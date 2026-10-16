@@ -169,7 +169,7 @@ async function startScan() {
       if (gen !== scanGen) return;
       const c = new Html5Qrcode("reader");
       html5 = c;
-      html5Ready = c.start({ facingMode: "environment" }, { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.85); return { width: s, height: s }; } }, (text) => onQr(text), () => {});
+      html5Ready = c.start({ facingMode: "environment" }, { fps: 10, qrbox: (w, h) => { const s = Math.max(50, Math.floor(Math.min(w, h) * 0.85)); return { width: s, height: s }; } }, (text) => onQr(text), () => {});
       await html5Ready;
     }
   } catch {
