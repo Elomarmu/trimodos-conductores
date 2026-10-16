@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest==8.3.4
+# Solo para generar iconos y la prueba de navegador con c?mara simulada:
+pillow
+qrcode
+playwright

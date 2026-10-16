@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Request
@@ -113,6 +114,22 @@ def goods(q: str = Query("", max_length=60)):
     return {"resultados": get_odoo().search_goods(q.strip(), 10)}
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"  # nunca guardar datos de órdenes en cachés
+    elif request.url.path == "/sw.js":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("text/javascript", ".js")
 _public = Path(__file__).resolve().parent.parent / "public"
 if _public.is_dir():  # en Vercel los estáticos los sirve la plataforma; en local, FastAPI
     app.mount("/", StaticFiles(directory=_public, html=True), name="public")

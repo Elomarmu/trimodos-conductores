@@ -41,6 +41,18 @@ ALLOWED_CALLS = {
     (TASK_MODEL, "message_post"),    # solo vía post_note
 }
 
+# Permisos que se comprueban sin ejecutar nada: (modelo, operación, ¿debería tenerlo el usuario técnico?)
+EXPECTED_PERMISSIONS = [
+    (TASK_MODEL, "read", True), (TASK_MODEL, "write", True),       # write: necesario para publicar la nota (message_post)
+    (TASK_MODEL, "unlink", False),
+    (PACKAGE_MODEL, "read", True), (PACKAGE_MODEL, "write", True),
+    (PACKAGE_MODEL, "create", False), (PACKAGE_MODEL, "unlink", False),
+    (GOODS_MODEL, "read", True), (GOODS_MODEL, "write", False),
+    (ATTACHMENT_MODEL, "read", True),
+    (ORDER_MODEL, "read", True), (ORDER_MODEL, "write", False), (ORDER_MODEL, "unlink", False),
+]
+ALLOWED_CALLS |= {(m, "check_access_rights") for m, _, _ in EXPECTED_PERMISSIONS}
+
 
 class OdooClient:
     def __init__(self, settings: Settings):
@@ -156,6 +168,11 @@ class OdooClient:
     def goods_name(self, goods_id: int) -> str | None:
         rows = self._call(GOODS_MODEL, "read", [[goods_id]], {"fields": ["name"]})
         return rows[0]["name"] if rows else None
+
+    def check_permissions(self) -> list[tuple[str, str, bool, bool]]:
+        """(modelo, operación, esperado, real). Solo consulta los derechos del usuario; no modifica nada."""
+        return [(m, op, expected, bool(self._call(m, "check_access_rights", [op], {"raise_exception": False})))
+                for m, op, expected in EXPECTED_PERMISSIONS]
 
     def list_companies(self) -> list[dict]:
         return self._call("res.company", "search_read", [[]], {"fields": ["name"]})

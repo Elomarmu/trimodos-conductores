@@ -50,13 +50,35 @@ async function api(path, options) {
 const post = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
 
 // ---------- navegación ----------
-function go(name) {
+// Cada pantalla es una entrada del historial: el botón Atrás de Android vuelve a la pantalla anterior
+// en vez de cerrar la app.
+let currentScreen = "menu";
+function show(name) {
   clearError();
+  currentScreen = name;
   for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== "s-" + name;
   if (name !== "scan") stopScan();
   if (name === "scan") startScan();
   window.scrollTo({ top: 0 });
 }
+function go(name) {
+  if (name === currentScreen) return show(name);
+  if (name === "menu") {                      // volver al menú: se limpia la orden y el historial
+    state.data = null; state.edits = {}; pending = null;
+    history.replaceState({ s: "menu" }, "");
+    return show("menu");
+  }
+  history.pushState({ s: name }, "");
+  show(name);
+}
+window.addEventListener("popstate", (e) => {
+  let target = (e.state && e.state.s) || "menu";
+  if (!state.data && (target === "edit" || target === "review")) target = "menu";
+  if (target === "review" && !pending) target = "edit";
+  if (!$("confirm").hidden) $("confirm").hidden = true;
+  show(target);
+});
+history.replaceState({ s: "menu" }, "");
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-go]");
   if (b) go(b.dataset.go);
@@ -88,11 +110,11 @@ async function startScan() {
         } catch { /* fotograma no válido: se ignora */ }
       }, 250);
     } else {
-      await loadScript("https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js");
+      await loadScript("/vendor/html5-qrcode.min.js");
       if (gen !== scanGen) return;
       const c = new Html5Qrcode("reader");
       html5 = c;
-      html5Ready = c.start({ facingMode: "environment" }, { fps: 10, qrbox: 240 }, (text) => onQr(text), () => {});
+      html5Ready = c.start({ facingMode: "environment" }, { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.85); return { width: s, height: s }; } }, (text) => onQr(text), () => {});
       await html5Ready;
     }
   } catch {
@@ -384,6 +406,9 @@ $("btn-share").addEventListener("click", () => pdfAction(async (b) => {
 }));
 
 // ---------- arranque ----------
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
 $("btn-scan").addEventListener("click", () => go("scan"));
 (async () => {
   try {
