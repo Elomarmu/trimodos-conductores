@@ -1,6 +1,6 @@
 {
-  "name": "DECA - Trimodos",
-  "short_name": "DECA - Trimodos",
+  "name": "DECA Trimodos",
+  "short_name": "DECA Trimodos",
   "description": "Corrige mercancía, bultos, euro palets y peso de la orden de transporte.",
   "lang": "es",
   "start_url": "/",
