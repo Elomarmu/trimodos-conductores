@@ -1,10 +1,14 @@
 :root {
   --bg: #000; --fg: #fff; --muted: #c8c8c8; --card: #161616; --line: #6b6b6b;
-  --accent: #ffd400; --ok: #00e060; --bad: #ff5a5a; --info: #5cc8ff;
+  --brand: #fcda00;                       /* amarillo Grupo Trimodos (por defecto) */
+  --warn: #ffd400; --ok: #00e060; --bad: #ff5a5a; --info: #5cc8ff;
 }
+body[data-company="stinsa"]    { --brand: #009f92; }   /* verde STINSA */
+body[data-company="transargi"] { --brand: #f17e49; }   /* naranja TRANSARGI */
 * { box-sizing: border-box; }
 html { font-size: 22px; }
 body {
+  --accent: var(--brand);
   margin: 0; background: var(--bg); color: var(--fg);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; line-height: 1.35;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -34,7 +38,7 @@ h2 { font-size: 1.2rem; margin: 0 0 8px; }
 .banner { padding: 14px 16px; border-radius: 14px; font-weight: 700; border: 3px solid; margin: 6px 0; }
 #err { position: sticky; top: 0; z-index: 30; margin: 0; border-radius: 0; background: #2a0000; color: #fff; border-color: var(--bad); font-size: 1.1rem; }
 .banner.bad { border-color: var(--bad); }
-.banner.warn { border-color: var(--accent); color: var(--accent); background: #221c00; }
+.banner.warn { border-color: var(--warn); color: var(--warn); background: #221c00; }
 .banner.info { border-color: var(--info); color: var(--info); background: #001a26; }
 
 .cam { position: relative; background: #111; border-radius: 16px; overflow: hidden; aspect-ratio: 1 / 1; max-height: 46vh; width: 100%; border: 3px solid var(--line); }
@@ -45,6 +49,8 @@ h2 { font-size: 1.2rem; margin: 0 0 8px; }
 .manual { border-top: 2px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 12px; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .seg-btn[aria-checked="true"] { background: var(--accent); color: #000; border-color: var(--accent); }
+.seg-btn[data-company="stinsa"][aria-checked="true"]    { background: #009f92; border-color: #009f92; }
+.seg-btn[data-company="transargi"][aria-checked="true"] { background: #f17e49; border-color: #f17e49; }
 
 input[type=text], input[type=password] {
   width: 100%; min-height: 68px; font-size: 1.4rem; padding: 10px 14px; border-radius: 14px;
@@ -77,3 +83,13 @@ input[type=text]:disabled { color: var(--muted); background: #0d0d0d; }
 .done-mark { font-size: 4rem; text-align: center; color: var(--ok); }
 
 @media (prefers-reduced-motion: no-preference) { .btn { transition: transform .08s; } }
+
+/* ---- Marca: franja blanca con el logo (los logos llevan texto negro) y borde del color de la empresa ---- */
+.brandbar {
+  background: #fff; display: flex; align-items: center; justify-content: center;
+  padding: 10px 16px; border-bottom: 8px solid var(--brand);
+}
+.brandbar img { height: 48px; width: auto; max-width: 70%; display: block; }
+body[data-screen="menu"] .brandbar { padding: 22px 16px; }
+body[data-screen="menu"] .brandbar img { height: 72px; }
+.screen { min-height: calc(100vh - 70px); }

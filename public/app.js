@@ -3,6 +3,8 @@
 
 const $ = (id) => document.getElementById(id);
 const MAX_KG_WARNING = 44000;
+const LOGOS = { trimodos: "/img/trimodos.png", stinsa: "/img/stinsa.png", transargi: "/img/transargi.png" };
+const COMPANY_BY_ID = { 1: "stinsa", 7: "transargi" };
 const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
 const state = { data: null, edits: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, health: {} };
 
@@ -92,9 +94,20 @@ const post = (path, data) => api(path, { method: "POST", headers: { "Content-Typ
 // Cada pantalla es una entrada del historial: el botón Atrás de Android vuelve a la pantalla anterior
 // en vez de cerrar la app.
 let currentScreen = "menu";
+// Marca: el color de acento y el logo de la franja dependen de la empresa de la orden.
+function setBrand(company, screen) {
+  if (company !== undefined) { if (company) document.body.dataset.company = company; else delete document.body.dataset.company; }
+  document.body.dataset.screen = screen;
+  const co = document.body.dataset.company;
+  const usaEmpresa = co && (screen === "edit" || screen === "review");
+  const key = usaEmpresa ? co : "trimodos";
+  $("brand-logo").src = LOGOS[key];
+  $("brand-logo").alt = { trimodos: "Grupo Trimodos", stinsa: "STINSA", transargi: "TRANSARGI" }[key];
+}
 function show(name) {
   clearError();
   currentScreen = name;
+  setBrand(undefined, name);
   for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== "s-" + name;
   if (name !== "scan") stopScan();
   if (name === "scan") startScan();
@@ -103,8 +116,11 @@ function show(name) {
 function go(name) {
   if (name === currentScreen) return show(name);
   if (name === "menu") {                      // volver al menú: se limpia la orden y el historial
-    state.data = null; state.edits = {}; pending = null;
+    state.data = null; state.edits = {}; pending = null; state.company = null;
+    for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", "false");
+    setBrand(null, "menu");
     history.replaceState({ s: "menu" }, "");
+setBrand(null, "menu");
     return show("menu");
   }
   history.pushState({ s: name }, "");
@@ -189,6 +205,7 @@ function onQr(text) {
 for (const b of document.querySelectorAll(".seg-btn")) {
   b.addEventListener("click", () => {
     state.company = b.dataset.company;
+    setBrand(state.company, currentScreen);   // el botón principal toma el color de la empresa elegida
     for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", String(x === b));
   });
 }
@@ -240,6 +257,7 @@ function setEdit(p, key, value) { (state.edits[p.id] ||= {})[key] = value; }
 
 function renderEdit() {
   const d = state.data;
+  setBrand(COMPANY_BY_ID[d.tarea.compania && d.tarea.compania.id] || null, "edit");
   $("edit-title").textContent = "Pedido " + (d.tarea.pedido || d.tarea.nombre);
   const banners = $("edit-banners");
   banners.replaceChildren();
