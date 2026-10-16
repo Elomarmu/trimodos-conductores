@@ -15,6 +15,7 @@ def _env(monkeypatch):
     monkeypatch.setenv("ODOO_MODE", "mock")
     monkeypatch.setenv("ODOO_URL", "https://www.stinsa.com")
     monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.delenv("APP_ACCESS_CODE", raising=False)  # el .env real trae uno: los tests no deben depender de él
 
 
 def qr(att_id, token):
