@@ -1,5 +1,9 @@
 ﻿"""Odoo simulado con los mismos métodos que OdooClient. Datos basados en el pedido de prueba S2621473."""
 import copy
+import uuid
+from datetime import datetime
+
+from .pdf_sample import make_sample_pdf
 
 TOKEN_ACTUAL = "11111111-aaaa-bbbb-cccc-000000000001"
 TOKEN_ANTIGUO = "22222222-aaaa-bbbb-cccc-000000000002"
@@ -15,6 +19,7 @@ GOODS = [
 
 class MockOdoo:
     def __init__(self):
+        self.pdfs = {}
         self.tasks = {
             204067: {
                 "id": 204067, "name": "S2621473", "company_id": [7, "TRANSARGI S.L.U"], "stage_id": [3, "En curso"],
@@ -72,4 +77,38 @@ class MockOdoo:
     def search_goods(self, query, limit=10):
         q = (query or "").lower()
         return [g for g in GOODS if q in g["name"].lower()][: min(limit, 10)]
+
+    def goods_name(self, goods_id):
+        return next((g["name"] for g in GOODS if g["id"] == goods_id), None)
+
+    def update_packages(self, task_id, changes):
+        """changes: {package_id: {campo: valor}}. Aplica en memoria y genera un PDF de muestra nuevo."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for pid, vals in changes.items():
+            pkg = self.packages[pid]
+            for k, v in vals.items():
+                pkg[k] = [v, self.goods_name(v)] if k == "goods_id" else v
+            pkg["write_date"] = now
+        task = self.tasks[task_id]
+        att_id = max(self.attachments) + 1
+        token = str(uuid.uuid4())
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        name = f"Orden de transporte - SIMULACION - {stamp}.pdf"
+        self.attachments[att_id] = {"id": att_id, "res_model": "project.task", "res_id": task_id, "access_token": token, "name": name}
+        task["tms_transport_order_attachment_id"] = [att_id, name]
+        lines = ["*** DOCUMENTO DE MUESTRA - SIMULACION, NO ES UNA ORDEN REAL ***", f"Generado: {now}", ""]
+        for p in (self.packages[i] for i in task["tms_package_ids"]):
+            lines += [
+                f"{p['name']}: {p['shipping_origin_id'][1]} -> {p['shipping_destination_id'][1]}",
+                f"   Mercancia: {p['goods_id'][1]}   Elementos: {p['number_of_packages']}   Euro: {p['euro_pallet_qty']}   Peso: {p['shipping_weight']:,.0f} kg",
+                "",
+            ]
+        self.pdfs[att_id] = make_sample_pdf(f"Orden de transporte {task['name']}", lines)
+        return att_id, token
+
+    def get_pdf(self, attachment_id, token):
+        att = self.attachments.get(attachment_id)
+        if not att or att["access_token"] != token:
+            return None
+        return self.pdfs.get(attachment_id)
 

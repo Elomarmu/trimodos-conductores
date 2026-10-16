@@ -29,6 +29,7 @@ ALLOWED_CALLS = {
     (PACKAGE_MODEL, "read"),
     (PACKAGE_MODEL, "fields_get"),
     (GOODS_MODEL, "name_search"),
+    (GOODS_MODEL, "read"),
     (ATTACHMENT_MODEL, "read"),
     ("res.company", "search_read"),
 }
@@ -98,6 +99,13 @@ class OdooClient:
     def search_goods(self, query: str, limit: int = 10) -> list[dict]:
         limit = min(limit, 10)
         return [{"id": i, "name": n} for i, n in self._call(GOODS_MODEL, "name_search", [query], {"limit": limit})]
+
+    def get_pdf(self, attachment_id, token):
+        raise NotImplementedError  # fase 3
+
+    def goods_name(self, goods_id: int) -> str | None:
+        rows = self._call(GOODS_MODEL, "read", [[goods_id]], {"fields": ["name"]})
+        return rows[0]["name"] if rows else None
 
     def list_companies(self) -> list[dict]:
         return self._call("res.company", "search_read", [[]], {"fields": ["name"]})

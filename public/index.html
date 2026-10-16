@@ -1,6 +1,75 @@
 <!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Conductores</title></head>
-<body style="font-family:sans-serif;font-size:22px;padding:24px">
-<h1>App de conductores</h1><p>Servidor funcionando. Las pantallas llegan en la fase 2.</p>
-</body></html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Orden de transporte</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="err" class="banner bad" role="alert" hidden></div>
+
+<!-- PANTALLA 1: menú -->
+<main id="s-menu" class="screen">
+  <h1>Conductores</h1>
+  <button id="btn-scan" class="btn primary huge">Escanear orden de transporte</button>
+  <p id="modo" class="hint" hidden></p>
+</main>
+
+<!-- PANTALLA 2: escáner -->
+<main id="s-scan" class="screen" hidden>
+  <h1>Escanea el código QR</h1>
+  <div id="cam" class="cam"><video id="video" playsinline muted></video><div id="reader"></div></div>
+  <p id="cam-msg" class="hint">Apunta al código QR de la orden.</p>
+  <button id="btn-test-qr" class="btn secondary" hidden>Usar QR de prueba</button>
+  <section class="manual">
+    <h2>¿No se lee? Escribe el pedido</h2>
+    <div class="seg" role="radiogroup" aria-label="Empresa">
+      <button type="button" class="btn seg-btn" data-company="transargi" role="radio" aria-checked="false">TRANSARGI</button>
+      <button type="button" class="btn seg-btn" data-company="stinsa" role="radio" aria-checked="false">STINSA</button>
+    </div>
+    <input id="order" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="S2621473" aria-label="Número de pedido">
+    <button id="btn-order" class="btn primary">Buscar pedido</button>
+  </section>
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- PANTALLA 3: datos actuales y edición -->
+<main id="s-edit" class="screen" hidden>
+  <h1 id="edit-title">Orden</h1>
+  <div id="edit-banners"></div>
+  <div id="packages"></div>
+  <button id="btn-review" class="btn primary">Revisar cambios</button>
+  <button class="btn ghost" data-go="menu">Cancelar</button>
+</main>
+
+<!-- PANTALLA 4: resumen, confirmación y resultado -->
+<main id="s-review" class="screen" hidden>
+  <h1 id="review-title">Revisa los cambios</h1>
+  <div id="review-body"></div>
+  <div id="review-actions">
+    <button id="btn-save" class="btn primary">Guardar cambios</button>
+    <button id="btn-back-edit" class="btn ghost">Volver y corregir</button>
+  </div>
+  <div id="done-actions" hidden>
+    <button id="btn-open" class="btn primary">Abrir PDF</button>
+    <button id="btn-download" class="btn secondary">Descargar PDF</button>
+    <button id="btn-share" class="btn secondary" hidden>Compartir</button>
+    <button class="btn ghost" data-go="menu">Volver al menú</button>
+  </div>
+</main>
+
+<div id="confirm" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-q" hidden>
+  <div class="dialog">
+    <h2 id="confirm-q">¿Seguro?</h2>
+    <p>Se generará una nueva orden de transporte.</p>
+    <button id="btn-yes" class="btn ok huge">Sí, guardar</button>
+    <button id="btn-no" class="btn danger huge">No, volver</button>
+  </div>
+</div>
+
+<div id="busy" class="overlay" hidden><div class="dialog"><h2 id="busy-msg">Un momento…</h2></div></div>
+<script src="app.js"></script>
+</body>
+</html>

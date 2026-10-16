@@ -1,12 +1,13 @@
 """Lógica de negocio: resolver el QR o el número de pedido hasta la tarea y sus bultos."""
 import hmac
+import math
 import re
 from urllib.parse import urlparse
 
 from .config import Settings
 from .errors import AppError
 from .qr import normalize_order_name, parse_qr
-from .tokens import sign_session
+from .tokens import sign_session, verify_session
 
 TASK_MODEL = "project.task"
 
@@ -28,6 +29,8 @@ def is_editable(task: dict, packages: list[dict]) -> tuple[bool, str | None]:
 
 def _allowed_hosts(settings: Settings) -> set[str]:
     hosts = set(settings.qr_allowed_hosts)
+    if settings.mode != "real":
+        hosts.add("www.stinsa.com")  # el QR de prueba del modo simulado
     if settings.odoo_url:
         hosts.add((urlparse(settings.odoo_url).hostname or "").lower())
     return hosts
@@ -97,3 +100,81 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
         "motivo_no_editable": reason,
         "sesion": session,
     }
+
+
+# ---------------------------------------------------------------------------
+# Guardado
+# ---------------------------------------------------------------------------
+MAX_WEIGHT_WARNING = 44000
+FIELD_LABELS = {"goods_id": "Mercancía", "number_of_packages": "Elementos", "euro_pallet_qty": "Euro palets", "shipping_weight": "Peso"}
+
+
+def _clean_change(odoo, c: dict) -> dict:
+    """Valida los valores de un bulto y devuelve solo los campos informados."""
+    bad = lambda msg: AppError(msg, 400, "dato_invalido")  # noqa: E731
+    out: dict = {}
+    if c.get("goods_id") is not None:
+        if not odoo.goods_name(c["goods_id"]):
+            raise bad("La mercancía elegida no existe. Elígela de la lista.")
+        out["goods_id"] = c["goods_id"]
+    for field, label in (("number_of_packages", "Elementos"), ("euro_pallet_qty", "Euro palets")):
+        if c.get(field) is not None:
+            if c[field] < 0:
+                raise bad(f"{label} no puede ser negativo.")
+            out[field] = c[field]
+    if c.get("shipping_weight") is not None:
+        w = c["shipping_weight"]
+        if not math.isfinite(w) or w <= 0:
+            raise bad("El peso tiene que ser mayor que 0.")
+        out["shipping_weight"] = float(w)
+    return out
+
+
+def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[dict]) -> dict:
+    """Valida todo en el servidor (no se fía del cliente) y guarda los cambios."""
+    ses = verify_session(settings.secret_key, sesion)
+    if ses["task_id"] != task_id:
+        raise AppError("La sesión no corresponde a esta orden. Vuelve a escanearla.", 401, "sesion_invalida")
+    if not cambios:
+        raise AppError("No has cambiado ningún dato.", 400, "sin_cambios")
+
+    task = odoo.read_task(task_id)
+    if not task or not task.get("is_transport_order"):
+        raise AppError("No encontramos esta orden. Avisa a la oficina.", 404, "no_encontrada")
+    packages = {p["id"]: p for p in odoo.read_packages(task.get("tms_package_ids") or [])}
+
+    editable, reason = is_editable(task, list(packages.values()))
+    if not editable:
+        raise AppError(reason, 409, "no_editable")
+
+    changes: dict[int, dict] = {}
+    for c in cambios:
+        pid = c["package_id"]
+        if pid not in packages or pid not in ses["write_dates"]:
+            raise AppError("Ese bulto no pertenece a esta orden.", 400, "bulto_ajeno")
+        if packages[pid]["write_date"] != ses["write_dates"][pid]:
+            raise AppError("Esta orden ha cambiado mientras la editabas. Vuelve a cargarla.", 409, "datos_cambiados")
+        clean = _clean_change(odoo, c)
+        cur = packages[pid]
+        current = {"goods_id": (cur.get("goods_id") or [None])[0], "number_of_packages": cur.get("number_of_packages"),
+                   "euro_pallet_qty": cur.get("euro_pallet_qty"), "shipping_weight": cur.get("shipping_weight")}
+        diff = {k: v for k, v in clean.items() if v != current[k]}
+        if diff:
+            changes.setdefault(pid, {}).update(diff)
+    if not changes:
+        raise AppError("No has cambiado ningún dato.", 400, "sin_cambios")
+
+    warnings = []
+    for pid, vals in changes.items():
+        if vals.get("shipping_weight", 0) > MAX_WEIGHT_WARNING:
+            warnings.append(f"{packages[pid]['name']}: el peso supera 44.000 kg.")
+
+    if settings.mode == "real":
+        raise AppError("El guardado real todavía no está activado.", 501, "no_implementado")  # fase 3
+
+    attachment_id, token = odoo.update_packages(task_id, changes)
+    return {
+        "ok": True, "simulado": True, "bultos_modificados": len(changes), "avisos": warnings,
+        "adjunto_id": attachment_id, "pdf_url": f"/api/pdf/{attachment_id}?token={token}",
+    }
+

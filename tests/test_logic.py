@@ -135,3 +135,104 @@ def test_api_resolve_y_goods():
     assert r.status_code == 400 and "error" in r.json()
     assert len(c.get("/api/goods", params={"q": "a"}).json()["resultados"]) <= 10
 
+
+
+# --- guardado
+def _sesion(odoo, **kw):
+    return service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
+
+
+def _cambio(**kw):
+    base = {"package_id": 287102, "goods_id": 2, "number_of_packages": 12, "euro_pallet_qty": 10, "shipping_weight": 8450.0}
+    base.update(kw)
+    return base
+
+
+def test_update_ok_genera_pdf_y_cambia_datos():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=20, shipping_weight=9000.5)])
+    assert out["bultos_modificados"] == 1 and out["simulado"] is True
+    assert odoo.packages[287102]["number_of_packages"] == 20 and odoo.packages[287102]["shipping_weight"] == 9000.5
+    att_id = int(out["pdf_url"].split("/")[-1].split("?")[0])
+    token = out["pdf_url"].split("token=")[1]
+    assert odoo.get_pdf(att_id, token).startswith(b"%PDF")
+    assert odoo.get_pdf(att_id, "otro") is None
+    assert odoo.tasks[204067]["tms_transport_order_attachment_id"][0] == att_id
+
+
+@pytest.mark.parametrize("cambio, code", [
+    ({"number_of_packages": -1}, "dato_invalido"),
+    ({"euro_pallet_qty": -5}, "dato_invalido"),
+    ({"shipping_weight": 0}, "dato_invalido"),
+    ({"shipping_weight": -3.0}, "dato_invalido"),
+    ({"shipping_weight": float("nan")}, "dato_invalido"),
+    ({"goods_id": 999999}, "dato_invalido"),
+    ({"package_id": 287103, "number_of_packages": 1}, "bulto_ajeno"),   # existe pero no es de la sesión... ver abajo
+])
+def test_update_validaciones(cambio, code):
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    # 287103 pertenece a la tarea, así que para probar "ajeno" usamos un id que no es de la tarea
+    if cambio.get("package_id") == 287103:
+        cambio = {"package_id": 1, "number_of_packages": 1}
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(**cambio)])
+    assert e.value.code == code
+
+
+def test_update_sin_cambios():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio()])
+    assert e.value.code == "sin_cambios"
+
+
+def test_update_sesion_de_otra_tarea_o_manipulada():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    with pytest.raises(AppError):
+        service.update(odoo, get_settings(), r["sesion"], 300001, [_cambio(number_of_packages=1)])
+    with pytest.raises(AppError):
+        service.update(odoo, get_settings(), "x.y", 204067, [_cambio(number_of_packages=1)])
+
+
+def test_update_detecta_cambios_hechos_por_otro():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    odoo.packages[287102]["write_date"] = "2026-01-05 11:00:00"  # alguien lo tocó después
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=1)])
+    assert e.value.code == "datos_cambiados" and e.value.status == 409
+
+
+def test_update_rechaza_tarea_no_editable():
+    odoo = MockOdoo()
+    r = service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
+    odoo.tasks[204067]["is_closed"] = True  # se cierra después de cargar
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=1)])
+    assert e.value.code == "no_editable"
+
+
+def test_update_peso_alto_avisa_pero_guarda():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(shipping_weight=45000)])
+    assert out["avisos"] and odoo.packages[287102]["shipping_weight"] == 45000
+
+
+def test_api_update_y_pdf():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    r = c.post("/api/resolve-qr", json={"order_name": "S2621473", "company": "transargi"}).json()
+    body = {"task_id": r["tarea"]["id"], "sesion": r["sesion"], "cambios": [_cambio(euro_pallet_qty=11)]}
+    u = c.post("/api/update", json=body)
+    assert u.status_code == 200, u.text
+    p = c.get(u.json()["pdf_url"])
+    assert p.status_code == 200 and p.content.startswith(b"%PDF") and p.headers["content-type"] == "application/pdf"
+    assert c.get("/api/pdf/1?token=x").status_code == 404
+    bad = c.post("/api/update", json={"task_id": "x"})
+    assert bad.status_code == 400 and "error" in bad.json()

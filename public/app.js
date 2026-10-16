@@ -1,0 +1,373 @@
+"use strict";
+// App de conductores: 4 pantallas (menú, escáner, edición, resumen/resultado). Sin dependencias.
+
+const $ = (id) => document.getElementById(id);
+const MAX_KG_WARNING = 44000;
+const state = { data: null, edits: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, health: {} };
+
+// ---------- utilidades ----------
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c != null) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+}
+const group = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+function fmtNum(n) {
+  const [int, dec] = String(Math.round(n * 100) / 100).split(".");
+  return group(int) + (dec ? "," + dec : "");
+}
+function parseNum(text) {
+  const t = String(text).trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+  return t === "" || !/^\d*\.?\d+$/.test(t) ? NaN : Number(t);
+}
+
+function showError(msg) {
+  const e = $("err");
+  e.textContent = msg;
+  e.hidden = false;
+  window.scrollTo({ top: 0 });
+}
+function clearError() { $("err").hidden = true; }
+function busy(msg) { $("busy-msg").textContent = msg || "Un momento…"; $("busy").hidden = !msg; }
+
+async function api(path, options) {
+  let res;
+  try {
+    res = await fetch(path, options);
+  } catch {
+    throw new Error("No hay conexión. Inténtalo de nuevo.");
+  }
+  let body = null;
+  try { body = await res.json(); } catch { /* PDF u otra cosa */ }
+  if (!res.ok) { const e = new Error((body && body.error) || "Algo ha fallado. Inténtalo de nuevo."); e.code = body && body.codigo; throw e; }
+  return body;
+}
+const post = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+
+// ---------- navegación ----------
+function go(name) {
+  clearError();
+  for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== "s-" + name;
+  if (name !== "scan") stopScan();
+  if (name === "scan") startScan();
+  window.scrollTo({ top: 0 });
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-go]");
+  if (b) go(b.dataset.go);
+});
+
+// ---------- pantalla 2: escáner ----------
+let stream = null, scanTimer = null, html5 = null, html5Ready = null, scanGen = 0;
+
+async function startScan() {
+  const gen = ++scanGen;
+  $("cam-msg").textContent = "Apunta al código QR de la orden.";
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    $("cam-msg").textContent = "La cámara necesita una conexión segura (https). Escribe el número de pedido.";
+    return;
+  }
+  try {
+    if ("BarcodeDetector" in window) {
+      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      if (gen !== scanGen) { s.getTracks().forEach((t) => t.stop()); return; } // ya se salió de la pantalla
+      stream = s;
+      const v = $("video");
+      v.srcObject = s;
+      await v.play();
+      scanTimer = setInterval(async () => {
+        try {
+          const codes = await detector.detect(v);
+          if (codes.length) onQr(codes[0].rawValue);
+        } catch { /* fotograma no válido: se ignora */ }
+      }, 250);
+    } else {
+      await loadScript("https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js");
+      if (gen !== scanGen) return;
+      const c = new Html5Qrcode("reader");
+      html5 = c;
+      html5Ready = c.start({ facingMode: "environment" }, { fps: 10, qrbox: 240 }, (text) => onQr(text), () => {});
+      await html5Ready;
+    }
+  } catch {
+    if (gen === scanGen) $("cam-msg").textContent = "No se puede usar la cámara. Revisa el permiso o escribe el número de pedido.";
+  }
+}
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    if (window.Html5Qrcode) return ok();
+    document.head.append(h("script", { src, onload: ok, onerror: fail }));
+  });
+}
+function stopScan() {
+  scanGen++;
+  clearInterval(scanTimer); scanTimer = null;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  $("video").srcObject = null;
+  if (html5) {
+    const c = html5, ready = html5Ready;
+    html5 = null; html5Ready = null;
+    // esperar a que termine de arrancar antes de pararla; cualquier fallo aquí es irrelevante
+    Promise.resolve(ready).then(() => c.stop()).then(() => c.clear()).catch(() => {});
+  }
+}let scanning = false;
+function onQr(text) {
+  if (scanning) return;
+  scanning = true;
+  stopScan();
+  load({ qr_text: text }).finally(() => { scanning = false; });
+}
+
+// entrada manual
+for (const b of document.querySelectorAll(".seg-btn")) {
+  b.addEventListener("click", () => {
+    state.company = b.dataset.company;
+    for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", String(x === b));
+  });
+}
+$("btn-order").addEventListener("click", () => {
+  clearError();
+  if (!state.company) return showError("Elige la empresa: TRANSARGI o STINSA.");
+  const n = $("order").value.trim();
+  if (!n) return showError("Escribe el número de pedido. Ejemplo: S2621473");
+  stopScan();
+  load({ order_name: n, company: state.company });
+});
+$("btn-test-qr").addEventListener("click", () => { stopScan(); load({ qr_text: state.health.qr_prueba }); });
+
+async function load(req) {
+  clearError();
+  busy("Buscando la orden…");
+  try {
+    state.data = await post("/api/resolve-qr", req);
+    state.lastReq = req;
+    state.edits = {};
+    renderEdit();
+    go("edit");
+  } catch (e) {
+    go("scan");
+    showError(e.message);
+  } finally {
+    busy(null);
+  }
+}
+
+// ---------- pantalla 3: edición ----------
+const FIELDS = [
+  { key: "mercancia", label: "Mercancía" },
+  { key: "elementos", label: "Elementos (bultos)" },
+  { key: "euro_palets", label: "Euro palets" },
+  { key: "peso", label: "Peso (kg)" },
+];
+
+function current(p) {
+  const e = state.edits[p.id] || {};
+  return {
+    goods: "goods" in e ? e.goods : p.mercancia, // null = ha escrito pero aún no ha elegido de la lista
+    elementos: e.elementos ?? p.elementos,
+    euro_palets: e.euro_palets ?? p.euro_palets,
+    peso: e.peso ?? p.peso,
+  };
+}
+function setEdit(p, key, value) { (state.edits[p.id] ||= {})[key] = value; }
+
+function renderEdit() {
+  const d = state.data;
+  $("edit-title").textContent = "Pedido " + (d.tarea.pedido || d.tarea.nombre);
+  const banners = $("edit-banners");
+  banners.replaceChildren();
+  if (d.version_antigua) banners.append(h("div", { class: "banner warn" }, "Esta orden tiene una versión más nueva. Estos son los datos actuales."));
+  if (!d.editable) banners.append(h("div", { class: "banner bad" }, d.motivo_no_editable || "Esta orden no se puede modificar."));
+  else if (!d.verificado_por_qr) banners.append(h("div", { class: "banner info" }, "Orden abierta por número de pedido (sin QR)."));
+  $("btn-review").hidden = !d.editable;
+
+  const box = $("packages");
+  box.replaceChildren();
+  d.bultos.forEach((p, i) => box.append(packageCard(p, i)));
+}
+
+function packageCard(p, index) {
+  const ro = !state.data.editable;
+  const route = [p.origen?.name, p.destino?.name].filter(Boolean).join(" → ");
+  const card = h("section", { class: "pkg" },
+    h("h2", {}, `Lugar ${index + 1} · ${p.name}`),
+    h("div", { class: "route" }, route),
+  );
+
+  // mercancía con sugerencias
+  const goodsInput = h("input", { type: "text", id: `g-${p.id}`, value: current(p).goods?.name || "", autocomplete: "off", disabled: ro });
+  const sugg = h("div", { class: "sugg" });
+  let timer = null;
+  goodsInput.addEventListener("input", () => {
+    clearTimeout(timer);
+    setEdit(p, "goods", null); // hasta que elija de la lista no vale
+    markChanged();
+    timer = setTimeout(async () => {
+      const q = goodsInput.value.trim();
+      if (q.length < 2) return sugg.replaceChildren();
+      try {
+        const r = await api("/api/goods?q=" + encodeURIComponent(q));
+        sugg.replaceChildren(...r.resultados.map((g) => h("button", { type: "button", class: "btn", onclick: () => {
+          setEdit(p, "goods", { id: g.id, name: g.name });
+          goodsInput.value = g.name;
+          sugg.replaceChildren();
+          markChanged();
+        } }, g.name)));
+        if (!r.resultados.length) sugg.replaceChildren(h("p", { class: "hint" }, "No hay mercancías con ese nombre."));
+      } catch (e) { showError(e.message); }
+    }, 300);
+  });
+  const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Ahora en Odoo: " + (p.mercancia?.name || "—")));
+
+  const numField = (key, label, value, dec) => {
+    const input = h("input", { type: "text", inputmode: dec ? "decimal" : "numeric", pattern: "[0-9.,]*", id: `${key}-${p.id}`, value: fmtNum(value), disabled: ro, autocomplete: "off" });
+    input.addEventListener("input", () => { setEdit(p, key, parseNum(input.value)); markChanged(); });
+    input.addEventListener("blur", () => { const n = parseNum(input.value); if (!Number.isNaN(n)) input.value = fmtNum(n); });
+    input.addEventListener("focus", () => input.select());
+    return h("div", { class: "field", "data-key": key }, h("label", { for: input.id }, label), input, h("div", { class: "was" }, "Ahora en Odoo: " + fmtNum(p[key])));
+  };
+  const c = current(p);
+  card.append(goodsField,
+    h("div", { class: "row2" }, numField("elementos", "Elementos", c.elementos, false), numField("euro_palets", "Euro palets", c.euro_palets, false)),
+    numField("peso", "Peso (kg)", c.peso, true));
+  card.dataset.pkg = p.id;
+  return card;
+}
+
+function markChanged() {
+  for (const card of document.querySelectorAll(".pkg")) {
+    const p = state.data.bultos.find((x) => String(x.id) === card.dataset.pkg);
+    const c = current(p);
+    const changed = {
+      mercancia: !c.goods || c.goods.id !== p.mercancia?.id,
+      elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
+    };
+    for (const f of card.querySelectorAll(".field")) f.classList.toggle("changed", !!changed[f.dataset.key]);
+  }
+}
+
+// ---------- pantalla 4: resumen, confirmación, resultado ----------
+function collectChanges() {
+  const changes = [];
+  for (const p of state.data.bultos) {
+    const c = current(p);
+    const name = `Lugar ${state.data.bultos.indexOf(p) + 1} · ${p.name}`;
+    if (!c.goods) throw new Error(`${name}: elige la mercancía de la lista.`);
+    for (const k of ["elementos", "euro_palets"]) {
+      if (!Number.isInteger(c[k]) || c[k] < 0) throw new Error(`${name}: ${k === "elementos" ? "Elementos" : "Euro palets"} tiene que ser un número entero, 0 o más.`);
+    }
+    if (!(c.peso > 0)) throw new Error(`${name}: el peso tiene que ser mayor que 0.`);
+    const rows = [
+      { label: "Mercancía", before: p.mercancia?.name || "—", after: c.goods.name, changed: c.goods.id !== p.mercancia?.id },
+      { label: "Elementos", before: fmtNum(p.elementos), after: fmtNum(c.elementos), changed: c.elementos !== p.elementos },
+      { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: c.euro_palets !== p.euro_palets },
+      { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: c.peso !== p.peso },
+    ];
+    if (rows.some((r) => r.changed)) {
+      changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods.id, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: c.peso > MAX_KG_WARNING });
+    }
+  }
+  if (!changes.length) throw new Error("No has cambiado ningún dato.");
+  return changes;
+}
+
+let pending = null;
+$("btn-review").addEventListener("click", () => {
+  clearError();
+  try { pending = collectChanges(); } catch (e) { return showError(e.message); }
+  $("review-title").textContent = "Revisa los cambios";
+  $("review-actions").hidden = false;
+  $("done-actions").hidden = true;
+  const body = $("review-body");
+  body.replaceChildren();
+  if (pending.some((c) => c.heavy)) body.append(h("div", { class: "banner warn" }, "Atención: el peso supera 44.000 kg. Puedes continuar."));
+  for (const c of pending) {
+    body.append(h("section", { class: "diff" }, h("h2", {}, c.name),
+      c.rows.map((r) => r.changed
+        ? h("div", { class: "line changed" }, h("div", { class: "lbl" }, r.label), h("div", { class: "before" }, "Antes: " + r.before), h("div", { class: "after" }, "Ahora: " + r.after))
+        : h("div", { class: "line same" }, `${r.label}: ${r.after} (sin cambios)`))));
+  }
+  go("review");
+});
+$("btn-back-edit").addEventListener("click", () => go("edit"));
+$("btn-save").addEventListener("click", () => { $("confirm").hidden = false; $("btn-no").focus(); });
+$("btn-no").addEventListener("click", () => { $("confirm").hidden = true; });
+$("btn-yes").addEventListener("click", save);
+
+async function save() {
+  $("confirm").hidden = true;
+  busy("Guardando y generando la orden…");
+  try {
+    const r = await post("/api/update", { task_id: state.data.tarea.id, sesion: state.data.sesion, cambios: pending.map((c) => c.payload) });
+    state.pdfUrl = r.pdf_url;
+    state.pdfBlob = null;
+    renderDone(r);
+  } catch (e) {
+    if (e.code === "datos_cambiados") {
+      await load(state.lastReq);
+      showError(e.message);
+    } else showError(e.message);
+  } finally { busy(null); }
+}
+
+function renderDone(r) {
+  $("review-title").textContent = "Orden generada";
+  const body = $("review-body");
+  body.replaceChildren(...[
+    h("div", { class: "done-mark" }, "✓"),
+    h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte (${r.bultos_modificados} ${r.bultos_modificados === 1 ? "lugar modificado" : "lugares modificados"}).`),
+    r.simulado ? h("div", { class: "banner info" }, "MODO SIMULADO: no se ha escrito nada en Odoo. El PDF es una muestra.") : null,
+    ...r.avisos.map((a) => h("div", { class: "banner warn" }, a)),
+  ].filter(Boolean));
+  $("review-actions").hidden = true;
+  $("done-actions").hidden = false;
+  $("btn-share").hidden = !(navigator.canShare && navigator.share);
+  window.scrollTo({ top: 0 });
+}
+
+async function getPdf() {
+  if (state.pdfBlob) return state.pdfBlob;
+  busy("Preparando el PDF…");
+  try {
+    let res;
+    try { res = await fetch(state.pdfUrl); } catch { throw new Error("No hay conexión. Inténtalo de nuevo."); }
+    if (!res.ok) throw new Error("No se ha podido descargar el PDF. Inténtalo de nuevo.");
+    state.pdfBlob = await res.blob();
+    return state.pdfBlob;
+  } finally { busy(null); }
+}
+const pdfName = () => `orden-${(state.data.tarea.pedido || state.data.tarea.id)}.pdf`;
+async function pdfAction(fn) { clearError(); try { await fn(await getPdf()); } catch (e) { showError(e.message); } }
+
+$("btn-open").addEventListener("click", () => pdfAction((b) => {
+  const w = window.open(URL.createObjectURL(b), "_blank");
+  if (!w) showError("El navegador ha bloqueado la ventana. Usa «Descargar PDF».");
+}));
+$("btn-download").addEventListener("click", () => pdfAction((b) => {
+  const a = h("a", { href: URL.createObjectURL(b), download: pdfName() });
+  document.body.append(a); a.click(); a.remove();
+}));
+$("btn-share").addEventListener("click", () => pdfAction(async (b) => {
+  const file = new File([b], pdfName(), { type: "application/pdf" });
+  if (!navigator.canShare({ files: [file] })) throw new Error("Este móvil no permite compartir el PDF. Usa «Descargar PDF».");
+  try { await navigator.share({ files: [file], title: "Orden de transporte" }); } catch (e) { if (e.name !== "AbortError") throw new Error("No se ha podido compartir. Inténtalo de nuevo."); }
+}));
+
+// ---------- arranque ----------
+$("btn-scan").addEventListener("click", () => go("scan"));
+(async () => {
+  try {
+    state.health = await api("/api/health");
+    if (state.health.modo !== "real") {
+      $("modo").hidden = false;
+      $("modo").textContent = "Modo de prueba (datos simulados)";
+      $("btn-test-qr").hidden = false;
+    }
+  } catch { /* sin conexión: se avisará al buscar */ }
+})();
