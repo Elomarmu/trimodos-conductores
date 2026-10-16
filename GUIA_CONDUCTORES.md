@@ -8,6 +8,7 @@
 
 ## Paso a paso
 
+0. **Solo la primera vez:** la app pide un **código de acceso**. Pídelo en la oficina, escríbelo y pulsa «Entrar». Se queda guardado en el móvil. Si cambia, te lo volverá a pedir.
 1. **Pulsa el botón grande «Escanear orden de transporte».**
 2. **Apunta la cámara al código QR de la orden.** Se lee solo, no hace falta pulsar nada.
    - *Si no se lee* (poca luz, papel arrugado): escribe a mano el número de pedido, por ejemplo **S2621473**, y **elige la empresa: TRANSARGI o STINSA**. Después pulsa «Buscar pedido».

@@ -388,3 +388,76 @@ def test_cliente_real_pdf_exige_token(monkeypatch):
     assert c.get_pdf(555, "tok").startswith(b"%PDF")
     assert c.get_pdf(555, "malo") is None
     assert c.get_pdf(555, "") is None
+
+
+# --- código de acceso compartido
+@pytest.fixture
+def con_codigo(monkeypatch):
+    monkeypatch.setenv("APP_ACCESS_CODE", "clave-de-prueba")
+    monkeypatch.setattr("app.main.FAIL_DELAY", 0)
+
+
+def _cliente():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    return TestClient(app)
+
+
+def test_todas_las_rutas_api_exigen_codigo_salvo_health():
+    from app.main import app, require_access
+    rutas = [r for r in app.routes if getattr(r, "path", "").startswith("/api/")]
+    assert len(rutas) >= 6
+    for r in rutas:
+        protegida = require_access in [d.call for d in r.dependant.dependencies]
+        assert protegida == (r.path != "/api/health"), r.path
+
+
+def test_codigo_obligatorio_y_correcto(con_codigo):
+    c = _cliente()
+    cuerpo = {"order_name": "S2621473", "company": "transargi"}
+    assert c.post("/api/resolve-qr", json=cuerpo).status_code == 401                                    # sin cabecera
+    assert c.post("/api/resolve-qr", json=cuerpo, headers={"X-Codigo-Acceso": "otra"}).status_code == 401
+    mal = c.post("/api/resolve-qr", json=cuerpo, headers={"X-Codigo-Acceso": "otra"}).json()
+    assert mal["codigo"] == "codigo_invalido" and "clave" not in str(mal)
+    ok = {"X-Codigo-Acceso": "clave-de-prueba"}
+    assert c.post("/api/resolve-qr", json=cuerpo, headers=ok).status_code == 200
+    assert c.post("/api/login", headers=ok).status_code == 200
+    assert c.post("/api/login", headers={"X-Codigo-Acceso": "otra"}).status_code == 401
+    assert c.get("/api/goods", params={"q": "a"}).status_code == 401
+    assert c.get("/api/goods", params={"q": "a"}, headers=ok).status_code == 200
+    assert c.get("/api/pdf/900002?token=x").status_code == 401
+    assert c.post("/api/update", json={"task_id": 1, "sesion": "x", "cambios": []}).status_code == 401
+    assert c.post("/api/reprint", json={"task_id": 1, "sesion": "x"}).status_code == 401
+
+
+def test_health_es_publico_e_indica_si_hace_falta_codigo(con_codigo):
+    h = _cliente().get("/api/health").json()
+    assert h["requiere_codigo"] is True and "clave" not in str(h)
+
+
+def test_sin_codigo_en_modo_simulado_no_se_pide():
+    c = _cliente()
+    assert c.get("/api/health").json()["requiere_codigo"] is False
+    assert c.post("/api/login").status_code == 200
+
+
+@pytest.mark.parametrize("codigo", ["", "corto"])
+def test_modo_real_sin_codigo_suficiente_se_niega_a_funcionar(monkeypatch, codigo):
+    monkeypatch.setenv("ODOO_MODE", "real")
+    monkeypatch.setenv("SECRET_KEY", "x" * 20)
+    monkeypatch.setenv("APP_ACCESS_CODE", codigo)
+    c = _cliente()
+    r = c.post("/api/resolve-qr", json={"order_name": "S2621473", "company": "transargi"}, headers={"X-Codigo-Acceso": codigo})
+    assert r.status_code == 503 and r.json()["codigo"] == "sin_configurar"
+    assert c.get("/api/health").json()["requiere_codigo"] is True
+
+
+def test_modo_real_con_codigo_valido_pasa_la_barrera(monkeypatch):
+    from app.main import require_access
+    monkeypatch.setenv("ODOO_MODE", "real")
+    monkeypatch.setenv("SECRET_KEY", "x" * 20)
+    monkeypatch.setenv("APP_ACCESS_CODE", "codigo-largo-ok")
+    assert require_access("codigo-largo-ok") is None
+    with pytest.raises(AppError):
+        monkeypatch.setattr("app.main.FAIL_DELAY", 0)
+        require_access("codigo-largo-mal")

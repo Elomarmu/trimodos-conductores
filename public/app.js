@@ -35,18 +35,56 @@ function showError(msg) {
 function clearError() { $("err").hidden = true; }
 function busy(msg) { $("busy-msg").textContent = msg || "Un momento…"; $("busy").hidden = !msg; }
 
-async function api(path, options) {
+// Código de acceso compartido: se pide una vez y se recuerda en este móvil.
+const CODE_KEY = "codigo-acceso";
+function getCode() { try { return localStorage.getItem(CODE_KEY) || ""; } catch { return ""; } }
+function saveCode(v) { try { localStorage.setItem(CODE_KEY, v); } catch { /* sin almacenamiento: lo pedirá cada vez */ } }
+const authHeaders = (code = getCode()) => ({ "X-Codigo-Acceso": code });
+
+async function api(path, options = {}) {
   let res;
   try {
-    res = await fetch(path, options);
+    res = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...authHeaders() } });
   } catch {
     throw new Error("No hay conexión. Inténtalo de nuevo.");
   }
   let body = null;
   try { body = await res.json(); } catch { /* PDF u otra cosa */ }
-  if (!res.ok) { const e = new Error((body && body.error) || "Algo ha fallado. Inténtalo de nuevo."); e.code = body && body.codigo; throw e; }
+  if (!res.ok) {
+    const e = new Error((body && body.error) || "Algo ha fallado. Inténtalo de nuevo.");
+    e.code = body && body.codigo;
+    if (e.code === "codigo_invalido") askCode("El código de acceso ya no es válido. Pídelo en la oficina.");
+    throw e;
+  }
   return body;
 }
+
+function askCode(help) {
+  if (help) $("access-help").textContent = help;
+  $("access-err").hidden = true;
+  $("access-code").value = "";
+  $("access").hidden = false;
+  $("access-code").focus();
+}
+$("access-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const code = $("access-code").value.trim();
+  if (!code) return;
+  $("access-err").hidden = true;
+  try {
+    const res = await fetch("/api/login", { method: "POST", headers: authHeaders(code) });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(b.error || "Algo ha fallado. Inténtalo de nuevo.");
+    }
+    saveCode(code);
+    $("access").hidden = true;
+    $("btn-scan").disabled = false;
+  } catch (e) {
+    $("access-err").textContent = e instanceof TypeError ? "No hay conexión. Inténtalo de nuevo." : e.message;
+    $("access-err").hidden = false;
+  }
+});
 const post = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
 
 // ---------- navegación ----------
@@ -382,7 +420,7 @@ async function getPdf() {
   busy("Preparando el PDF…");
   try {
     let res;
-    try { res = await fetch(state.pdfUrl); } catch { throw new Error("No hay conexión. Inténtalo de nuevo."); }
+    try { res = await fetch(state.pdfUrl, { headers: authHeaders() }); } catch { throw new Error("No hay conexión. Inténtalo de nuevo."); }
     if (!res.ok) throw new Error("No se ha podido descargar el PDF. Inténtalo de nuevo.");
     state.pdfBlob = await res.blob();
     return state.pdfBlob;
@@ -413,6 +451,16 @@ $("btn-scan").addEventListener("click", () => go("scan"));
 (async () => {
   try {
     state.health = await api("/api/health");
+    if (state.health.requiere_codigo) {
+      $("btn-scan").disabled = true;           // hasta comprobar el código guardado
+      const guardado = getCode();
+      let ok = false, sinRed = false;
+      if (guardado) {
+        try { ok = (await fetch("/api/login", { method: "POST", headers: authHeaders(guardado) })).ok; } catch { sinRed = true; }
+      }
+      if (ok || sinRed) $("btn-scan").disabled = false;   // sin red no se puede comprobar: ya avisará al buscar
+      else askCode();
+    }
     if (state.health.modo !== "real") {
       $("modo").hidden = false;
       $("modo").textContent = "Modo de prueba (datos simulados)";

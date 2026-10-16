@@ -20,7 +20,8 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 PORT = 8765
 BASE = f"http://localhost:{PORT}"
-QR_TEXT = "https://www.stinsa.com/web/content/900002?access_token=11111111-aaaa-bbbb-cccc-000000000001&download=true"
+CODIGO = "codigo-de-prueba"
+QR_TEXT ="https://www.stinsa.com/web/content/900002?access_token=11111111-aaaa-bbbb-cccc-000000000001&download=true"
 SALIDA = Path(os.environ.get("PRUEBA_CAPTURAS", tempfile.gettempdir()))
 
 
@@ -60,7 +61,7 @@ comprobar.fallos = 0
 def main():
     video = Path(tempfile.gettempdir()) / "qr_camara.y4m"
     crear_video_qr(video, QR_TEXT)
-    env = {**os.environ, "ODOO_MODE": "mock", "DRY_RUN": "false"}
+    env = {**os.environ, "ODOO_MODE": "mock", "DRY_RUN": "false", "APP_ACCESS_CODE": CODIGO}
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -74,9 +75,27 @@ def main():
             pg.on("pageerror", lambda e: errores.append(str(e)))
             pg.on("console", lambda m: errores.append(m.text) if m.type == "error" else None)
 
-            print("Escáner con cámara simulada")
+            print("Código de acceso")
             pg.goto(BASE)
+            pg.wait_for_selector("#access:not([hidden])")
+            comprobar(pg.is_disabled("#btn-scan"), "sin código el botón del menú está bloqueado")
+            pg.fill("#access-code", "equivocado"); pg.click("#access-form button")
+            pg.wait_for_selector("#access-err:not([hidden])")
+            comprobar("incorrecto" in pg.inner_text("#access-err"), "un código malo da un mensaje claro: «" + pg.inner_text("#access-err") + "»")
+            pg.fill("#access-code", CODIGO); pg.click("#access-form button")
+            pg.wait_for_selector("#access", state="hidden")
+            comprobar(pg.is_enabled("#btn-scan"), "con el código correcto se desbloquea la app")
+            pg.reload()
             pg.wait_for_selector("#modo:not([hidden])")
+            comprobar(pg.is_hidden("#access") and pg.is_enabled("#btn-scan"), "el móvil recuerda el código: no lo vuelve a pedir")
+            pg.evaluate("localStorage.setItem('codigo-acceso', 'cambiado')")
+            pg.reload()
+            pg.wait_for_selector("#access:not([hidden])")
+            comprobar(True, "si el código guardado deja de valer, lo vuelve a pedir")
+            pg.fill("#access-code", CODIGO); pg.click("#access-form button")
+            pg.wait_for_selector("#access", state="hidden")
+
+            print("Escáner con cámara simulada")
             pg.click("#btn-scan")
             pg.wait_for_selector("#s-edit:not([hidden])", timeout=20000)
             comprobar("S2621473" in pg.inner_text("#edit-title"), "el QR se lee con la cámara y abre el pedido S2621473")
@@ -136,7 +155,7 @@ def main():
             pg.goto(BASE)
 
             # Se ignoran: fallos de red del paso "sin conexión" (esperados) y el aviso benigno de la librería del escáner al apagar la cámara.
-            ruido = ("ERR_INTERNET_DISCONNECTED", "play() request was interrupted")
+            ruido = ("ERR_INTERNET_DISCONNECTED", "play() request was interrupted", "status of 401")  # 401: los códigos malos que la prueba provoca
             reales = [e for e in errores if not any(r in e for r in ruido)]
             comprobar(not reales, f"sin errores de JavaScript {reales or ''}")
             navegador.close()

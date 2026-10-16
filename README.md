@@ -4,7 +4,7 @@ PWA para móvil que permite al conductor corregir, al cargar, la **mercancía, l
 
 > Guía de una página para los conductores: [GUIA_CONDUCTORES.md](GUIA_CONDUCTORES.md)
 
-**Estado:** prototipo de uso personal. Antes de ponerlo en manos de conductores, lee [Seguridad](#seguridad) y [Alojamiento](#alojamiento-y-despliegue).
+**Estado:** prototipo. Antes de ponerlo en manos de conductores, lee [Seguridad](#7-seguridad) y [Alojamiento](#6-alojamiento-y-despliegue).
 
 ---
 
@@ -46,6 +46,7 @@ Después abre **http://localhost:8000** en el navegador. La cámara web funciona
 | `ODOO_USER`, `ODOO_PASSWORD` | Usuario y **contraseña** (o API key donde Odoo la admita; ver abajo). |
 | `ODOO_COMPANY_IDS` | `1,7` (1 = STINSA, 7 = TRANSARGI S.L.U). |
 | `SECRET_KEY` | Clave larga aleatoria para firmar las sesiones (obligatoria en `real`). |
+| `APP_ACCESS_CODE` | **Código de acceso compartido** (mínimo 8 caracteres). En modo `real` es **obligatorio**: sin él, la API se niega a funcionar (error 503). Los conductores lo escriben una vez en el móvil y se queda guardado. En modo `mock`, si está vacío, no se pide. |
 | `QR_ALLOWED_HOSTS` | Dominios extra aceptados dentro del QR (p. ej. la demo de Tecnativa). |
 
 **Cómo averiguar la base de datos:** Odoo suele tener desactivado el listado. Con la sesión iniciada, abre la consola del navegador (F12) y escribe `odoo.session_info.db`. Para producción es `prod`.
@@ -109,7 +110,7 @@ El proyecto ya está preparado para **Vercel**: FastAPI como función Python (`a
 ### Pasos (se harán guiados, en la fase 5)
 1. Cuenta en **GitHub** y repositorio **privado**; subir el proyecto (`.env` no se sube).
 2. Cuenta en **Vercel** → *Add New Project* → importar el repositorio.
-3. En *Settings → Environment Variables* añadir las del `.env` (`ODOO_MODE=real`, `DRY_RUN`, `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`, `ODOO_COMPANY_IDS`, `SECRET_KEY`). **Nunca en el código.**
+3. En *Settings → Environment Variables* añadir las del `.env` (`ODOO_MODE=real`, `DRY_RUN`, `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`, `ODOO_COMPANY_IDS`, `SECRET_KEY`, `APP_ACCESS_CODE`). **Nunca en el código.**
 4. Desplegar y abrir la URL `https://…vercel.app` en el móvil.
 5. **Tiempo máximo:** guardar + imprimir tarda unos **5-7 s** (casi todo, imprimir el PDF en Odoo). `vercel.json` fija `maxDuration` a 30 s; hay que comprobar en el despliegue que tu plan lo permite (el valor por defecto de 10 s quedaría justo).
 
@@ -130,10 +131,17 @@ Si la usan los conductores de la empresa, hay que pasar a **Vercel Pro** u otro 
 - **Trazabilidad:** cada guardado deja una **nota interna** en la tarea («Modificado desde la app de conductores», fecha/hora y valores antes → ahora) y un log en el servidor sin datos sensibles (las URL con token no se registran).
 - **Cabeceras:** `nosniff`, `no-referrer`, sin marcos, cámara solo para la propia app, y la API nunca se guarda en caché.
 
-### Limitación importante antes de publicar en internet
-Hoy **no hay identificación de usuario**: quien tenga la dirección de la app puede abrir una orden **escribiendo un número de pedido** (sin QR) y modificarla. El número de pedido no es un secreto. Con la app solo en tu ordenador es aceptable; **antes de publicarla** hay que añadir al menos un código de acceso compartido y, en la fase 2, identificar al conductor:
+### Código de acceso compartido
+Abrir una orden **escribiendo un número de pedido** (sin QR) no requiere ningún secreto, y los números de pedido no lo son. Por eso **todas las rutas de la API, salvo `/api/health`, exigen el código** (`APP_ACCESS_CODE`, cabecera `X-Codigo-Acceso`):
 
-- **Fase 2 propuesta:** cada conductor tiene un **PIN de 4 dígitos** (lista en una variable de entorno o tabla pequeña). Se pide una sola vez y el móvil lo recuerda; el nombre queda en la nota de la tarea. Otra opción aún más simple: un selector con su nombre.
+- Se compara en tiempo constante, tras un fallo se espera 1 s y se registra el intento **sin guardar lo escrito**.
+- En modo `real` sin código (o de menos de 8 caracteres) la API responde 503: falla cerrada, nunca abierta.
+- Un test recorre las rutas de la API y falla si alguna nueva se olvida de protegerla.
+- **Cambiar el código** (p. ej. si un conductor deja la empresa o se filtra): cámbialo en el `.env` o en las variables de Vercel y vuelve a desplegar. Los móviles lo volverán a pedir.
+- Es un código **compartido**: no distingue quién hizo cada cambio ni se puede quitar a una sola persona. Usa un código largo y no lo reutilices. Para eso está la fase 2.
+
+### Fase 2 propuesta: identificar al conductor
+Cada conductor tiene un **PIN de 4 dígitos** (lista en una variable de entorno o tabla pequeña). Se pide una sola vez y el móvil lo recuerda; el nombre queda en la nota de la tarea. Una opción aún más simple: un selector con su nombre. Sustituiría al código compartido y permitiría dar de baja a una sola persona.
 
 ## 8. Estructura
 

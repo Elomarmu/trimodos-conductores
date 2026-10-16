@@ -1,8 +1,10 @@
+import hmac
 import logging
 import mimetypes
+import time
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -28,6 +30,26 @@ def get_odoo():
         s = get_settings()
         _odoo = OdooClient(s) if s.mode == "real" else MockOdoo()
     return _odoo
+
+
+MIN_CODE_LENGTH = 8
+FAIL_DELAY = 1.0  # segundos de espera tras un código incorrecto: frena los intentos al azar
+
+
+def require_access(x_codigo_acceso: str = Header("")):
+    """Código de acceso compartido. En modo real es obligatorio: sin él configurado, la API se niega a funcionar."""
+    s = get_settings()
+    if s.mode == "real" and len(s.access_code) < MIN_CODE_LENGTH:
+        raise AppError("La app no está configurada. Avisa a la oficina.", 503, "sin_configurar")
+    if not s.access_code:
+        return  # solo posible en modo simulado
+    if not hmac.compare_digest(x_codigo_acceso.encode(), s.access_code.encode()):
+        log.warning("Código de acceso incorrecto")  # nunca se registra lo que se escribió
+        time.sleep(FAIL_DELAY)
+        raise AppError("Código de acceso incorrecto.", 401, "codigo_invalido")
+
+
+access = [Depends(require_access)]
 
 
 class ResolveBody(BaseModel):
@@ -66,23 +88,28 @@ async def unexpected_handler(request: Request, exc: Exception):
     return JSONResponse({"error": "Algo ha fallado. Inténtalo de nuevo.", "codigo": "interno"}, status_code=500)
 
 
+@app.post("/api/login", dependencies=access)
+def login():
+    return {"ok": True}
+
+
 @app.get("/api/health")
 def health():
     s = get_settings()
-    info = {"ok": True, "modo": s.mode, "dry_run": s.dry_run}
+    info = {"ok": True, "modo": s.mode, "dry_run": s.dry_run, "requiere_codigo": bool(s.access_code) or s.mode == "real"}
     if s.mode != "real":  # ayuda para probar sin QR físico
         info["qr_prueba"] = "https://www.stinsa.com/web/content/900002?access_token=11111111-aaaa-bbbb-cccc-000000000001&download=true"
     return info
 
 
-@app.post("/api/resolve-qr")
+@app.post("/api/resolve-qr", dependencies=access)
 def resolve_qr(body: ResolveBody):
     result = service.resolve(get_odoo(), get_settings(), qr_text=body.qr_text, order_name=body.order_name, company=body.company)
     log.info("resolve tarea=%s via=%s", result["tarea"]["id"], "qr" if body.qr_text else "pedido")
     return result
 
 
-@app.post("/api/update")
+@app.post("/api/update", dependencies=access)
 def update(body: UpdateBody):
     result = service.update(get_odoo(), get_settings(), body.sesion, body.task_id, [c.model_dump() for c in body.cambios])
     log.info("update tarea=%s bultos=%s", body.task_id, result["bultos_modificados"])
@@ -94,14 +121,14 @@ class ReprintBody(BaseModel):
     sesion: str
 
 
-@app.post("/api/reprint")
+@app.post("/api/reprint", dependencies=access)
 def reprint(body: ReprintBody):
     result = service.reprint(get_odoo(), get_settings(), body.sesion, body.task_id)
     log.info("reprint tarea=%s", body.task_id)
     return result
 
 
-@app.get("/api/pdf/{attachment_id}")
+@app.get("/api/pdf/{attachment_id}", dependencies=access)
 def pdf(attachment_id: int, token: str = Query("", max_length=80)):
     data = get_odoo().get_pdf(attachment_id, token)
     if not data:
@@ -109,7 +136,7 @@ def pdf(attachment_id: int, token: str = Query("", max_length=80)):
     return Response(data, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="orden-{attachment_id}.pdf"'})
 
 
-@app.get("/api/goods")
+@app.get("/api/goods", dependencies=access)
 def goods(q: str = Query("", max_length=60)):
     return {"resultados": get_odoo().search_goods(q.strip(), 10)}
 

@@ -23,6 +23,7 @@ class Settings:
     company_ids: list[int]
     secret_key: str
     qr_allowed_hosts: list[str]
+    access_code: str
 
 
 def get_settings() -> Settings:
@@ -43,4 +44,5 @@ def get_settings() -> Settings:
         company_ids=[int(x) for x in os.environ.get("ODOO_COMPANY_IDS", "1,7").split(",") if x.strip()],
         secret_key=secret,
         qr_allowed_hosts=[h.strip().lower() for h in os.environ.get("QR_ALLOWED_HOSTS", "").split(",") if h.strip()],
+        access_code=os.environ.get("APP_ACCESS_CODE", "").strip(),
     )

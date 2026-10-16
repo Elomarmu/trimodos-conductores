@@ -78,6 +78,16 @@
   </div>
 </div>
 
+<div id="access" class="overlay" role="dialog" aria-modal="true" aria-labelledby="access-q" hidden>
+  <form id="access-form" class="dialog">
+    <h2 id="access-q">Código de acceso</h2>
+    <p id="access-help">Pídelo en la oficina. Solo hace falta la primera vez.</p>
+    <input id="access-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Código de acceso">
+    <div id="access-err" class="banner bad" role="alert" hidden></div>
+    <button type="submit" class="btn primary huge">Entrar</button>
+  </form>
+</div>
+
 <div id="busy" class="overlay" hidden><div class="dialog"><h2 id="busy-msg">Un momento…</h2></div></div>
 <script src="app.js"></script>
 </body>
