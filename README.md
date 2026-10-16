@@ -107,13 +107,19 @@ El cambio es **solo tocar el `.env`** (`ODOO_USER`, `ODOO_PASSWORD`). Aun con tu
 
 El proyecto ya está preparado para **Vercel**: FastAPI como función Python (`api/index.py`), frontend estático en `public/`, y `vercel.json`. No usa archivos locales ni procesos permanentes, y el mismo código corre en local.
 
-### Pasos (se harán guiados, en la fase 5)
-1. Cuenta en **GitHub** y repositorio **privado**; subir el proyecto (`.env` no se sube).
-2. Cuenta en **Vercel** → *Add New Project* → importar el repositorio.
-3. En *Settings → Environment Variables* añadir las del `.env` (`ODOO_MODE=real`, `DRY_RUN`, `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`, `ODOO_COMPANY_IDS`, `SECRET_KEY`, `APP_ACCESS_CODE`). **Nunca en el código.**
-4. Desplegar y abrir la URL `https://…vercel.app` en el móvil.
-5. **Tiempo máximo:** guardar + imprimir tarda unos **5-7 s** (casi todo, imprimir el PDF en Odoo). `vercel.json` fija `maxDuration` a 30 s; hay que comprobar en el despliegue que tu plan lo permite (el valor por defecto de 10 s quedaría justo).
+### Pasos
+1. Cuenta en **GitHub** y repositorio **privado**; subir el proyecto (`.env` no se sube): `git remote add origin <url>` y `git push -u origin main`.
+2. Cuenta en **Vercel** → *Add New Project* → importar el repositorio (preset **Other**, sin comandos de build).
+3. En *Settings → Environment Variables* añadir las del `.env` (`ODOO_MODE=real`, `DRY_RUN`, `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`, `ODOO_COMPANY_IDS`, `SECRET_KEY`, `APP_ACCESS_CODE`), marcando como **Sensitive** las secretas. **Nunca en el código.** Los cambios de variables solo se aplican con un **nuevo despliegue** (*Redeploy*).
+4. Desplegar y abrir `https://…vercel.app/api/health`: debe devolver `"ok":true`.
+5. Desplegar siempre con `DRY_RUN=true`; ponerlo en `false` solo para pruebas autorizadas y volver a `true`.
 
+### Lecciones del primer despliegue (por si se repite)
+- **«Protected by Vercel Authentication»:** Vercel protege los despliegues por defecto y pide iniciar sesión en Vercel. Hay que desactivarlo en *Settings → Deployment Protection* (la app se protege con su propio código de acceso).
+- **No poner `rewrites` hacia `/api/index` en `vercel.json`:** Vercel detecta FastAPI solo y entrega a la app la ruta *reescrita*, y todas las rutas `/api/...` daban 404.
+- **«Blocked»:** en el plan Hobby Vercel solo despliega commits cuyo **autor está vinculado a la cuenta de GitHub** propietaria. Configurar en el proyecto `git config user.name` / `user.email` con el correo de GitHub (p. ej. `ID+usuario@users.noreply.github.com`).
+- **Región:** `vercel.json` fija `"regions": ["cdg1"]` (París) para estar cerca de Odoo. En el plan Hobby solo se permite una.
+- **Tiempo medido en producción:** guardar + imprimir ≈ **4-5 s** desde París (≈1 s por lectura). `maxDuration` está a 30 s.
 ### ⚠️ El plan gratuito (Hobby) es solo para uso personal y no comercial
 Si la usan los conductores de la empresa, hay que pasar a **Vercel Pro** u otro alojamiento.
 
@@ -143,7 +149,19 @@ Abrir una orden **escribiendo un número de pedido** (sin QR) no requiere ningú
 ### Fase 2 propuesta: identificar al conductor
 Cada conductor tiene un **PIN de 4 dígitos** (lista en una variable de entorno o tabla pequeña). Se pide una sola vez y el móvil lo recuerda; el nombre queda en la nota de la tarea. Una opción aún más simple: un selector con su nombre. Sustituiría al código compartido y permitiría dar de baja a una sola persona.
 
-## 8. Estructura
+## 8. Aspecto y marca
+
+- Tema oscuro y de alto contraste pensado para la cabina (poca luz, guantes). Todos los colores están en variables al inicio de `public/styles.css`.
+- **Marca:** franja blanca con el logo y color de acento por empresa: Grupo Trimodos **#fcda00**, STINSA **#009f92**, TRANSARGI **#f17e49** (texto negro sobre los botones: contraste 6,5-7,9:1). El acento cambia según la empresa de la orden (o la elegida al escribir el pedido).
+- Los logos se preparan con `scripts/preparar_logos.py` (recorta márgenes y los deja en `public/img/`). Al cambiar archivos de la carcasa, **sube la versión de caché** en `public/sw.js` (`conductores-v2` → `v3`).
+
+## 9. Datos de Odoo: particularidades detectadas
+
+- Una tarea cuenta como **orden de transporte** si tiene `is_transport_order` **o** una orden de transporte ya generada: hay tareas reales (p. ej. pedido S2621553) con la marca a `False` pero con su PDF.
+- Un bulto puede venir **vacío** (sin mercancía, 0 elementos, 0 euro palets, 0 kg). Se puede dejar la **mercancía en blanco** (`goods_id` no es obligatorio en `tms.package`). Al guardar solo se validan los campos que cambian.
+- El mismo número de pedido puede existir en STINSA y en TRANSARGI: por eso al escribirlo a mano se elige la empresa.
+
+## 10. Estructura
 
 ```
 api/index.py            entrada de Vercel (importa app.main:app)
