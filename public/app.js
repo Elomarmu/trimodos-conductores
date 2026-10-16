@@ -3,6 +3,7 @@
 
 const $ = (id) => document.getElementById(id);
 const MAX_KG_WARNING = 44000;
+const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
 const state = { data: null, edits: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, health: {} };
 
 // ---------- utilidades ----------
@@ -229,7 +230,7 @@ const FIELDS = [
 function current(p) {
   const e = state.edits[p.id] || {};
   return {
-    goods: "goods" in e ? e.goods : p.mercancia, // null = ha escrito pero aún no ha elegido de la lista
+    goods: "goods" in e ? e.goods : p.mercancia, // null = en blanco; PENDING = ha escrito sin elegir de la lista
     elementos: e.elementos ?? p.elementos,
     euro_palets: e.euro_palets ?? p.euro_palets,
     peso: e.peso ?? p.peso,
@@ -266,7 +267,8 @@ function packageCard(p, index) {
   let timer = null;
   goodsInput.addEventListener("input", () => {
     clearTimeout(timer);
-    setEdit(p, "goods", null); // hasta que elija de la lista no vale
+    // texto vacío = mercancía en blanco (vale); con texto, no vale hasta que elija de la lista
+    setEdit(p, "goods", goodsInput.value.trim() === "" ? null : PENDING);
     markChanged();
     timer = setTimeout(async () => {
       const q = goodsInput.value.trim();
@@ -283,7 +285,7 @@ function packageCard(p, index) {
       } catch (e) { showError(e.message); }
     }, 300);
   });
-  const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Ahora en Odoo: " + (p.mercancia?.name || "—")));
+  const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Ahora en Odoo: " + (p.mercancia?.name || "(en blanco)")));
 
   const numField = (key, label, value, dec) => {
     const input = h("input", { type: "text", inputmode: dec ? "decimal" : "numeric", pattern: "[0-9.,]*", id: `${key}-${p.id}`, value: fmtNum(value), disabled: ro, autocomplete: "off" });
@@ -305,7 +307,7 @@ function markChanged() {
     const p = state.data.bultos.find((x) => String(x.id) === card.dataset.pkg);
     const c = current(p);
     const changed = {
-      mercancia: !c.goods || c.goods.id !== p.mercancia?.id,
+      mercancia: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
       elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
     };
     for (const f of card.querySelectorAll(".field")) f.classList.toggle("changed", !!changed[f.dataset.key]);
@@ -319,23 +321,23 @@ function collectChanges() {
     const c = current(p);
     const name = `Lugar ${state.data.bultos.indexOf(p) + 1} · ${p.name}`;
     const changed = {
-      goods: (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
+      goods: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
       elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
     };
     if (!Object.values(changed).some(Boolean) && !Number.isNaN(c.elementos + c.euro_palets + c.peso)) continue; // bulto sin tocar: no se valida
     // Bulto modificado: tiene que quedar completo y correcto.
-    if (!c.goods) throw new Error(`${name}: elige la mercancía de la lista.`);
+    if (c.goods === PENDING) throw new Error(`${name}: elige la mercancía de la lista o borra el texto para dejarla en blanco.`);
     for (const k of ["elementos", "euro_palets"]) {
       if (!Number.isInteger(c[k]) || c[k] < 0) throw new Error(`${name}: ${k === "elementos" ? "Elementos" : "Euro palets"} tiene que ser un número entero, 0 o más.`);
     }
     if (!(c.peso > 0)) throw new Error(`${name}: el peso tiene que ser mayor que 0.`);
     const rows = [
-      { label: "Mercancía", before: p.mercancia?.name || "—", after: c.goods.name, changed: changed.goods },
+      { label: "Mercancía", before: p.mercancia?.name || "(en blanco)", after: c.goods ? c.goods.name : "(en blanco)", changed: changed.goods },
       { label: "Elementos", before: fmtNum(p.elementos), after: fmtNum(c.elementos), changed: changed.elementos },
       { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: changed.euro_palets },
       { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
     ];
-    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods.id, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: c.peso > MAX_KG_WARNING });
+    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: c.peso > MAX_KG_WARNING });
   }
   if (!changes.length) throw new Error("No has cambiado ningún dato.");
   return changes;

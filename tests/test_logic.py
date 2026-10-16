@@ -512,3 +512,40 @@ def test_si_se_cambia_el_peso_de_un_bulto_vacio_se_valida_ese_campo():
     assert e.value.code == "dato_invalido"
     out = service.update(odoo, get_settings(), r["sesion"], 204067, [{"package_id": 287103, "goods_id": 3, "number_of_packages": 3, "euro_pallet_qty": 2, "shipping_weight": 1500.0}])
     assert out["bultos_modificados"] == 1
+
+
+# --- mercancía en blanco
+def test_vaciar_la_mercancia_se_guarda_como_en_blanco_y_queda_en_la_nota():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(goods_id=0)])
+    assert out["ok"] and odoo.writes == [(287102, {"goods_id": False})]
+    assert odoo.packages[287102]["goods_id"] is False
+    assert "Mercancía: Cartón y papel → (en blanco)" in odoo.notes[0][1]
+    again = service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
+    assert again["bultos"][0]["mercancia"] is None
+
+
+def test_dejar_en_blanco_una_mercancia_que_ya_esta_en_blanco_no_es_un_cambio():
+    odoo = MockOdoo()
+    odoo.packages[287102]["goods_id"] = False
+    r = _sesion(odoo)
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(goods_id=0)])
+    assert e.value.code == "sin_cambios"
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(goods_id=0, number_of_packages=3)])
+    assert odoo.writes == [(287102, {"number_of_packages": 3})] and out["ok"]   # la mercancía en blanco no se vuelve a escribir
+
+
+def test_poner_mercancia_a_un_bulto_en_blanco():
+    odoo = MockOdoo()
+    odoo.packages[287102]["goods_id"] = False
+    r = _sesion(odoo)
+    service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(goods_id=3)])
+    assert odoo.writes == [(287102, {"goods_id": 3})] and "(en blanco) → Bebidas" in odoo.notes[0][1]
+
+
+def test_el_cliente_real_puede_vaciar_la_mercancia(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    c.write_package(287102, {"goods_id": False})
+    assert srv.calls[-1][:3] == ("tms.package", "write", [[287102], {"goods_id": False}])

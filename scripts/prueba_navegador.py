@@ -113,6 +113,14 @@ def main():
             print("Flujo completo")
             pg.click("#btn-scan")
             pg.wait_for_selector("#s-edit:not([hidden])", timeout=20000)
+            pg.fill("#g-287102", "")                          # borrar la mercancía = dejarla en blanco
+            pg.click("#btn-review"); pg.wait_for_selector("#s-review:not([hidden])")
+            comprobar("(en blanco)" in pg.inner_text("#review-body"), "mercancía borrada: el resumen dice «(en blanco)» y deja continuar")
+            pg.click("#btn-back-edit")
+            pg.fill("#g-287102", "zzz")                       # texto sin elegir de la lista: no vale
+            pg.click("#btn-review"); pg.wait_for_selector("#err:not([hidden])")
+            comprobar("borra el texto" in pg.inner_text("#err"), "texto sin elegir de la lista: avisa «" + pg.inner_text("#err") + "»")
+            pg.fill("#g-287102", "cart"); pg.wait_for_selector("#packages .sugg .btn"); pg.click("#packages .sugg .btn >> nth=0")
             pg.fill("#elementos-287102", "20")
             pg.click("#btn-review")
             pg.wait_for_selector("#s-review:not([hidden])")

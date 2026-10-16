@@ -125,9 +125,12 @@ def _clean_change(odoo, c: dict) -> dict:
     bad = lambda msg: AppError(msg, 400, "dato_invalido")  # noqa: E731
     out: dict = {}
     if c.get("goods_id") is not None:
-        if not odoo.goods_name(c["goods_id"]):
+        if c["goods_id"] == 0:
+            out["goods_id"] = False          # 0 = dejar la mercancía en blanco
+        elif not odoo.goods_name(c["goods_id"]):
             raise bad("La mercancía elegida no existe. Elígela de la lista.")
-        out["goods_id"] = c["goods_id"]
+        else:
+            out["goods_id"] = c["goods_id"]
     for field, label in (("number_of_packages", "Elementos"), ("euro_pallet_qty", "Euro palets")):
         if c.get(field) is not None:
             if c[field] < 0:
@@ -169,7 +172,13 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
         current = {"goods_id": (cur.get("goods_id") or [None])[0], "number_of_packages": cur.get("number_of_packages"),
                    "euro_pallet_qty": cur.get("euro_pallet_qty"), "shipping_weight": cur.get("shipping_weight")}
         # Solo se validan los campos que CAMBIAN: un bulto vacío o con peso 0 que no se toca no bloquea el guardado.
-        changed = {k: c[k] for k in current if c.get(k) is not None and c[k] != current[k]}
+        changed = {}
+        for k in current:
+            v = c.get(k)
+            if v is None:
+                continue
+            if (None if (k == "goods_id" and v == 0) else v) != current[k]:   # goods_id 0 = en blanco = None en Odoo
+                changed[k] = v
         diff = _clean_change(odoo, changed) if changed else {}
         if diff:
             changes.setdefault(pid, {}).update(diff)
@@ -257,7 +266,8 @@ def _describe(odoo, packages: dict, changes: dict) -> list[tuple[str, list[str]]
         rows = []
         for field, after in vals.items():
             if field == "goods_id":
-                before_s, after_s = (p.get("goods_id") or [0, "—"])[1], odoo.goods_name(after)
+                before_s = (p.get("goods_id") or [0, "(en blanco)"])[1]
+                after_s = odoo.goods_name(after) if after else "(en blanco)"
             else:
                 before_s, after_s = fmt_num(p.get(field) or 0), fmt_num(after)
                 if field == "shipping_weight":

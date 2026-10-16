@@ -99,7 +99,7 @@ class MockOdoo:
     def write_package(self, package_id, values):
         pkg = self.packages[package_id]
         for k, v in values.items():
-            pkg[k] = [v, self.goods_name(v)] if k == "goods_id" else v
+            pkg[k] = ([v, self.goods_name(v)] if v else False) if k == "goods_id" else v
         pkg["write_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.writes.append((package_id, dict(values)))
 
