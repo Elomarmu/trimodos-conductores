@@ -30,6 +30,7 @@ def get_odoo():
 class ResolveBody(BaseModel):
     qr_text: str | None = None
     order_name: str | None = None
+    company: str | None = None  # "stinsa" o "transargi" (obligatoria con order_name)
 
 
 @app.exception_handler(AppError)
@@ -51,7 +52,7 @@ def health():
 
 @app.post("/api/resolve-qr")
 def resolve_qr(body: ResolveBody):
-    result = service.resolve(get_odoo(), get_settings(), qr_text=body.qr_text, order_name=body.order_name)
+    result = service.resolve(get_odoo(), get_settings(), qr_text=body.qr_text, order_name=body.order_name, company=body.company)
     log.info("resolve tarea=%s via=%s", result["tarea"]["id"], "qr" if body.qr_text else "pedido")
     return result
 

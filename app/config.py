@@ -40,7 +40,7 @@ def get_settings() -> Settings:
         odoo_db=os.environ.get("ODOO_DB", ""),
         odoo_user=os.environ.get("ODOO_USER", ""),
         odoo_password=os.environ.get("ODOO_PASSWORD", ""),
-        company_ids=[int(x) for x in os.environ.get("ODOO_COMPANY_IDS", "7").split(",") if x.strip()],
+        company_ids=[int(x) for x in os.environ.get("ODOO_COMPANY_IDS", "1,7").split(",") if x.strip()],
         secret_key=secret,
         qr_allowed_hosts=[h.strip().lower() for h in os.environ.get("QR_ALLOWED_HOSTS", "").split(",") if h.strip()],
     )

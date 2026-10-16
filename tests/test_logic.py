@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 
 from app import service
 from app.config import get_settings
@@ -68,13 +68,36 @@ def test_resolve_qr_adjunto_inexistente():
 
 
 def test_resolve_por_pedido():
-    r = service.resolve(MockOdoo(), get_settings(), order_name="s2621473")
-    assert r["tarea"]["nombre"] == "S2621473" and r["verificado_por_qr"] is False
+    r = service.resolve(MockOdoo(), get_settings(), order_name="s2621473", company="transargi")
+    assert r["tarea"]["id"] == 204067 and r["tarea"]["pedido"] == "S2621473" and r["verificado_por_qr"] is False
+
+
+def test_mismo_pedido_en_otra_empresa_da_otra_tarea():
+    r = service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="stinsa")
+    assert r["tarea"]["id"] == 300001
+
+
+def test_pedido_a_mano_exige_empresa():
+    for c in (None, "", "otra"):
+        with pytest.raises(AppError) as e:
+            service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company=c)
+        assert e.value.code == "falta_empresa"
+
+
+def test_regla_editable():
+    r = service.resolve(MockOdoo(), get_settings(), order_name="S2600001", company="transargi")
+    assert r["editable"] is False and "cerrada" in r["motivo_no_editable"]
+    assert "facturada" in service.is_editable({"is_closed": False, "invoice_count": 2}, [])[1]
+    ok = service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="transargi")
+    assert ok["editable"] is True
+    for state, expected in [("done", False), ("cancel", False), ("transit", True), ("loading", True)]:
+        assert service.is_editable({"is_closed": False, "invoice_count": 0}, [{"state": state}])[0] is expected
+    assert service.is_editable({"is_closed": True, "invoice_count": 0}, [])[0] is False
 
 
 def test_resolve_pedido_inexistente_y_vacio():
     with pytest.raises(AppError):
-        service.resolve(MockOdoo(), get_settings(), order_name="S9999999")
+        service.resolve(MockOdoo(), get_settings(), order_name="S9999999", company="stinsa")
     with pytest.raises(AppError):
         service.resolve(MockOdoo(), get_settings())
 
@@ -106,8 +129,9 @@ def test_api_resolve_y_goods():
     from app.main import app
     c = TestClient(app)
     assert c.get("/api/health").json()["ok"] is True
-    r = c.post("/api/resolve-qr", json={"order_name": "S2621473"})
+    r = c.post("/api/resolve-qr", json={"order_name": "S2621473", "company": "transargi"})
     assert r.status_code == 200 and r.json()["tarea"]["id"] == 204067
     r = c.post("/api/resolve-qr", json={"qr_text": "basura"})
     assert r.status_code == 400 and "error" in r.json()
     assert len(c.get("/api/goods", params={"q": "a"}).json()["resultados"]) <= 10
+

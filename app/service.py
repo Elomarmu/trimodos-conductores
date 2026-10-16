@@ -1,5 +1,6 @@
 """Lógica de negocio: resolver el QR o el número de pedido hasta la tarea y sus bultos."""
 import hmac
+import re
 from urllib.parse import urlparse
 
 from .config import Settings
@@ -10,8 +11,18 @@ from .tokens import sign_session
 TASK_MODEL = "project.task"
 
 
-def is_editable(task: dict) -> tuple[bool, str | None]:
-    """Regla de 'tarea cerrada o facturada'. PENDIENTE de confirmar con los datos reales (ver scripts/diagnostico.py)."""
+COMPANIES = {"stinsa": 1, "transargi": 7}
+LOCKED_PACKAGE_STATES = ("done", "cancel")
+
+
+def is_editable(task: dict, packages: list[dict]) -> tuple[bool, str | None]:
+    """No editable si la tarea está cerrada, ya tiene facturas o algún bulto está terminado/cancelado."""
+    if task.get("is_closed"):
+        return False, "Esta orden ya está cerrada. Avisa a la oficina."
+    if (task.get("invoice_count") or 0) > 0:
+        return False, "Esta orden ya está facturada. Avisa a la oficina."
+    if any(p.get("state") in LOCKED_PACKAGE_STATES for p in packages):
+        return False, "Esta orden ya está terminada o cancelada. Avisa a la oficina."
     return True, None
 
 
@@ -39,10 +50,11 @@ def _package_view(p: dict) -> dict:
     }
 
 
-def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: str | None = None) -> dict:
+def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: str | None = None, company: str | None = None) -> dict:
     not_found = AppError("No encontramos esta orden. Revisa el número o avisa a la oficina.", 404, "no_encontrada")
     verified = False
     outdated = False
+    order_label = None
 
     if qr_text:
         qr = parse_qr(qr_text, _allowed_hosts(settings))
@@ -57,20 +69,26 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
         current = task.get("tms_transport_order_attachment_id")
         outdated = not current or current[0] != att["id"]
         verified = True
+        found = re.search(r"\bS\d{5,9}\b", att.get("name") or "")  # el adjunto se llama "Orden de transporte - S2621473 - ..."
+        order_label = found.group(0) if found else None
     elif order_name:
         name = normalize_order_name(order_name)
-        tasks = odoo.find_transport_tasks(name)
+        company_id = COMPANIES.get((company or "").strip().lower())
+        if not company_id:
+            raise AppError("Elige la empresa: TRANSARGI o STINSA.", 400, "falta_empresa")
+        tasks = odoo.find_transport_tasks(name, company_id)
         if not tasks:
             raise not_found
         task = tasks[0]  # la más reciente
+        order_label = name
     else:
         raise AppError("Escanea el código o escribe el número de pedido.", 400, "faltan_datos")
 
     packages = odoo.read_packages(task.get("tms_package_ids") or [])
-    editable, reason = is_editable(task)
+    editable, reason = is_editable(task, packages)
     session = sign_session(settings.secret_key, task["id"], {p["id"]: p["write_date"] for p in packages})
     return {
-        "tarea": {"id": task["id"], "nombre": task["name"], "compania": _m2o(task.get("company_id")), "etapa": _m2o(task.get("stage_id"))},
+        "tarea": {"id": task["id"], "nombre": task["name"], "pedido": order_label or None, "compania": _m2o(task.get("company_id")), "etapa": _m2o(task.get("stage_id"))},
         "bultos": [_package_view(p) for p in packages],
         "version_antigua": outdated,
         "aviso": "Esta orden tiene una versión más nueva." if outdated else None,

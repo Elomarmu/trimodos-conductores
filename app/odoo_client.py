@@ -13,7 +13,7 @@ PACKAGE_MODEL = "tms.package"
 GOODS_MODEL = "tms.goods"
 ATTACHMENT_MODEL = "ir.attachment"
 
-TASK_FIELDS = ["name", "company_id", "stage_id", "is_transport_order", "tms_package_ids", "tms_transport_order_attachment_id"]
+TASK_FIELDS = ["name", "company_id", "stage_id", "is_transport_order", "tms_package_ids", "tms_transport_order_attachment_id", "is_closed", "invoice_count"]
 PACKAGE_FIELDS = [
     "name", "carrier_tracking_ref", "goods_id", "number_of_packages", "euro_pallet_qty", "shipping_weight",
     "shipping_origin_id", "shipping_destination_id", "pickup_date", "forecast_unload_date", "state", "write_date",
@@ -30,6 +30,7 @@ ALLOWED_CALLS = {
     (PACKAGE_MODEL, "fields_get"),
     (GOODS_MODEL, "name_search"),
     (ATTACHMENT_MODEL, "read"),
+    ("res.company", "search_read"),
 }
 
 
@@ -69,8 +70,11 @@ class OdooClient:
         return self._rpc("object", "execute_kw", [self.s.odoo_db, uid, self.s.odoo_password, model, method, args, kwargs])
 
     # ---- operaciones permitidas ----------------------------------------------
-    def find_transport_tasks(self, order_name: str) -> list[dict]:
-        orders = self._call(ORDER_MODEL, "search_read", [[["name", "=", order_name]]], {"fields": ["tasks_ids"], "limit": 1})
+    def find_transport_tasks(self, order_name: str, company_id: int) -> list[dict]:
+        orders = self._call(
+            ORDER_MODEL, "search_read", [[["name", "=", order_name], ["company_id", "=", company_id]]],
+            {"fields": ["tasks_ids"], "limit": 1},
+        )
         if not orders or not orders[0]["tasks_ids"]:
             return []
         return self._call(
@@ -94,6 +98,9 @@ class OdooClient:
     def search_goods(self, query: str, limit: int = 10) -> list[dict]:
         limit = min(limit, 10)
         return [{"id": i, "name": n} for i, n in self._call(GOODS_MODEL, "name_search", [query], {"limit": limit})]
+
+    def list_companies(self) -> list[dict]:
+        return self._call("res.company", "search_read", [[]], {"fields": ["name"]})
 
     def describe_fields(self, model: str, filters: list[str]) -> dict:
         """Solo diagnóstico: lista campos (nombre, tipo, etiqueta) cuyo nombre contenga alguno de los filtros."""
