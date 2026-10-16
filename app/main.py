@@ -14,6 +14,7 @@ from .mock_odoo import MockOdoo
 from .odoo_client import OdooClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # sus logs incluyen las URL con access_token
 log = logging.getLogger("conductores")
 
 app = FastAPI(title="App de conductores", docs_url=None, redoc_url=None)
@@ -84,6 +85,18 @@ def resolve_qr(body: ResolveBody):
 def update(body: UpdateBody):
     result = service.update(get_odoo(), get_settings(), body.sesion, body.task_id, [c.model_dump() for c in body.cambios])
     log.info("update tarea=%s bultos=%s", body.task_id, result["bultos_modificados"])
+    return result
+
+
+class ReprintBody(BaseModel):
+    task_id: int
+    sesion: str
+
+
+@app.post("/api/reprint")
+def reprint(body: ReprintBody):
+    result = service.reprint(get_odoo(), get_settings(), body.sesion, body.task_id)
+    log.info("reprint tarea=%s", body.task_id)
     return result
 
 

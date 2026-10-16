@@ -1,7 +1,10 @@
 """Cliente Odoo con lista blanca. NO existe ninguna llamada genérica: cada operación permitida es un método fijo.
 
-Fase 1: solo lectura. La escritura (tms.package) y message_post se añaden en la fase 3 con las mismas reglas.
+Lectura de tareas/bultos/mercancías/adjuntos; escritura SOLO de 4 campos en tms.package; message_post SOLO en project.task;
+impresión SOLO del informe tms_reporting.tms_transportation_order.
 """
+import json
+
 import httpx
 
 from .config import Settings
@@ -19,6 +22,8 @@ PACKAGE_FIELDS = [
     "shipping_origin_id", "shipping_destination_id", "pickup_date", "forecast_unload_date", "state", "write_date",
 ]
 ATTACHMENT_FIELDS = ["res_model", "res_id", "access_token", "name"]
+EDITABLE_FIELDS = frozenset({"goods_id", "number_of_packages", "euro_pallet_qty", "shipping_weight"})
+REPORT_NAME = "tms_reporting.tms_transportation_order"
 
 # (modelo, método) permitidos. Todo lo demás se rechaza antes de salir hacia Odoo.
 ALLOWED_CALLS = {
@@ -32,6 +37,8 @@ ALLOWED_CALLS = {
     (GOODS_MODEL, "read"),
     (ATTACHMENT_MODEL, "read"),
     ("res.company", "search_read"),
+    (PACKAGE_MODEL, "write"),        # solo vía write_package (campos EDITABLE_FIELDS)
+    (TASK_MODEL, "message_post"),    # solo vía post_note
 }
 
 
@@ -39,7 +46,8 @@ class OdooClient:
     def __init__(self, settings: Settings):
         self.s = settings
         self._uid: int | None = None
-        self._http = httpx.Client(timeout=25)
+        self._http = httpx.Client(timeout=25)   # JSON-RPC y sesión web (informe)
+        self._anon = httpx.Client(timeout=40)   # descarga por token, SIN cookies de sesión
 
     # ---- bajo nivel (privado) -------------------------------------------------
     def _rpc(self, service: str, method: str, args: list):
@@ -100,8 +108,50 @@ class OdooClient:
         limit = min(limit, 10)
         return [{"id": i, "name": n} for i, n in self._call(GOODS_MODEL, "name_search", [query], {"limit": limit})]
 
-    def get_pdf(self, attachment_id, token):
-        raise NotImplementedError  # fase 3
+    # ---- escritura (solo lo imprescindible) ------------------------------------
+    def write_package(self, package_id: int, values: dict) -> None:
+        if not values or not set(values) <= EDITABLE_FIELDS:
+            raise PermissionError("Campo no permitido")
+        self._call(PACKAGE_MODEL, "write", [[int(package_id)], values])
+
+    def post_note(self, task_id: int, html_body: str) -> None:
+        """Nota interna (sin avisar a seguidores) en la tarea."""
+        self._call(TASK_MODEL, "message_post", [[int(task_id)]],
+                   {"body": html_body, "message_type": "comment", "subtype_xmlid": "mail.mt_note"})
+
+    def print_order(self, task_id: int, company_id: int) -> dict:
+        """Imprime la orden de transporte (Odoo crea un adjunto nuevo en la tarea) y devuelve ese adjunto."""
+        fail = AppError("No se ha podido generar la orden de transporte. Inténtalo de nuevo.", 502, "pdf_fallo")
+        try:
+            r = self._http.post(f"{self.s.odoo_url}/web/session/authenticate", json={
+                "jsonrpc": "2.0", "method": "call",
+                "params": {"db": self.s.odoo_db, "login": self.s.odoo_user, "password": self.s.odoo_password}})
+            res = r.json().get("result") or {}
+            if not res.get("uid"):
+                raise fail
+            r = self._http.get(f"{self.s.odoo_url}/report/pdf/{REPORT_NAME}/{int(task_id)}",
+                               params={"context": json.dumps({"allowed_company_ids": [int(company_id)]})}, timeout=90)
+        except httpx.HTTPError:
+            raise fail
+        if r.status_code != 200 or not r.content.startswith(b"%PDF"):
+            raise fail
+        task = self.read_task(task_id)
+        att_ref = task and task.get("tms_transport_order_attachment_id")
+        att = att_ref and self.read_attachment(att_ref[0])
+        if not att:
+            raise fail
+        return att
+
+    def get_pdf(self, attachment_id: int, token: str) -> bytes | None:
+        """Descarga el PDF con el access_token del adjunto (sin sesión: si el token no vale, Odoo lo rechaza)."""
+        if not token:
+            return None
+        try:
+            r = self._anon.get(f"{self.s.odoo_url}/web/content/{int(attachment_id)}",
+                               params={"access_token": token, "download": "true"})
+        except httpx.HTTPError:
+            raise AppError("No hay conexión. Inténtalo de nuevo.", 503, "sin_conexion")
+        return r.content if r.status_code == 200 and r.content.startswith(b"%PDF") else None
 
     def goods_name(self, goods_id: int) -> str | None:
         rows = self._call(GOODS_MODEL, "read", [[goods_id]], {"fields": ["name"]})

@@ -312,9 +312,31 @@ async function save() {
     if (e.code === "datos_cambiados") {
       await load(state.lastReq);
       showError(e.message);
+    } else if (e.code === "pdf_fallo") {
+      renderPdfFailed(e.message);   // los datos ya están guardados: solo falta el PDF
     } else showError(e.message);
   } finally { busy(null); }
 }
+
+function renderPdfFailed(msg) {
+  $("review-title").textContent = "Cambios guardados";
+  $("review-body").replaceChildren(h("div", { class: "banner warn" }, msg));
+  $("review-actions").hidden = true;
+  $("done-actions").hidden = false;
+  for (const id of ["btn-open", "btn-download", "btn-share"]) $(id).hidden = true;
+  $("btn-retry").hidden = false;
+  window.scrollTo({ top: 0 });
+}
+$("btn-retry").addEventListener("click", async () => {
+  clearError();
+  busy("Generando la orden…");
+  try {
+    const r = await post("/api/reprint", { task_id: state.data.tarea.id, sesion: state.data.sesion });
+    state.pdfUrl = r.pdf_url; state.pdfBlob = null;
+    $("btn-retry").hidden = true;
+    renderDone({ ...r, bultos_modificados: pending.length, avisos: [] });
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
 
 function renderDone(r) {
   $("review-title").textContent = "Orden generada";
@@ -322,11 +344,13 @@ function renderDone(r) {
   body.replaceChildren(...[
     h("div", { class: "done-mark" }, "✓"),
     h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte (${r.bultos_modificados} ${r.bultos_modificados === 1 ? "lugar modificado" : "lugares modificados"}).`),
-    r.simulado ? h("div", { class: "banner info" }, "MODO SIMULADO: no se ha escrito nada en Odoo. El PDF es una muestra.") : null,
+    r.modo_aviso ? h("div", { class: "banner info" }, r.modo_aviso) : null,
     ...r.avisos.map((a) => h("div", { class: "banner warn" }, a)),
   ].filter(Boolean));
   $("review-actions").hidden = true;
   $("done-actions").hidden = false;
+  $("btn-open").hidden = false; $("btn-download").hidden = false;
+  $("btn-retry").hidden = true;
   $("btn-share").hidden = !(navigator.canShare && navigator.share);
   window.scrollTo({ top: 0 });
 }

@@ -1,4 +1,4 @@
-﻿"""Odoo simulado con los mismos métodos que OdooClient. Datos basados en el pedido de prueba S2621473."""
+"""Odoo simulado con los mismos métodos que OdooClient. Datos basados en el pedido de prueba S2621473."""
 import copy
 import uuid
 from datetime import datetime
@@ -20,6 +20,7 @@ GOODS = [
 class MockOdoo:
     def __init__(self):
         self.pdfs = {}
+        self.writes, self.notes, self.prints = [], [], []  # registro de lo que se "escribe", para los tests
         self.tasks = {
             204067: {
                 "id": 204067, "name": "S2621473", "company_id": [7, "TRANSARGI S.L.U"], "stage_id": [3, "En curso"],
@@ -81,34 +82,43 @@ class MockOdoo:
     def goods_name(self, goods_id):
         return next((g["name"] for g in GOODS if g["id"] == goods_id), None)
 
-    def update_packages(self, task_id, changes):
-        """changes: {package_id: {campo: valor}}. Aplica en memoria y genera un PDF de muestra nuevo."""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for pid, vals in changes.items():
-            pkg = self.packages[pid]
-            for k, v in vals.items():
-                pkg[k] = [v, self.goods_name(v)] if k == "goods_id" else v
-            pkg["write_date"] = now
+    def write_package(self, package_id, values):
+        pkg = self.packages[package_id]
+        for k, v in values.items():
+            pkg[k] = [v, self.goods_name(v)] if k == "goods_id" else v
+        pkg["write_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.writes.append((package_id, dict(values)))
+
+    def post_note(self, task_id, html_body):
+        self.notes.append((task_id, html_body))
+
+    def _sample_pdf(self, task_id, stamp):
         task = self.tasks[task_id]
-        att_id = max(self.attachments) + 1
-        token = str(uuid.uuid4())
-        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        name = f"Orden de transporte - SIMULACION - {stamp}.pdf"
-        self.attachments[att_id] = {"id": att_id, "res_model": "project.task", "res_id": task_id, "access_token": token, "name": name}
-        task["tms_transport_order_attachment_id"] = [att_id, name]
-        lines = ["*** DOCUMENTO DE MUESTRA - SIMULACION, NO ES UNA ORDEN REAL ***", f"Generado: {now}", ""]
+        lines = ["*** DOCUMENTO DE MUESTRA - SIMULACION, NO ES UNA ORDEN REAL ***", f"Generado: {stamp}", ""]
         for p in (self.packages[i] for i in task["tms_package_ids"]):
             lines += [
                 f"{p['name']}: {p['shipping_origin_id'][1]} -> {p['shipping_destination_id'][1]}",
                 f"   Mercancia: {p['goods_id'][1]}   Elementos: {p['number_of_packages']}   Euro: {p['euro_pallet_qty']}   Peso: {p['shipping_weight']:,.0f} kg",
                 "",
             ]
-        self.pdfs[att_id] = make_sample_pdf(f"Orden de transporte {task['name']}", lines)
-        return att_id, token
+        return make_sample_pdf(f"Orden de transporte {task['name']}", lines)
+
+    def print_order(self, task_id, company_id):
+        """Como Odoo: cada impresión crea un adjunto nuevo y lo deja como el actual de la tarea."""
+        att_id = max(self.attachments) + 1
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        name = f"Orden de transporte - SIMULACION - {stamp}.pdf"
+        att = {"id": att_id, "res_model": "project.task", "res_id": task_id, "access_token": str(uuid.uuid4()), "name": name}
+        self.attachments[att_id] = att
+        self.tasks[task_id]["tms_transport_order_attachment_id"] = [att_id, name]
+        self.pdfs[att_id] = self._sample_pdf(task_id, stamp)
+        self.prints.append(task_id)
+        return copy.deepcopy(att)
 
     def get_pdf(self, attachment_id, token):
         att = self.attachments.get(attachment_id)
         if not att or att["access_token"] != token:
             return None
-        return self.pdfs.get(attachment_id)
-
+        if attachment_id not in self.pdfs:  # adjuntos de ejemplo: se genera una muestra con los datos actuales
+            self.pdfs[attachment_id] = self._sample_pdf(att["res_id"], "(adjunto existente)")
+        return self.pdfs[attachment_id]

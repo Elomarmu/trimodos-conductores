@@ -1,8 +1,12 @@
 """Lógica de negocio: resolver el QR o el número de pedido hasta la tarea y sus bultos."""
 import hmac
+import html
+import logging
 import math
 import re
+from datetime import datetime
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from .config import Settings
 from .errors import AppError
@@ -10,6 +14,7 @@ from .qr import normalize_order_name, parse_qr
 from .tokens import sign_session, verify_session
 
 TASK_MODEL = "project.task"
+log = logging.getLogger("conductores")
 
 
 COMPANIES = {"stinsa": 1, "transargi": 7}
@@ -89,7 +94,7 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
 
     packages = odoo.read_packages(task.get("tms_package_ids") or [])
     editable, reason = is_editable(task, packages)
-    session = sign_session(settings.secret_key, task["id"], {p["id"]: p["write_date"] for p in packages})
+    session = sign_session(settings.secret_key, task["id"], {p["id"]: p["write_date"] for p in packages}, verified=verified)
     return {
         "tarea": {"id": task["id"], "nombre": task["name"], "pedido": order_label or None, "compania": _m2o(task.get("company_id")), "etapa": _m2o(task.get("stage_id"))},
         "bultos": [_package_view(p) for p in packages],
@@ -169,12 +174,96 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
         if vals.get("shipping_weight", 0) > MAX_WEIGHT_WARNING:
             warnings.append(f"{packages[pid]['name']}: el peso supera 44.000 kg.")
 
-    if settings.mode == "real":
-        raise AppError("El guardado real todavía no está activado.", 501, "no_implementado")  # fase 3
+    lines = _describe(odoo, packages, changes)
+    base = {"ok": True, "bultos_modificados": len(changes), "avisos": warnings}
 
-    attachment_id, token = odoo.update_packages(task_id, changes)
-    return {
-        "ok": True, "simulado": True, "bultos_modificados": len(changes), "avisos": warnings,
-        "adjunto_id": attachment_id, "pdf_url": f"/api/pdf/{attachment_id}?token={token}",
-    }
+    if settings.dry_run:
+        # DRY_RUN: no se escribe, ni se publica, ni se imprime nada en Odoo. Se devuelve la orden actual.
+        log.info("DRY_RUN tarea=%s bultos=%s: no se escribe en Odoo", task_id, sorted(changes))
+        current = _current_attachment(odoo, task)
+        return {**base, "simulado": True, "modo_aviso": "MODO PRUEBA (DRY_RUN): no se ha guardado nada en Odoo. Este PDF es la orden actual, sin los cambios.", **_pdf_ref(current)}
+
+    done = []
+    try:
+        for pid, vals in changes.items():
+            odoo.write_package(pid, vals)
+            done.append(pid)
+    except Exception:
+        log.exception("Guardado incompleto tarea=%s escritos=%s", task_id, done)
+        raise AppError("No se han podido guardar todos los cambios. Vuelve a escanear la orden y revísala.", 502, "guardado_fallo")
+
+    try:
+        odoo.post_note(task_id, _note_html(lines, ses["verified"]))
+    except Exception:
+        log.exception("No se pudo publicar la nota en la tarea %s", task_id)  # los datos ya están guardados: se sigue
+
+    return {**base, "simulado": settings.mode != "real", **_print(odoo, task), "modo_aviso": None if settings.mode == "real" else "MODO SIMULADO: no se ha escrito nada en Odoo. El PDF es una muestra."}
+
+
+def reprint(odoo, settings: Settings, sesion: str, task_id: int) -> dict:
+    """Reintento si los cambios se guardaron pero falló el PDF."""
+    ses = verify_session(settings.secret_key, sesion)
+    if ses["task_id"] != task_id:
+        raise AppError("La sesión no corresponde a esta orden. Vuelve a escanearla.", 401, "sesion_invalida")
+    task = odoo.read_task(task_id)
+    if not task or not task.get("is_transport_order"):
+        raise AppError("No encontramos esta orden. Avisa a la oficina.", 404, "no_encontrada")
+    if settings.dry_run:
+        return {"ok": True, "simulado": True, "modo_aviso": "MODO PRUEBA (DRY_RUN): no se ha impreso nada.", **_pdf_ref(_current_attachment(odoo, task))}
+    return {"ok": True, "simulado": settings.mode != "real", "modo_aviso": None, **_print(odoo, task)}
+
+
+def _print(odoo, task: dict) -> dict:
+    try:
+        att = odoo.print_order(task["id"], task["company_id"][0])
+    except AppError:
+        raise AppError("Los cambios se han guardado, pero no se ha podido generar la nueva orden. Pulsa «Reintentar PDF».", 502, "pdf_fallo")
+    except Exception:
+        log.exception("Fallo al imprimir la tarea %s", task["id"])
+        raise AppError("Los cambios se han guardado, pero no se ha podido generar la nueva orden. Pulsa «Reintentar PDF».", 502, "pdf_fallo")
+    return _pdf_ref(att)
+
+
+def _current_attachment(odoo, task: dict) -> dict:
+    ref = task.get("tms_transport_order_attachment_id")
+    att = ref and odoo.read_attachment(ref[0])
+    if not att:
+        raise AppError("Esta orden todavía no tiene un PDF generado.", 404, "sin_pdf")
+    return att
+
+
+def _pdf_ref(att: dict) -> dict:
+    return {"adjunto_id": att["id"], "pdf_url": f"/api/pdf/{att['id']}?token={att['access_token']}"}
+
+
+def fmt_num(n) -> str:
+    n = float(n)
+    text = f"{int(n):,}" if n == int(n) else f"{n:,.2f}".rstrip("0").rstrip(".")
+    return text.replace(",", "\0").replace(".", ",").replace("\0", ".")
+
+
+def _describe(odoo, packages: dict, changes: dict) -> list[tuple[str, list[str]]]:
+    """[(bulto, ['Mercancía: A → B', ...])] con los valores de antes y de ahora."""
+    out = []
+    for pid, vals in changes.items():
+        p = packages[pid]
+        rows = []
+        for field, after in vals.items():
+            if field == "goods_id":
+                before_s, after_s = (p.get("goods_id") or [0, "—"])[1], odoo.goods_name(after)
+            else:
+                before_s, after_s = fmt_num(p.get(field) or 0), fmt_num(after)
+                if field == "shipping_weight":
+                    before_s, after_s = before_s + " kg", after_s + " kg"
+            rows.append(f"{FIELD_LABELS[field]}: {before_s} → {after_s}")
+        out.append((p["name"], rows))
+    return out
+
+
+def _note_html(lines: list[tuple[str, list[str]]], verified: bool) -> str:
+    when = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%d/%m/%Y %H:%M")
+    items = "".join(f"<li><b>{html.escape(name)}</b>: {html.escape('; '.join(rows))}</li>" for name, rows in lines)
+    who = "orden abierta con el QR verificado" if verified else "orden abierta por número de pedido (sin QR)"
+    return (f"<p><b>Modificado desde la app de conductores</b> — {when}</p><ul>{items}</ul>"
+            f"<p>Conductor: sin identificar ({who}).</p>")
 

@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from app import service
 from app.config import get_settings
@@ -14,6 +14,7 @@ HOSTS = {"www.stinsa.com"}
 def _env(monkeypatch):
     monkeypatch.setenv("ODOO_MODE", "mock")
     monkeypatch.setenv("ODOO_URL", "https://www.stinsa.com")
+    monkeypatch.setenv("DRY_RUN", "false")
 
 
 def qr(att_id, token):
@@ -105,7 +106,7 @@ def test_resolve_pedido_inexistente_y_vacio():
 # --- sesión firmada
 def test_sesion_ok_manipulada_y_caducada():
     t = sign_session("k", 5, {1: "2026-01-01 10:00:00"}, now=1000)
-    assert verify_session("k", t, now=1001) == {"task_id": 5, "write_dates": {1: "2026-01-01 10:00:00"}}
+    assert verify_session("k", t, now=1001) == {"task_id": 5, "write_dates": {1: "2026-01-01 10:00:00"}, "verified": False}
     with pytest.raises(AppError):
         verify_session("otra", t, now=1001)
     with pytest.raises(AppError):
@@ -236,3 +237,154 @@ def test_api_update_y_pdf():
     assert c.get("/api/pdf/1?token=x").status_code == 404
     bad = c.post("/api/update", json={"task_id": "x"})
     assert bad.status_code == 400 and "error" in bad.json()
+import json
+
+import httpx
+from app.odoo_client import OdooClient
+
+
+# --- fase 3: nota, DRY_RUN, reintento
+def test_update_publica_nota_con_antes_y_ahora_y_imprime_una_vez():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=20, shipping_weight=9000, goods_id=3)])
+    assert odoo.writes == [(287102, {"goods_id": 3, "number_of_packages": 20, "shipping_weight": 9000.0})]
+    assert odoo.prints == [204067] and len(odoo.notes) == 1
+    note = odoo.notes[0][1]
+    assert "Modificado desde la app de conductores" in note and "PK2627486" in note
+    assert "Elementos: 12 → 20" in note and "Peso: 8.450 kg → 9.000 kg" in note and "Mercancía: Cartón y papel → Bebidas" in note
+    assert "sin QR" in note  # abierta por número de pedido
+    assert out["adjunto_id"] == odoo.tasks[204067]["tms_transport_order_attachment_id"][0]
+
+
+def test_nota_escapa_html():
+    odoo = MockOdoo()
+    assert "<script>" not in service._note_html([("<script>", ["x"])], True)
+
+
+def test_dry_run_no_escribe_ni_imprime_ni_publica(monkeypatch):
+    monkeypatch.setenv("DRY_RUN", "true")
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=99)])
+    assert odoo.writes == [] and odoo.notes == [] and odoo.prints == []
+    assert odoo.packages[287102]["number_of_packages"] == 12
+    assert out["simulado"] is True and "DRY_RUN" in out["modo_aviso"] and out["adjunto_id"] == 900002
+
+
+def test_fallo_al_imprimir_deja_datos_guardados_y_permite_reintentar():
+    class Falla(MockOdoo):
+        def print_order(self, *a):
+            raise RuntimeError("odoo caído")
+    odoo = Falla()
+    r = _sesion(odoo)
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=7)])
+    assert e.value.code == "pdf_fallo" and "guardado" in e.value.message
+    assert odoo.packages[287102]["number_of_packages"] == 7 and len(odoo.notes) == 1
+    odoo2 = MockOdoo()
+    out = service.reprint(odoo2, get_settings(), r["sesion"], 204067)
+    assert odoo2.prints == [204067] and out["pdf_url"]
+
+
+def test_fallo_al_guardar_no_imprime():
+    class Falla(MockOdoo):
+        def write_package(self, *a):
+            raise RuntimeError("sin permisos")
+    odoo = Falla()
+    r = _sesion(odoo)
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=7)])
+    assert e.value.code == "guardado_fallo" and odoo.prints == [] and odoo.notes == []
+
+
+def test_fallo_al_publicar_nota_no_impide_el_pdf():
+    class Falla(MockOdoo):
+        def post_note(self, *a):
+            raise RuntimeError("x")
+    odoo = Falla()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=7)])
+    assert out["ok"] and odoo.prints == [204067]
+
+
+def test_fmt_num():
+    assert service.fmt_num(8450) == "8.450" and service.fmt_num(1234567.5) == "1.234.567,5" and service.fmt_num(0) == "0"
+
+
+# --- cliente real contra un Odoo falso (sin red)
+class FakeOdooServer:
+    def __init__(self):
+        self.calls = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/jsonrpc":
+            p = json.loads(request.content)["params"]
+            if p["service"] == "common":
+                return httpx.Response(200, json={"result": 7})
+            model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
+            self.calls.append((model, method, args, kw))
+            result = True
+            if (model, method) == ("project.task", "read"):
+                result = [{"id": 204067, "tms_transport_order_attachment_id": [555, "x.pdf"]}]
+            if (model, method) == ("ir.attachment", "read"):
+                result = [{"id": 555, "res_model": "project.task", "res_id": 204067, "access_token": "tok", "name": "x.pdf"}]
+            return httpx.Response(200, json={"result": result})
+        if path == "/web/session/authenticate":
+            self.calls.append(("web", "authenticate"))
+            return httpx.Response(200, json={"result": {"uid": 7}})
+        if path.startswith("/report/pdf/"):
+            self.calls.append(("report", path, request.url.params["context"]))
+            return httpx.Response(200, content=b"%PDF-1.4 fake")
+        if path == "/web/content/555":
+            ok = request.url.params.get("access_token") == "tok"
+            self.calls.append(("content", ok))
+            return httpx.Response(200 if ok else 403, content=b"%PDF-1.4 fake" if ok else b"no")
+        return httpx.Response(404)
+
+
+def _real_client(monkeypatch):
+    monkeypatch.setenv("ODOO_URL", "https://odoo.test")
+    monkeypatch.setenv("ODOO_PASSWORD", "x")
+    c = OdooClient(get_settings())
+    srv = FakeOdooServer()
+    c._http = httpx.Client(transport=httpx.MockTransport(srv.handler))
+    c._anon = httpx.Client(transport=httpx.MockTransport(srv.handler))
+    return c, srv
+
+
+def test_cliente_real_escribe_solo_campos_permitidos(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    for bad in [{"state": "done"}, {"name": "x"}, {}, {"number_of_packages": 1, "state": "done"}]:
+        with pytest.raises(PermissionError):
+            c.write_package(1, bad)
+    assert srv.calls == []
+    c.write_package(287102, {"number_of_packages": 5})
+    assert srv.calls[-1][:3] == ("tms.package", "write", [[287102], {"number_of_packages": 5}])
+
+
+def test_cliente_real_nota_interna_en_la_tarea(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    c.post_note(204067, "<p>hola</p>")
+    model, method, args, kw = srv.calls[-1]
+    assert (model, method, args) == ("project.task", "message_post", [[204067]])
+    assert kw["subtype_xmlid"] == "mail.mt_note" and kw["body"] == "<p>hola</p>"
+    assert kw["context"]["allowed_company_ids"] == [1, 7]
+
+
+def test_cliente_real_imprime_con_contexto_de_compania(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    att = c.print_order(204067, 7)
+    assert att["id"] == 555
+    rep = next(x for x in srv.calls if x[0] == "report")
+    assert rep[1] == "/report/pdf/tms_reporting.tms_transportation_order/204067"
+    assert json.loads(rep[2]) == {"allowed_company_ids": [7]}
+    assert ("web", "authenticate") in srv.calls
+
+
+def test_cliente_real_pdf_exige_token(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    assert c.get_pdf(555, "tok").startswith(b"%PDF")
+    assert c.get_pdf(555, "malo") is None
+    assert c.get_pdf(555, "") is None
