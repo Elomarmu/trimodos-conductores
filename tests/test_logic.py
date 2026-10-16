@@ -549,3 +549,13 @@ def test_el_cliente_real_puede_vaciar_la_mercancia(monkeypatch):
     c, srv = _real_client(monkeypatch)
     c.write_package(287102, {"goods_id": False})
     assert srv.calls[-1][:3] == ("tms.package", "write", [[287102], {"goods_id": False}])
+
+
+def test_la_pagina_tiene_titulo_y_vista_previa_para_compartir():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "public"
+    html = (root / "index.html").read_text(encoding="utf-8")
+    assert "<title>Modificación DECA - Trimodos</title>" in html
+    assert 'property="og:title" content="Modificación DECA - Trimodos"' in html
+    assert 'property="og:image" content="https://' in html          # absoluta: WhatsApp/Teams no resuelven rutas relativas
+    assert (root / "img" / "compartir.png").exists()
