@@ -37,9 +37,19 @@ class MockOdoo:
                 "is_transport_order": True, "tms_package_ids": [287102], "tms_transport_order_attachment_id": [900004, "Orden de transporte - S2600001 - 20260101090000.pdf"],
                 "is_closed": True, "invoice_count": 1,
             },
+            300003: {   # como el pedido real S2621553: marca is_transport_order a False pero con su orden generada
+                "id": 300003, "name": "T.I.- COMPLETO INTERNACIONAL", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [7, "En desarrollo"],
+                "is_transport_order": False, "tms_package_ids": [287102], "tms_transport_order_attachment_id": [900005, "Orden de transporte - S2621553 - 20261016151726.pdf"],
+                "is_closed": False, "invoice_count": 0,
+            },
+            300004: {   # tarea normal del pedido: ni marcada ni con orden de transporte
+                "id": 300004, "name": "TAREA INTERNA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [1, "Nuevo"],
+                "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": False,
+                "is_closed": False, "invoice_count": 0,
+            },
         }
         # (pedido, id de compañía) -> tareas: el mismo número puede existir en STINSA y en TRANSARGI
-        self.orders = {("S2621473", 7): [204067], ("S2621473", 1): [300001], ("S2600001", 7): [300002]}
+        self.orders = {("S2621473", 7): [204067], ("S2621473", 1): [300001], ("S2600001", 7): [300002], ("S2621553", 7): [300003, 300004]}
         self.packages = {
             287102: {
                 "id": 287102, "name": "PK2627486", "carrier_tracking_ref": "REF-0042", "goods_id": [2, "Cartón y papel"],
@@ -60,11 +70,15 @@ class MockOdoo:
             900002: {"id": 900002, "res_model": "project.task", "res_id": 204067, "access_token": TOKEN_ACTUAL, "name": "Orden de transporte - S2621473 - 20260105101500.pdf"},
             900003: {"id": 900003, "res_model": "project.task", "res_id": 300001, "access_token": "33333333-aaaa-bbbb-cccc-000000000003", "name": "Orden de transporte - S2621473 - 20260106090000.pdf"},
             900004: {"id": 900004, "res_model": "project.task", "res_id": 300002, "access_token": "44444444-aaaa-bbbb-cccc-000000000004", "name": "Orden de transporte - S2600001 - 20260101090000.pdf"},
+            900005: {"id": 900005, "res_model": "project.task", "res_id": 300003, "access_token": "55555555-aaaa-bbbb-cccc-000000000005", "name": "Orden de transporte - S2621553 - 20261016151726.pdf"},
             900001: {"id": 900001, "res_model": "project.task", "res_id": 204067, "access_token": TOKEN_ANTIGUO, "name": "Orden antigua"},
         }
 
     def find_transport_tasks(self, order_name, company_id):
-        return [copy.deepcopy(self.tasks[i]) for i in sorted(self.orders.get((order_name, company_id), []), reverse=True)]
+        ids = sorted(self.orders.get((order_name, company_id), []), reverse=True)
+        keep = [i for i in ids if self.tasks[i]["is_transport_order"] or self.tasks[i]["tms_transport_order_attachment_id"]]  # mismo filtro que Odoo
+        keep.sort(key=lambda i: not self.tasks[i]["is_transport_order"])  # marcadas primero (orden estable: la más reciente antes)
+        return [copy.deepcopy(self.tasks[i]) for i in keep]
 
     def read_task(self, task_id):
         return copy.deepcopy(self.tasks.get(task_id))
@@ -98,7 +112,7 @@ class MockOdoo:
         for p in (self.packages[i] for i in task["tms_package_ids"]):
             lines += [
                 f"{p['name']}: {p['shipping_origin_id'][1]} -> {p['shipping_destination_id'][1]}",
-                f"   Mercancia: {p['goods_id'][1]}   Elementos: {p['number_of_packages']}   Euro: {p['euro_pallet_qty']}   Peso: {p['shipping_weight']:,.0f} kg",
+                f"   Mercancia: {(p['goods_id'] or [0, '-'])[1]}   Elementos: {p['number_of_packages']}   Euro: {p['euro_pallet_qty']}   Peso: {p['shipping_weight']:,.0f} kg",
                 "",
             ]
         return make_sample_pdf(f"Orden de transporte {task['name']}", lines)

@@ -462,3 +462,53 @@ def test_modo_real_con_codigo_valido_pasa_la_barrera(monkeypatch):
     with pytest.raises(AppError):
         monkeypatch.setattr("app.main.FAIL_DELAY", 0)
         require_access("codigo-largo-mal")
+
+
+# --- tareas con is_transport_order = False pero con su orden de transporte (caso real S2621553)
+def test_pedido_con_tarea_sin_marca_pero_con_orden_generada_se_encuentra():
+    r = service.resolve(MockOdoo(), get_settings(), order_name="S2621553", company="transargi")
+    assert r["tarea"]["id"] == 300003 and r["tarea"]["pedido"] == "S2621553" and len(r["bultos"]) == 1
+
+
+def test_qr_de_tarea_sin_marca_funciona():
+    qr_ = qr(900005, "55555555-aaaa-bbbb-cccc-000000000005")
+    r = service.resolve(MockOdoo(), get_settings(), qr_text=qr_)
+    assert r["tarea"]["id"] == 300003 and r["verificado_por_qr"] is True and r["version_antigua"] is False
+
+
+def test_tarea_sin_marca_ni_orden_generada_sigue_rechazada():
+    odoo = MockOdoo()
+    odoo.orders[("S2600009", 7)] = [300004]
+    with pytest.raises(AppError):
+        service.resolve(odoo, get_settings(), order_name="S2600009", company="transargi")
+    assert service.is_transport_task({"is_transport_order": False, "tms_transport_order_attachment_id": False}) is False
+    assert service.is_transport_task({"is_transport_order": True}) is True
+
+
+def test_se_puede_guardar_en_tarea_sin_marca():
+    odoo = MockOdoo()
+    r = service.resolve(odoo, get_settings(), order_name="S2621553", company="transargi")
+    out = service.update(odoo, get_settings(), r["sesion"], 300003, [_cambio(number_of_packages=5)])
+    assert out["ok"] and odoo.prints == [300003]
+
+
+def test_bulto_vacio_sin_tocar_no_bloquea_el_guardado_de_otro_bulto():
+    odoo = MockOdoo()
+    odoo.packages[287103].update({"goods_id": False, "number_of_packages": 0, "euro_pallet_qty": 0, "shipping_weight": 0.0})  # bulto vacío, como PK2627590
+    r = service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [
+        _cambio(number_of_packages=30),
+        {"package_id": 287103, "goods_id": None, "number_of_packages": 0, "euro_pallet_qty": 0, "shipping_weight": 0.0},
+    ])
+    assert out["bultos_modificados"] == 1 and odoo.writes == [(287102, {"number_of_packages": 30})]
+
+
+def test_si_se_cambia_el_peso_de_un_bulto_vacio_se_valida_ese_campo():
+    odoo = MockOdoo()
+    odoo.packages[287103].update({"goods_id": False, "number_of_packages": 0, "euro_pallet_qty": 0, "shipping_weight": 0.0})
+    r = service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [{"package_id": 287103, "number_of_packages": 3, "shipping_weight": -5.0}])
+    assert e.value.code == "dato_invalido"
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [{"package_id": 287103, "goods_id": 3, "number_of_packages": 3, "euro_pallet_qty": 2, "shipping_weight": 1500.0}])
+    assert out["bultos_modificados"] == 1

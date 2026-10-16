@@ -18,6 +18,12 @@ log = logging.getLogger("conductores")
 
 
 COMPANIES = {"stinsa": 1, "transargi": 7}
+
+
+def is_transport_task(task: dict) -> bool:
+    """Orden de transporte = tarea marcada como tal O con una orden de transporte ya generada.
+    (Hay tareas reales, p. ej. la del pedido S2621553, con la marca a False pero con su PDF de orden de transporte.)"""
+    return bool(task.get("is_transport_order") or task.get("tms_transport_order_attachment_id"))
 LOCKED_PACKAGE_STATES = ("done", "cancel")
 
 
@@ -72,7 +78,7 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
                 or not hmac.compare_digest(str(att["access_token"]), qr.access_token):
             raise not_found
         task = odoo.read_task(att["res_id"])
-        if not task or not task.get("is_transport_order"):
+        if not task or not is_transport_task(task):
             raise not_found
         current = task.get("tms_transport_order_attachment_id")
         outdated = not current or current[0] != att["id"]
@@ -144,7 +150,7 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
         raise AppError("No has cambiado ningún dato.", 400, "sin_cambios")
 
     task = odoo.read_task(task_id)
-    if not task or not task.get("is_transport_order"):
+    if not task or not is_transport_task(task):
         raise AppError("No encontramos esta orden. Avisa a la oficina.", 404, "no_encontrada")
     packages = {p["id"]: p for p in odoo.read_packages(task.get("tms_package_ids") or [])}
 
@@ -159,11 +165,12 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
             raise AppError("Ese bulto no pertenece a esta orden.", 400, "bulto_ajeno")
         if packages[pid]["write_date"] != ses["write_dates"][pid]:
             raise AppError("Esta orden ha cambiado mientras la editabas. Vuelve a cargarla.", 409, "datos_cambiados")
-        clean = _clean_change(odoo, c)
         cur = packages[pid]
         current = {"goods_id": (cur.get("goods_id") or [None])[0], "number_of_packages": cur.get("number_of_packages"),
                    "euro_pallet_qty": cur.get("euro_pallet_qty"), "shipping_weight": cur.get("shipping_weight")}
-        diff = {k: v for k, v in clean.items() if v != current[k]}
+        # Solo se validan los campos que CAMBIAN: un bulto vacío o con peso 0 que no se toca no bloquea el guardado.
+        changed = {k: c[k] for k in current if c.get(k) is not None and c[k] != current[k]}
+        diff = _clean_change(odoo, changed) if changed else {}
         if diff:
             changes.setdefault(pid, {}).update(diff)
     if not changes:
@@ -206,7 +213,7 @@ def reprint(odoo, settings: Settings, sesion: str, task_id: int) -> dict:
     if ses["task_id"] != task_id:
         raise AppError("La sesión no corresponde a esta orden. Vuelve a escanearla.", 401, "sesion_invalida")
     task = odoo.read_task(task_id)
-    if not task or not task.get("is_transport_order"):
+    if not task or not is_transport_task(task):
         raise AppError("No encontramos esta orden. Avisa a la oficina.", 404, "no_encontrada")
     if settings.dry_run:
         return {"ok": True, "simulado": True, "modo_aviso": "MODO PRUEBA (DRY_RUN): no se ha impreso nada.", **_pdf_ref(_current_attachment(odoo, task))}

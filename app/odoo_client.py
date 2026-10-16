@@ -99,8 +99,9 @@ class OdooClient:
         if not orders or not orders[0]["tasks_ids"]:
             return []
         return self._call(
-            TASK_MODEL, "search_read", [[["id", "in", orders[0]["tasks_ids"]], ["is_transport_order", "=", True]]],
-            {"fields": TASK_FIELDS, "order": "id desc"},
+            TASK_MODEL, "search_read",
+            [[["id", "in", orders[0]["tasks_ids"]], "|", ["is_transport_order", "=", True], ["tms_transport_order_attachment_id", "!=", False]]],
+            {"fields": TASK_FIELDS, "order": "is_transport_order desc, id desc"},  # primero las marcadas, luego la más reciente
         )
 
     def read_task(self, task_id: int) -> dict | None:

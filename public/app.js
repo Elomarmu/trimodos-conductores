@@ -318,25 +318,28 @@ function collectChanges() {
   for (const p of state.data.bultos) {
     const c = current(p);
     const name = `Lugar ${state.data.bultos.indexOf(p) + 1} · ${p.name}`;
+    const changed = {
+      goods: (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
+      elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
+    };
+    if (!Object.values(changed).some(Boolean) && !Number.isNaN(c.elementos + c.euro_palets + c.peso)) continue; // bulto sin tocar: no se valida
+    // Bulto modificado: tiene que quedar completo y correcto.
     if (!c.goods) throw new Error(`${name}: elige la mercancía de la lista.`);
     for (const k of ["elementos", "euro_palets"]) {
       if (!Number.isInteger(c[k]) || c[k] < 0) throw new Error(`${name}: ${k === "elementos" ? "Elementos" : "Euro palets"} tiene que ser un número entero, 0 o más.`);
     }
     if (!(c.peso > 0)) throw new Error(`${name}: el peso tiene que ser mayor que 0.`);
     const rows = [
-      { label: "Mercancía", before: p.mercancia?.name || "—", after: c.goods.name, changed: c.goods.id !== p.mercancia?.id },
-      { label: "Elementos", before: fmtNum(p.elementos), after: fmtNum(c.elementos), changed: c.elementos !== p.elementos },
-      { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: c.euro_palets !== p.euro_palets },
-      { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: c.peso !== p.peso },
+      { label: "Mercancía", before: p.mercancia?.name || "—", after: c.goods.name, changed: changed.goods },
+      { label: "Elementos", before: fmtNum(p.elementos), after: fmtNum(c.elementos), changed: changed.elementos },
+      { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: changed.euro_palets },
+      { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
     ];
-    if (rows.some((r) => r.changed)) {
-      changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods.id, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: c.peso > MAX_KG_WARNING });
-    }
+    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods.id, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: c.peso > MAX_KG_WARNING });
   }
   if (!changes.length) throw new Error("No has cambiado ningún dato.");
   return changes;
 }
-
 let pending = null;
 $("btn-review").addEventListener("click", () => {
   clearError();
