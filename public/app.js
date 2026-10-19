@@ -428,7 +428,7 @@ $("btn-retry").addEventListener("click", async () => {
     const r = await post("/api/reprint", { task_id: state.data.tarea.id, sesion: state.data.sesion });
     state.pdfUrl = r.pdf_url; state.pdfBlob = null;
     $("btn-retry").hidden = true;
-    renderDone({ ...r, bultos_modificados: pending.length, avisos: [] });
+    renderDone({ ...r, bultos_modificados: pending.length });
   } catch (e) { showError(e.message); } finally { busy(null); }
 });
 
@@ -439,7 +439,6 @@ function renderDone(r) {
     h("div", { class: "done-mark" }, "✓"),
     h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte (${r.bultos_modificados} ${r.bultos_modificados === 1 ? "lugar modificado" : "lugares modificados"}).`),
     r.modo_aviso ? h("div", { class: "banner info" }, r.modo_aviso) : null,
-    ...r.avisos.map((a) => h("div", { class: "banner warn" }, a)),
   ].filter(Boolean));
   $("review-actions").hidden = true;
   $("done-actions").hidden = false;

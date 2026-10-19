@@ -147,6 +147,24 @@ def main():
             comprobar(pg3.is_hidden("#mma"), "con umbral 50.000 enviado por el servidor, 28.000 kg no pide confirmación (la pantalla no tiene número propio)")
             ctx3.close()
 
+            print("Última pantalla: sin avisos")
+            ctx4 = navegador.new_context(viewport={"width": 390, "height": 844})
+            pg4 = ctx4.new_page()
+            pg4.add_init_script(f"localStorage.setItem('codigo-acceso', '{CODIGO}')")
+            pg4.add_init_script("Object.defineProperty(navigator, 'mediaDevices', {value: undefined})")
+            pg4.goto(BASE); pg4.wait_for_selector("#modo:not([hidden])")
+            pg4.click("#btn-scan"); pg4.click("[data-company=stinsa]"); pg4.fill("#order", "S2621473"); pg4.click("#btn-order")
+            pg4.wait_for_selector("#s-edit:not([hidden])")
+            pg4.fill("#peso-287103", "30.000"); pg4.click("#btn-review"); pg4.wait_for_selector("#mma:not([hidden])")
+            pg4.click("#btn-mma-si"); pg4.wait_for_selector("#s-review:not([hidden])")
+            pg4.click("#btn-save"); pg4.click("#btn-yes"); pg4.wait_for_selector("#done-actions:not([hidden])")
+            final = pg4.inner_text("#s-review")
+            comprobar("MMA" not in final and "27.000" not in final and pg4.locator("#review-body .banner.warn").count() == 0,
+                      "tras confirmar un peso alto, la última pantalla no muestra ningún aviso de peso")
+            comprobar(all(pg4.is_visible(i) for i in ("#btn-open", "#btn-download")) and pg4.is_visible("#done-actions [data-go=menu]"),
+                      "y ofrece abrir el PDF, descargarlo y volver al menú")
+            ctx4.close()
+
             print("Flujo completo")
             pg.click("#btn-scan")
             pg.wait_for_selector("#s-edit:not([hidden])", timeout=20000)
