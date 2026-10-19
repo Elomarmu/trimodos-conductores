@@ -109,6 +109,8 @@ def main():
             pg.go_back()
             pg.wait_for_selector("#s-menu:not([hidden])", timeout=5000)
             comprobar(True, "Atrás desde el escáner vuelve al menú")
+            logo = pg.evaluate("() => { const i = document.getElementById('brand-logo'); const r = i.getBoundingClientRect(); return [i.naturalWidth / i.naturalHeight, r.width / r.height]; }")
+            comprobar(abs(logo[0] - logo[1]) < 0.02, f"el logo conserva su proporción al volver al menú (logo {logo[0]:.3f}, dibujado {logo[1]:.3f})")
 
             print("Flujo completo")
             pg.click("#btn-scan")

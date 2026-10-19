@@ -89,7 +89,8 @@ input[type=text]:disabled { color: var(--muted); background: #0d0d0d; }
   background: #fff; display: flex; align-items: center; justify-content: center;
   padding: 10px 16px; border-bottom: 8px solid var(--brand);
 }
-.brandbar img { height: 48px; width: auto; max-width: 70%; display: block; }
+/* Tamaño por MÁXIMOS con alto y ancho automáticos: el navegador reduce el logo siempre en proporción (fijar el alto lo deformaba). */
+.brandbar img { height: auto; width: auto; max-height: 48px; max-width: 70%; object-fit: contain; display: block; }
 body[data-screen="menu"] .brandbar { padding: 22px 16px; }
-body[data-screen="menu"] .brandbar img { height: 72px; }
+body[data-screen="menu"] .brandbar img { max-height: 72px; max-width: 80%; }
 .screen { min-height: calc(100vh - 70px); }

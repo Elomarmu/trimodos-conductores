@@ -120,7 +120,6 @@ function go(name) {
     for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", "false");
     setBrand(null, "menu");
     history.replaceState({ s: "menu" }, "");
-setBrand(null, "menu");
     return show("menu");
   }
   history.pushState({ s: name }, "");
@@ -134,6 +133,7 @@ window.addEventListener("popstate", (e) => {
   show(target);
 });
 history.replaceState({ s: "menu" }, "");
+setBrand(null, "menu");   // la franja arranca ya con el tamaño del menú
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-go]");
   if (b) go(b.dataset.go);
