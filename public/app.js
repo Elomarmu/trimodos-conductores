@@ -264,7 +264,8 @@ function renderEdit() {
   if (d.version_antigua) banners.append(h("div", { class: "banner warn" }, "Esta orden tiene una versión más nueva. Estos son los datos actuales."));
   if (!d.editable) banners.append(h("div", { class: "banner bad" }, d.motivo_no_editable || "Esta orden no se puede modificar."));
   else if (!d.verificado_por_qr) banners.append(h("div", { class: "banner info" }, "Orden abierta por número de pedido (sin QR)."));
-  $("btn-review").hidden = !d.editable;
+  if (!d.bultos.length && d.editable) banners.append(h("div", { class: "banner bad" }, "Esta orden no tiene lugares de carga o descarga que modificar. Avisa a la oficina."));
+  $("btn-review").hidden = !d.editable || !d.bultos.length;
 
   const box = $("packages");
   box.replaceChildren();

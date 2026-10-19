@@ -42,9 +42,13 @@ class MockOdoo:
                 "id": 300004, "name": "TAREA INTERNA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [1, "Nuevo"],
                 "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": False,
             },
+            300005: {   # como las órdenes de contenedor reales: orden de transporte generada pero SIN bultos
+                "id": 300005, "name": "ST TRANSPORTE CONTENEDOR", "company_id": [1, "STINSA"], "stage_id": [1, "Nuevo"],
+                "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": [900006, "Orden de transporte - S26099887 - 20261019152033.pdf"],
+            },
         }
         # (pedido, id de compañía) -> tareas: el mismo número puede existir en STINSA y en TRANSARGI
-        self.orders = {("S2621473", 7): [204067], ("S2621473", 1): [300001], ("S2600001", 7): [300002], ("S2621553", 7): [300003, 300004]}
+        self.orders = {("S2621473", 7): [204067], ("S2621473", 1): [300001], ("S2600001", 7): [300002], ("S2621553", 7): [300003, 300004], ("S26099887", 1): [300005]}
         self.packages = {
             287102: {
                 "id": 287102, "name": "PK2627486", "carrier_tracking_ref": "REF-0042", "goods_id": [2, "Cartón y papel"],
@@ -66,6 +70,7 @@ class MockOdoo:
             900003: {"id": 900003, "res_model": "project.task", "res_id": 300001, "access_token": "33333333-aaaa-bbbb-cccc-000000000003", "name": "Orden de transporte - S2621473 - 20260106090000.pdf"},
             900004: {"id": 900004, "res_model": "project.task", "res_id": 300002, "access_token": "44444444-aaaa-bbbb-cccc-000000000004", "name": "Orden de transporte - S2600001 - 20260101090000.pdf"},
             900005: {"id": 900005, "res_model": "project.task", "res_id": 300003, "access_token": "55555555-aaaa-bbbb-cccc-000000000005", "name": "Orden de transporte - S2621553 - 20261016151726.pdf"},
+            900006: {"id": 900006, "res_model": "project.task", "res_id": 300005, "access_token": "66666666-aaaa-bbbb-cccc-000000000006", "name": "Orden de transporte - S26099887 - 20261019152033.pdf"},
             900001: {"id": 900001, "res_model": "project.task", "res_id": 204067, "access_token": TOKEN_ANTIGUO, "name": "Orden antigua"},
         }
 

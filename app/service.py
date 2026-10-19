@@ -26,6 +26,7 @@ def is_transport_task(task: dict) -> bool:
     (Hay tareas reales, p. ej. las del pedido S2621553, con la marca a False: con su PDF o aún sin imprimir.)"""
     return bool(task.get("is_transport_order") or task.get("tms_transport_order_attachment_id") or task.get("tms_package_ids"))
 DEFAULT_EDITABLE_STAGES = ("nuevo", "en desarrollo")
+NO_PACKAGES_MSG = "Esta orden no tiene lugares de carga o descarga (bultos) que se puedan modificar desde la app. Avisa a la oficina."
 
 
 def _norm(text: str) -> str:
@@ -103,6 +104,8 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
 
     packages = odoo.read_packages(task.get("tms_package_ids") or [])
     editable, reason = is_editable(task, settings.editable_stages)
+    if not packages:                       # p. ej. órdenes de contenedor: tienen PDF pero no bultos tms.package
+        editable, reason = False, NO_PACKAGES_MSG
     session = sign_session(settings.secret_key, task["id"], {p["id"]: p["write_date"] for p in packages}, verified=verified)
     return {
         "tarea": {"id": task["id"], "nombre": task["name"], "pedido": order_label or None, "compania": _m2o(task.get("company_id")), "etapa": _m2o(task.get("stage_id"))},
@@ -159,6 +162,8 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
     if not task or not is_transport_task(task):
         raise AppError("No encontramos esta orden. Avisa a la oficina.", 404, "no_encontrada")
     packages = {p["id"]: p for p in odoo.read_packages(task.get("tms_package_ids") or [])}
+    if not packages:
+        raise AppError(NO_PACKAGES_MSG, 409, "sin_bultos")
 
     editable, reason = is_editable(task, settings.editable_stages)
     if not editable:

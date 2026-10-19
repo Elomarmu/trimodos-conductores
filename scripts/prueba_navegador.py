@@ -112,6 +112,18 @@ def main():
             logo = pg.evaluate("() => { const i = document.getElementById('brand-logo'); const r = i.getBoundingClientRect(); return [i.naturalWidth / i.naturalHeight, r.width / r.height]; }")
             comprobar(abs(logo[0] - logo[1]) < 0.02, f"el logo conserva su proporción al volver al menú (logo {logo[0]:.3f}, dibujado {logo[1]:.3f})")
 
+            print("Orden sin bultos (como las de contenedor)")
+            ctx2 = navegador.new_context(viewport={"width": 390, "height": 844})            # sin cámara: no se lee ningún QR solo
+            pg2 = ctx2.new_page()
+            pg2.add_init_script(f"localStorage.setItem('codigo-acceso', '{CODIGO}')")
+            pg2.add_init_script("Object.defineProperty(navigator, 'mediaDevices', {value: undefined})")      # sin cámara en esta pestaña
+            pg2.goto(BASE); pg2.wait_for_selector("#modo:not([hidden])")
+            pg2.click("#btn-scan"); pg2.click("[data-company=stinsa]"); pg2.fill("#order", "S26099887"); pg2.click("#btn-order")
+            pg2.wait_for_selector("#s-edit:not([hidden])")
+            comprobar("no tiene lugares de carga o descarga" in pg2.inner_text("#edit-banners"), "la pantalla explica por qué no hay nada que editar: «" + pg2.inner_text("#edit-banners")[:70] + "…»")
+            comprobar(pg2.is_hidden("#btn-review"), "no se ofrece «Revisar cambios» cuando no hay nada que cambiar")
+            ctx2.close()
+
             print("Flujo completo")
             pg.click("#btn-scan")
             pg.wait_for_selector("#s-edit:not([hidden])", timeout=20000)
