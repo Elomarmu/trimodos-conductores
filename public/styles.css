@@ -33,7 +33,8 @@ h2 { font-size: 1.2rem; margin: 0 0 8px; }
 .btn.huge { min-height: 110px; font-size: 1.5rem; }
 .btn:disabled { opacity: .45; }
 #s-menu { justify-content: center; }
-#s-menu .btn { min-height: 38vh; font-size: 1.9rem; }
+#s-menu #btn-scan { min-height: 38vh; font-size: 1.9rem; }
+#s-menu #btn-guia { min-height: 64px; font-size: 1.05rem; }   /* secundario: el botón grande sigue siendo uno solo */
 
 .banner { padding: 14px 16px; border-radius: 14px; font-weight: 700; border: 3px solid; margin: 6px 0; }
 #err { position: sticky; top: 0; z-index: 30; margin: 0; border-radius: 0; background: #2a0000; color: #fff; border-color: var(--bad); font-size: 1.1rem; }
@@ -94,3 +95,18 @@ input[type=text]:disabled { color: var(--muted); background: #0d0d0d; }
 body[data-screen="menu"] .brandbar { padding: 22px 16px; }
 body[data-screen="menu"] .brandbar img { max-height: 72px; max-width: 80%; }
 .screen { min-height: calc(100vh - 70px); }
+
+/* ---- Enlaces con aspecto de botón y página de la guía (generada desde GUIA_CONDUCTORES.md) ---- */
+a.btn { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
+.guia { gap: 10px; padding-bottom: 28px; }
+.guia h1 { font-size: 1.5rem; margin: 10px 0 4px; }
+.guia h2 { font-size: 1.25rem; margin: 22px 0 6px; color: var(--accent); border-bottom: 2px solid var(--line); padding-bottom: 4px; }
+.guia p, .guia li { font-size: 1.02rem; margin: .45rem 0; }
+.guia ol, .guia ul { padding-left: 1.5rem; margin: .3rem 0; }
+.guia li { margin: .7rem 0; }
+.guia strong { color: #fff; }
+.guia em { color: var(--muted); }
+.guia table, .guia tbody, .guia tr, .guia td { display: block; }   /* la tabla de avisos pasa a tarjetas: cabe en el móvil */
+.guia thead { display: none; }
+.guia tr { border: 3px solid var(--line); border-radius: 14px; padding: 12px; margin: 10px 0; background: var(--card); }
+.guia td:first-child { font-weight: 700; color: var(--warn); margin-bottom: 6px; }

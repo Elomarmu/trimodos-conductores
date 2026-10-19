@@ -648,3 +648,19 @@ def test_no_se_puede_guardar_en_una_orden_sin_bultos():
         service.update(odoo, get_settings(), r["sesion"], 300005, [{"package_id": 287102, "number_of_packages": 3}])
     assert e.value.code == "sin_bultos" and e.value.status == 409
     assert odoo.writes == [] and odoo.prints == [] and odoo.notes == []
+
+
+# --- guía dentro de la app
+def test_la_guia_de_la_app_se_genera_desde_el_markdown_y_no_esta_desfasada():
+    from pathlib import Path
+    from scripts.generar_guia import generar
+    actual = (Path(__file__).resolve().parent.parent / "public" / "guia.html").read_text(encoding="utf-8")
+    assert actual.replace("\r\n", "\n") == generar().replace("\r\n", "\n"), "guia.html desfasada: ejecuta scripts.generar_guia"
+    assert "Cómo corregir la orden de transporte" in actual and "Volver a la app" in actual
+
+
+def test_el_menu_enlaza_a_la_guia_y_se_guarda_para_uso_sin_conexion():
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parent.parent / "public"
+    assert 'id="btn-guia"' in (raiz / "index.html").read_text(encoding="utf-8") and 'href="/guia.html"' in (raiz / "index.html").read_text(encoding="utf-8")
+    assert '"/guia.html"' in (raiz / "sw.js").read_text(encoding="utf-8")

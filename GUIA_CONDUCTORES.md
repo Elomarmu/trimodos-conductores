@@ -4,19 +4,19 @@
 
 ## Antes de empezar
 - Ten a mano la orden de transporte (en papel o en PDF): lleva un **código QR**.
-- Abre la app **Conductores** desde el icono de la pantalla de inicio.
+- Abre la app **DECA Trimodos** desde el icono de la pantalla de inicio.
 
 ## Paso a paso
 
 0. **Solo la primera vez:** la app pide un **código de acceso**. Pídelo en la oficina, escríbelo y pulsa «Entrar». Se queda guardado en el móvil. Si cambia, te lo volverá a pedir.
 1. **Pulsa el botón grande «Escanear orden de transporte».**
 2. **Apunta la cámara al código QR de la orden.** Se lee solo, no hace falta pulsar nada.
-   - *Si no se lee* (poca luz, papel arrugado): escribe a mano el número de pedido, por ejemplo **S2621473**, y **elige la empresa: TRANSARGI o STINSA**. Después pulsa «Buscar pedido».
+    - *Si no se lee* (poca luz, papel arrugado): escribe a mano el número de pedido, por ejemplo **S2621473**, y **elige la empresa: TRANSARGI o STINSA**. Después pulsa «Buscar pedido».
 3. **Revisa los datos.** Verás cada lugar de carga y descarga con la mercancía, los elementos, los euro palets y el peso **tal como están ahora en el sistema** (pueden ser distintos al papel).
 4. **Cambia solo lo que haya cambiado.**
-   - *Mercancía:* escribe el nombre y **elige una de la lista**.
-   - *Elementos, euro palets y peso (kg):* escribe el número. Para decimales usa la coma.
-   - Pulsa **«Revisar cambios»**.
+    - *Mercancía:* escribe el nombre y **elige una de la lista**.
+    - *Elementos, euro palets y peso (kg):* escribe el número. Para decimales usa la coma.
+    - Pulsa **«Revisar cambios»**.
 5. **Comprueba el resumen.** Lo que cambia sale resaltado en amarillo: *Antes → Ahora*. Si algo está mal, pulsa «Volver y corregir».
 6. **Pulsa «Guardar cambios»** y confirma con **«Sí, guardar»**. Si dudas, pulsa «No, volver»: no se guarda nada.
 7. **Descarga o abre la nueva orden de transporte** (PDF) con los datos nuevos. Puedes compartirla con **«Compartir»**. **Usa siempre esta nueva orden**: la de papel ya no vale.

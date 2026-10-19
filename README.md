@@ -167,6 +167,7 @@ Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecna
   1. (Verificado: funciona) Usuario técnico **sin verificación en dos pasos (2FA)** y con contraseña, puesta en `ODOO_WEB_PASSWORD` (la clave API sigue en `ODOO_PASSWORD`). Con 2FA activado, Odoo responde `{uid: null}` y no se puede imprimir.
   2. Pedir a Tecnativa un **método público** en la tarea que genere la orden y devuelva el adjunto (sin sesión web, solo con clave API).
 
+- **Guía dentro de la app:** el botón «Cómo se usa (guía)» del menú abre `public/guia.html`, que se **genera** desde `GUIA_CONDUCTORES.md` (una sola fuente). Tras editar el `.md`, ejecuta `.\.venv\Scripts\python.exe -X utf8 -m scripts.generar_guia` (un test falla si `guia.html` se queda desfasada). Funciona sin conexión.
 - Tema oscuro y de alto contraste pensado para la cabina (poca luz, guantes). Todos los colores están en variables al inicio de `public/styles.css`.
 - **Marca:** franja blanca con el logo y color de acento por empresa: Grupo Trimodos **#fcda00**, STINSA **#009f92**, TRANSARGI **#f17e49** (texto negro sobre los botones: contraste 6,5-7,9:1). El acento cambia según la empresa de la orden (o la elegida al escribir el pedido).
 - Los logos se preparan con `scripts/preparar_logos.py` (recorta márgenes y los deja en `public/img/`). Al cambiar archivos de la carcasa, **sube la versión de caché** en `public/sw.js` (`conductores-v2` → `v3`).
