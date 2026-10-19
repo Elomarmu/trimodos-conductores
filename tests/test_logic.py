@@ -635,7 +635,7 @@ def test_orden_sin_bultos_se_lee_pero_no_es_editable_y_dice_por_que():
     odoo = MockOdoo()
     r = service.resolve(odoo, get_settings(), order_name="S26099887", company="stinsa")
     assert r["bultos"] == [] and r["editable"] is False
-    assert "no tiene lugares de carga o descarga" in r["motivo_no_editable"]
+    assert "responsable de tráfico" in r["motivo_no_editable"] and "bultos" in r["motivo_no_editable"]
     qr_ = qr(900006, "66666666-aaaa-bbbb-cccc-000000000006")
     r2 = service.resolve(odoo, get_settings(), qr_text=qr_)           # también por QR
     assert r2["tarea"]["id"] == 300005 and r2["editable"] is False and r2["verificado_por_qr"] is True

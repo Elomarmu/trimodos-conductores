@@ -120,7 +120,7 @@ def main():
             pg2.goto(BASE); pg2.wait_for_selector("#modo:not([hidden])")
             pg2.click("#btn-scan"); pg2.click("[data-company=stinsa]"); pg2.fill("#order", "S26099887"); pg2.click("#btn-order")
             pg2.wait_for_selector("#s-edit:not([hidden])")
-            comprobar("no tiene lugares de carga o descarga" in pg2.inner_text("#edit-banners"), "la pantalla explica por qué no hay nada que editar: «" + pg2.inner_text("#edit-banners")[:70] + "…»")
+            comprobar("responsable de tráfico" in pg2.inner_text("#edit-banners"), "la pantalla explica por qué no hay nada que editar: «" + pg2.inner_text("#edit-banners")[:70] + "…»")
             comprobar(pg2.is_hidden("#btn-review"), "no se ofrece «Revisar cambios» cuando no hay nada que cambiar")
             ctx2.close()
 

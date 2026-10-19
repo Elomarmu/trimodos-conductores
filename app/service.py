@@ -26,7 +26,7 @@ def is_transport_task(task: dict) -> bool:
     (Hay tareas reales, p. ej. las del pedido S2621553, con la marca a False: con su PDF o aún sin imprimir.)"""
     return bool(task.get("is_transport_order") or task.get("tms_transport_order_attachment_id") or task.get("tms_package_ids"))
 DEFAULT_EDITABLE_STAGES = ("nuevo", "en desarrollo")
-NO_PACKAGES_MSG = "Esta orden no tiene lugares de carga o descarga (bultos) que se puedan modificar desde la app. Avisa a la oficina."
+NO_PACKAGES_MSG = "Esta orden todavía no tiene creados los lugares de carga y descarga (bultos). Ponte en contacto con tu responsable de tráfico."
 
 
 def _norm(text: str) -> str:
