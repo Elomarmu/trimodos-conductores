@@ -28,6 +28,7 @@ REPORT_NAME = "tms_reporting.tms_transportation_order"
 # (modelo, método) permitidos. Todo lo demás se rechaza antes de salir hacia Odoo.
 ALLOWED_CALLS = {
     (ORDER_MODEL, "search_read"),
+    (ORDER_MODEL, "read"),           # solo invoice_count (Odoo 18: las tareas ya no lo tienen)
     (TASK_MODEL, "read"),
     (TASK_MODEL, "search_read"),
     (TASK_MODEL, "fields_get"),
@@ -37,6 +38,7 @@ ALLOWED_CALLS = {
     (GOODS_MODEL, "read"),
     (ATTACHMENT_MODEL, "read"),
     ("res.company", "search_read"),
+    ("ir.actions.report", "search_read"),   # solo vía find_report (diagnóstico)
     (PACKAGE_MODEL, "write"),        # solo vía write_package (campos EDITABLE_FIELDS)
     (TASK_MODEL, "message_post"),    # solo vía post_note
 }
@@ -60,6 +62,8 @@ class OdooClient:
         self._uid: int | None = None
         self._http = httpx.Client(timeout=25)   # JSON-RPC y sesión web (informe)
         self._anon = httpx.Client(timeout=40)   # descarga por token, SIN cookies de sesión
+        self._task_fields_cache: list[str] | None = None
+        self._task_has_invoice_count = True
 
     # ---- bajo nivel (privado) -------------------------------------------------
     def _rpc(self, service: str, method: str, args: list):
@@ -90,6 +94,29 @@ class OdooClient:
         uid = self._login()
         return self._rpc("object", "execute_kw", [self.s.odoo_db, uid, self.s.odoo_password, model, method, args, kwargs])
 
+    # ---- compatibilidad entre versiones de Odoo --------------------------------
+    def _task_fields(self) -> list[str]:
+        """Campos de tarea a leer. En Odoo 18 `invoice_count` ya no existe en la tarea: se calcula desde el pedido de venta."""
+        if self._task_fields_cache is None:
+            have = self._call(TASK_MODEL, "fields_get", [["invoice_count", "sale_order_id"]], {"attributes": ["type"]})
+            self._task_has_invoice_count = "invoice_count" in have
+            fields = [f for f in TASK_FIELDS if f != "invoice_count" or self._task_has_invoice_count]
+            if not self._task_has_invoice_count and "sale_order_id" in have:
+                fields.append("sale_order_id")
+            self._task_fields_cache = fields
+        return self._task_fields_cache
+
+    def _with_invoice_count(self, tasks: list[dict]) -> list[dict]:
+        if self._task_has_invoice_count:
+            return tasks
+        order_ids = {t["sale_order_id"][0] for t in tasks if t.get("sale_order_id")}
+        counts = {}
+        if order_ids:
+            counts = {o["id"]: o.get("invoice_count") or 0 for o in self._call(ORDER_MODEL, "read", [list(order_ids)], {"fields": ["invoice_count"]})}
+        for t in tasks:
+            t["invoice_count"] = counts.get((t.get("sale_order_id") or [0])[0], 0)
+        return tasks
+
     # ---- operaciones permitidas ----------------------------------------------
     def find_transport_tasks(self, order_name: str, company_id: int) -> list[dict]:
         orders = self._call(
@@ -98,14 +125,17 @@ class OdooClient:
         )
         if not orders or not orders[0]["tasks_ids"]:
             return []
-        return self._call(
+        fields = self._task_fields()
+        tasks = self._call(
             TASK_MODEL, "search_read",
             [[["id", "in", orders[0]["tasks_ids"]], "|", ["is_transport_order", "=", True], ["tms_transport_order_attachment_id", "!=", False]]],
-            {"fields": TASK_FIELDS, "order": "is_transport_order desc, id desc"},  # primero las marcadas, luego la más reciente
+            {"fields": fields, "order": "is_transport_order desc, id desc"},  # primero las marcadas, luego la más reciente
         )
+        return self._with_invoice_count(tasks)
 
     def read_task(self, task_id: int) -> dict | None:
-        rows = self._call(TASK_MODEL, "read", [[task_id]], {"fields": TASK_FIELDS})
+        fields = self._task_fields()
+        rows = self._with_invoice_count(self._call(TASK_MODEL, "read", [[task_id]], {"fields": fields}))
         return rows[0] if rows else None
 
     def read_packages(self, package_ids: list[int]) -> list[dict]:
@@ -138,7 +168,7 @@ class OdooClient:
         try:
             r = self._http.post(f"{self.s.odoo_url}/web/session/authenticate", json={
                 "jsonrpc": "2.0", "method": "call",
-                "params": {"db": self.s.odoo_db, "login": self.s.odoo_user, "password": self.s.odoo_password}})
+                "params": {"db": self.s.odoo_db, "login": self.s.odoo_user, "password": self.s.odoo_web_password}})
             res = r.json().get("result") or {}
             if not res.get("uid"):
                 raise fail
@@ -154,6 +184,16 @@ class OdooClient:
         if not att:
             raise fail
         return att
+
+    def check_web_login(self) -> bool:
+        """Solo comprueba si las credenciales sirven para abrir una sesión web (lo que hace falta para imprimir). No imprime nada."""
+        try:
+            r = self._http.post(f"{self.s.odoo_url}/web/session/authenticate", json={
+                "jsonrpc": "2.0", "method": "call",
+                "params": {"db": self.s.odoo_db, "login": self.s.odoo_user, "password": self.s.odoo_web_password}})
+            return bool((r.json().get("result") or {}).get("uid"))
+        except (httpx.HTTPError, ValueError):
+            return False
 
     def get_pdf(self, attachment_id: int, token: str) -> bytes | None:
         """Descarga el PDF con el access_token del adjunto (sin sesión: si el token no vale, Odoo lo rechaza)."""
@@ -174,6 +214,13 @@ class OdooClient:
         """(modelo, operación, esperado, real). Solo consulta los derechos del usuario; no modifica nada."""
         return [(m, op, expected, bool(self._call(m, "check_access_rights", [op], {"raise_exception": False})))
                 for m, op, expected in EXPECTED_PERMISSIONS]
+
+    def find_report(self) -> list[dict]:
+        """Diagnóstico: comprueba que existe el informe de la orden de transporte."""
+        return self._call("ir.actions.report", "search_read", [[["report_name", "=", REPORT_NAME]]], {"fields": ["report_name", "model", "report_type"]})
+
+    def server_version(self) -> str:
+        return self._rpc("common", "version", [])["server_version"]
 
     def list_companies(self) -> list[dict]:
         return self._call("res.company", "search_read", [[]], {"fields": ["name"]})

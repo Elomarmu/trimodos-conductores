@@ -327,6 +327,8 @@ class FakeOdooServer:
             model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
             self.calls.append((model, method, args, kw))
             result = True
+            if (model, method) == ("project.task", "fields_get"):   # como una v15: la tarea sí tiene invoice_count
+                result = {"invoice_count": {"type": "integer"}, "sale_order_id": {"type": "many2one"}}
             if (model, method) == ("project.task", "read"):
                 result = [{"id": 204067, "tms_transport_order_attachment_id": [555, "x.pdf"]}]
             if (model, method) == ("ir.attachment", "read"):
@@ -559,3 +561,37 @@ def test_la_pagina_tiene_titulo_y_vista_previa_para_compartir():
     assert 'property="og:title" content="Modificación DECA - Trimodos"' in html
     assert 'property="og:image" content="https://' in html          # absoluta: WhatsApp/Teams no resuelven rutas relativas
     assert (root / "img" / "compartir.png").exists()
+
+
+# --- Odoo 18: la tarea ya no tiene invoice_count; se calcula desde el pedido de venta
+def _cliente_v18(monkeypatch, facturas):
+    monkeypatch.setenv("ODOO_URL", "https://odoo18.test")
+    monkeypatch.setenv("ODOO_PASSWORD", "x")
+    c = OdooClient(get_settings())
+    llamadas = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        p = json.loads(request.content)["params"]
+        if p["service"] == "common":
+            return httpx.Response(200, json={"result": 7})
+        model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
+        llamadas.append((model, method, kw.get("fields")))
+        if (model, method) == ("project.task", "fields_get"):
+            return httpx.Response(200, json={"result": {"sale_order_id": {"type": "many2one"}}})   # sin invoice_count
+        if (model, method) == ("project.task", "read"):
+            return httpx.Response(200, json={"result": [{"id": 204067, "sale_order_id": [55, "S2621473"], "is_closed": False}]})
+        if (model, method) == ("sale.order", "read"):
+            return httpx.Response(200, json={"result": [{"id": 55, "invoice_count": facturas}]})
+        return httpx.Response(200, json={"result": True})
+    c._http = httpx.Client(transport=httpx.MockTransport(handler))
+    return c, llamadas
+
+
+@pytest.mark.parametrize("facturas", [0, 2])
+def test_odoo18_invoice_count_se_calcula_desde_el_pedido(monkeypatch, facturas):
+    c, llamadas = _cliente_v18(monkeypatch, facturas)
+    t = c.read_task(204067)
+    assert t["invoice_count"] == facturas
+    campos = next(f for m, me, f in llamadas if (m, me) == ("project.task", "read"))
+    assert "invoice_count" not in campos and "sale_order_id" in campos       # no se pide un campo que no existe
+    assert service.is_editable(t, [])[0] is (facturas == 0)                  # y la regla de "facturada" sigue funcionando

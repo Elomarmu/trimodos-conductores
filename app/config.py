@@ -3,7 +3,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# ENV_FILE permite apuntar a otro Odoo sin tocar el .env de producción (p. ej. ENV_FILE=.env.odoo18)
+load_dotenv(os.environ.get("ENV_FILE") or None)
 
 
 def _bool(value: str | None, default: bool) -> bool:
@@ -20,6 +21,7 @@ class Settings:
     odoo_db: str
     odoo_user: str
     odoo_password: str
+    odoo_web_password: str   # solo para imprimir el PDF (sesión web); si está vacía se usa odoo_password
     company_ids: list[int]
     secret_key: str
     qr_allowed_hosts: list[str]
@@ -41,6 +43,7 @@ def get_settings() -> Settings:
         odoo_db=os.environ.get("ODOO_DB", ""),
         odoo_user=os.environ.get("ODOO_USER", ""),
         odoo_password=os.environ.get("ODOO_PASSWORD", ""),
+        odoo_web_password=os.environ.get("ODOO_WEB_PASSWORD", "") or os.environ.get("ODOO_PASSWORD", ""),
         company_ids=[int(x) for x in os.environ.get("ODOO_COMPANY_IDS", "1,7").split(",") if x.strip()],
         secret_key=secret,
         qr_allowed_hosts=[h.strip().lower() for h in os.environ.get("QR_ALLOWED_HOSTS", "").split(",") if h.strip()],

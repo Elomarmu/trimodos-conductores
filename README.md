@@ -149,19 +149,33 @@ Abrir una orden **escribiendo un número de pedido** (sin QR) no requiere ningú
 ### Fase 2 propuesta: identificar al conductor
 Cada conductor tiene un **PIN de 4 dígitos** (lista en una variable de entorno o tabla pequeña). Se pide una sola vez y el móvil lo recuerda; el nombre queda en la nota de la tarea. Una opción aún más simple: un selector con su nombre. Sustituiría al código compartido y permitiría dar de baja a una sola persona.
 
-## 8. Aspecto y marca
+## 8. Probar contra otra versión de Odoo (p. ej. Odoo 18)
+
+La app puede apuntar a otro Odoo **sin tocar el `.env` de producción**: crea un archivo `.env.odoo18` (git lo ignora) con `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD` y déjalo en `DRY_RUN=true`.
+
+```powershell
+$env:ENV_FILE=".env.odoo18"; .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_compatibilidad   # SOLO LECTURA
+.\iniciar-v18.cmd                                                                                  # arranca la app contra ese Odoo
+```
+
+Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecnativa.net`, base `prod`):
+- **JSON-RPC con clave API:** funciona (la clave API se pone en `ODOO_PASSWORD`). Los modelos y campos del módulo TMS son los mismos y las empresas siguen siendo 1 (STINSA) y 7 (TRANSARGI).
+- **Cambio en la tarea:** `project.task` ya no tiene `invoice_count`; la app lo calcula desde el pedido de venta (`sale_order_id`) y la regla de «ya facturada» sigue funcionando en ambas versiones.
+- **Imprimir el PDF NO funciona solo con clave API.** Imprimir exige una sesión web (`/web/session/authenticate`) y Odoo no admite claves API ahí (tampoco por cabeceras Basic/Bearer). Opciones:
+  1. Usuario técnico **sin verificación en dos pasos (2FA)** y con contraseña, puesta en `ODOO_WEB_PASSWORD` (la clave API sigue en `ODOO_PASSWORD`). Con 2FA activado, Odoo responde `{uid: null}` y no se puede imprimir.
+  2. Pedir a Tecnativa un **método público** en la tarea que genere la orden y devuelva el adjunto (sin sesión web, solo con clave API).
 
 - Tema oscuro y de alto contraste pensado para la cabina (poca luz, guantes). Todos los colores están en variables al inicio de `public/styles.css`.
 - **Marca:** franja blanca con el logo y color de acento por empresa: Grupo Trimodos **#fcda00**, STINSA **#009f92**, TRANSARGI **#f17e49** (texto negro sobre los botones: contraste 6,5-7,9:1). El acento cambia según la empresa de la orden (o la elegida al escribir el pedido).
 - Los logos se preparan con `scripts/preparar_logos.py` (recorta márgenes y los deja en `public/img/`). Al cambiar archivos de la carcasa, **sube la versión de caché** en `public/sw.js` (`conductores-v2` → `v3`).
 
-## 9. Datos de Odoo: particularidades detectadas
+## 10. Datos de Odoo: particularidades detectadas
 
 - Una tarea cuenta como **orden de transporte** si tiene `is_transport_order` **o** una orden de transporte ya generada: hay tareas reales (p. ej. pedido S2621553) con la marca a `False` pero con su PDF.
 - Un bulto puede venir **vacío** (sin mercancía, 0 elementos, 0 euro palets, 0 kg). Se puede dejar la **mercancía en blanco** (`goods_id` no es obligatorio en `tms.package`). Al guardar solo se validan los campos que cambian.
 - El mismo número de pedido puede existir en STINSA y en TRANSARGI: por eso al escribirlo a mano se elige la empresa.
 
-## 10. Estructura
+## 11. Estructura
 
 ```
 api/index.py            entrada de Vercel (importa app.main:app)
