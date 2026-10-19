@@ -75,6 +75,13 @@ def main():
             pg.on("pageerror", lambda e: errores.append(str(e)))
             pg.on("console", lambda m: errores.append(m.text) if m.type == "error" else None)
 
+            print("Menú")
+            pg.goto(BASE); pg.wait_for_selector("#modo:not([hidden])")
+            titulo = pg.evaluate("() => { const h = document.querySelector('#s-menu h1'); const r = h.getBoundingClientRect(); return [h.textContent, getComputedStyle(h).textAlign, (r.left + r.right) / 2, window.innerWidth / 2]; }")
+            comprobar(titulo[0] == "DECA - Trimodos", f"el título del menú es «{titulo[0]}»")
+            comprobar(titulo[1] == "center" and abs(titulo[2] - titulo[3]) < 2, f"está centrado (centro del título {titulo[2]:.0f}px, centro de la pantalla {titulo[3]:.0f}px)")
+            pg.screenshot(path=str(SALIDA / "p4_menu.png"))
+
             print("Código de acceso")
             pg.goto(BASE)
             pg.wait_for_selector("#access:not([hidden])")

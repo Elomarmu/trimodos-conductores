@@ -33,6 +33,7 @@ h2 { font-size: 1.2rem; margin: 0 0 8px; }
 .btn.huge { min-height: 110px; font-size: 1.5rem; }
 .btn:disabled { opacity: .45; }
 #s-menu { justify-content: center; }
+#s-menu h1 { text-align: center; font-size: 2rem; margin: 0 0 6px; }
 #s-menu #btn-scan { min-height: 38vh; font-size: 1.9rem; }
 #s-menu #btn-guia { min-height: 64px; font-size: 1.05rem; }   /* secundario: el botón grande sigue siendo uno solo */
 
