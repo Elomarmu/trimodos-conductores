@@ -131,6 +131,22 @@ def main():
             comprobar(pg2.is_hidden("#btn-review"), "no se ofrece «Revisar cambios» cuando no hay nada que cambiar")
             ctx2.close()
 
+            print("Umbral de peso: lo manda el servidor")
+            ctx3 = navegador.new_context(viewport={"width": 390, "height": 844})
+            pg3 = ctx3.new_page()
+            pg3.add_init_script(f"localStorage.setItem('codigo-acceso', '{CODIGO}')")
+            pg3.add_init_script("Object.defineProperty(navigator, 'mediaDevices', {value: undefined})")
+            def subir_umbral(route):                          # el servidor "dice" que el umbral es 50.000 kg
+                resp = route.fetch(); datos = resp.json(); datos["umbral_peso_kg"] = 50000
+                route.fulfill(response=resp, json=datos)
+            pg3.route("**/api/resolve-qr", subir_umbral)
+            pg3.goto(BASE); pg3.wait_for_selector("#modo:not([hidden])")
+            pg3.click("#btn-scan"); pg3.click("[data-company=transargi]"); pg3.fill("#order", "S2621473"); pg3.click("#btn-order")
+            pg3.wait_for_selector("#s-edit:not([hidden])")
+            pg3.fill("#peso-287102", "28.000"); pg3.click("#btn-review"); pg3.wait_for_selector("#s-review:not([hidden])")
+            comprobar(pg3.is_hidden("#mma"), "con umbral 50.000 enviado por el servidor, 28.000 kg no pide confirmación (la pantalla no tiene número propio)")
+            ctx3.close()
+
             print("Flujo completo")
             pg.click("#btn-scan")
             pg.wait_for_selector("#s-edit:not([hidden])", timeout=20000)

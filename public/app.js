@@ -2,7 +2,6 @@
 // App de conductores: 4 pantallas (menú, escáner, edición, resumen/resultado). Sin dependencias.
 
 const $ = (id) => document.getElementById(id);
-const MAX_KG_WARNING = 27000;   // kg de mercancía a partir de los cuales se pide confirmar (posible exceso de la MMA)
 const LOGOS = { trimodos: "/img/trimodos.png", stinsa: "/img/stinsa.png", transargi: "/img/transargi.png" };
 const COMPANY_BY_ID = { 1: "stinsa", 7: "transargi" };
 const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
@@ -357,7 +356,7 @@ function collectChanges() {
       { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: changed.euro_palets },
       { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
     ];
-    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: changed.peso && c.peso > MAX_KG_WARNING });
+    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: changed.peso && c.peso > state.data.umbral_peso_kg });   // el umbral lo manda el servidor
   }
   if (!changes.length) throw new Error("No has cambiado ningún dato.");
   return changes;

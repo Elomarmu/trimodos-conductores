@@ -27,6 +27,7 @@ class Settings:
     qr_allowed_hosts: list[str]
     access_code: str
     editable_stages: list[str]   # etapas de la tarea en las que se puede modificar
+    weight_warning_kg: float     # a partir de este peso (kg) la app pide confirmar (posible exceso de la MMA)
 
 
 def get_settings() -> Settings:
@@ -49,5 +50,6 @@ def get_settings() -> Settings:
         secret_key=secret,
         qr_allowed_hosts=[h.strip().lower() for h in os.environ.get("QR_ALLOWED_HOSTS", "").split(",") if h.strip()],
         access_code=os.environ.get("APP_ACCESS_CODE", "").strip(),
+        weight_warning_kg=float((os.environ.get("PESO_AVISO_KG", "") or "27000").replace(",", ".")),
         editable_stages=[x.strip() for x in os.environ.get("EDITABLE_STAGES", "nuevo,en desarrollo").split(",") if x.strip()],
     )

@@ -668,7 +668,7 @@ def test_el_menu_enlaza_a_la_guia_y_se_guarda_para_uso_sin_conexion():
 
 # --- peso alto: confirmación a partir de 27.000 kg (ya no existe el aviso de 44.000 kg)
 def test_umbral_de_peso_es_27000_y_no_bloquea():
-    assert service.MAX_WEIGHT_WARNING == 27000
+    assert get_settings().weight_warning_kg == 27000
     for peso, hay_aviso in [(26999, False), (27000, False), (27001, True), (45000, True)]:
         odoo = MockOdoo()
         r = _sesion(odoo)
@@ -687,3 +687,23 @@ def test_el_aviso_de_peso_habla_de_la_mma_y_queda_en_la_nota():
     sin = MockOdoo(); r2 = _sesion(sin)
     service.update(sin, get_settings(), r2["sesion"], 204067, [_cambio(shipping_weight=9000)])
     assert "Aviso" not in sin.notes[0][1]                              # sin peso alto, la nota queda como siempre
+
+
+def test_el_umbral_de_peso_se_configura_por_entorno_y_se_envia_a_la_pantalla(monkeypatch):
+    odoo = MockOdoo()
+    assert service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")["umbral_peso_kg"] == 27000
+    monkeypatch.setenv("PESO_AVISO_KG", "30000")
+    assert get_settings().weight_warning_kg == 30000
+    assert service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")["umbral_peso_kg"] == 30000
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(shipping_weight=28000)])
+    assert out["avisos"] == []                                          # con umbral 30.000, 28.000 ya no avisa
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(shipping_weight=30001)])
+    assert "30.000 kg" in out["avisos"][0]                              # y el texto usa el umbral configurado
+
+
+@pytest.mark.parametrize("valor, esperado", [("", 27000), ("28000", 28000), ("27500,5", 27500.5)])
+def test_peso_aviso_kg_acepta_vacio_y_coma_decimal(monkeypatch, valor, esperado):
+    monkeypatch.setenv("PESO_AVISO_KG", valor)
+    assert get_settings().weight_warning_kg == esperado

@@ -115,6 +115,7 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
         "verificado_por_qr": verified,
         "editable": editable,
         "motivo_no_editable": reason,
+        "umbral_peso_kg": settings.weight_warning_kg,   # la pantalla pide confirmar a partir de este peso
         "sesion": session,
     }
 
@@ -122,7 +123,6 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
 # ---------------------------------------------------------------------------
 # Guardado
 # ---------------------------------------------------------------------------
-MAX_WEIGHT_WARNING = 27000   # kg de mercancía a partir de los cuales se pide confirmar (posible exceso de la MMA del conjunto)
 FIELD_LABELS = {"goods_id": "Mercancía", "number_of_packages": "Elementos", "euro_pallet_qty": "Euro palets", "shipping_weight": "Peso"}
 
 
@@ -195,8 +195,8 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
 
     warnings = []
     for pid, vals in changes.items():
-        if vals.get("shipping_weight", 0) > MAX_WEIGHT_WARNING:
-            warnings.append(f"{packages[pid]['name']}: peso superior a 27.000 kg; es posible que el conjunto supere la MMA autorizada.")
+        if vals.get("shipping_weight", 0) > settings.weight_warning_kg:
+            warnings.append(f"{packages[pid]['name']}: peso superior a {fmt_num(settings.weight_warning_kg)} kg; es posible que el conjunto supere la MMA autorizada.")
 
     lines = _describe(odoo, packages, changes)
     base = {"ok": True, "bultos_modificados": len(changes), "avisos": warnings}
