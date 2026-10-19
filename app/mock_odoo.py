@@ -23,29 +23,24 @@ class MockOdoo:
         self.writes, self.notes, self.prints = [], [], []  # registro de lo que se "escribe", para los tests
         self.tasks = {
             204067: {
-                "id": 204067, "name": "S2621473", "company_id": [7, "TRANSARGI S.L.U"], "stage_id": [3, "En curso"],
+                "id": 204067, "name": "S2621473", "company_id": [7, "TRANSARGI S.L.U"], "stage_id": [7, "En desarrollo"],
                 "is_transport_order": True, "tms_package_ids": [287102, 287103], "tms_transport_order_attachment_id": [900002, "Orden de transporte - S2621473 - 20260105101500.pdf"],
-                "is_closed": False, "invoice_count": 0,
             },
             300001: {
                 "id": 300001, "name": "CAMION COMPLETO FRANCIA", "company_id": [1, "STINSA"], "stage_id": [1, "Nuevo"],
                 "is_transport_order": True, "tms_package_ids": [287103], "tms_transport_order_attachment_id": [900003, "Orden de transporte - S2621473 - 20260106090000.pdf"],
-                "is_closed": False, "invoice_count": 0,
             },
             300002: {
                 "id": 300002, "name": "ORDEN FACTURADA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [5, "Hecho"],
                 "is_transport_order": True, "tms_package_ids": [287102], "tms_transport_order_attachment_id": [900004, "Orden de transporte - S2600001 - 20260101090000.pdf"],
-                "is_closed": True, "invoice_count": 1,
             },
             300003: {   # como el pedido real S2621553: marca is_transport_order a False pero con su orden generada
                 "id": 300003, "name": "T.I.- COMPLETO INTERNACIONAL", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [7, "En desarrollo"],
                 "is_transport_order": False, "tms_package_ids": [287102], "tms_transport_order_attachment_id": [900005, "Orden de transporte - S2621553 - 20261016151726.pdf"],
-                "is_closed": False, "invoice_count": 0,
             },
             300004: {   # tarea normal del pedido: ni marcada ni con orden de transporte
                 "id": 300004, "name": "TAREA INTERNA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [1, "Nuevo"],
                 "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": False,
-                "is_closed": False, "invoice_count": 0,
             },
         }
         # (pedido, id de compañía) -> tareas: el mismo número puede existir en STINSA y en TRANSARGI
@@ -76,7 +71,7 @@ class MockOdoo:
 
     def find_transport_tasks(self, order_name, company_id):
         ids = sorted(self.orders.get((order_name, company_id), []), reverse=True)
-        keep = [i for i in ids if self.tasks[i]["is_transport_order"] or self.tasks[i]["tms_transport_order_attachment_id"]]  # mismo filtro que Odoo
+        keep = [i for i in ids if self.tasks[i]["is_transport_order"] or self.tasks[i]["tms_transport_order_attachment_id"] or self.tasks[i]["tms_package_ids"]]  # mismo filtro que Odoo
         keep.sort(key=lambda i: not self.tasks[i]["is_transport_order"])  # marcadas primero (orden estable: la más reciente antes)
         return [copy.deepcopy(self.tasks[i]) for i in keep]
 

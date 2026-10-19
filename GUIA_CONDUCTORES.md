@@ -26,7 +26,7 @@
 | Mensaje | Qué hacer |
 |---|---|
 | «Esta orden tiene una versión más nueva» | El papel que llevas es antiguo. Trabaja con los datos que ves en pantalla y descarga la orden nueva al terminar. |
-| «Esta orden ya está cerrada / facturada / terminada» | No se puede modificar. Llama a la oficina. |
+| «Esta orden está en la etapa «…». Solo se puede modificar en «Nuevo» o «En desarrollo»» | La orden ya ha avanzado y no se puede cambiar desde la app. Llama a la oficina. |
 | «El peso supera 44.000 kg» | Es solo un aviso. Revisa que el peso sea correcto; puedes continuar. |
 | «Esta orden ha cambiado mientras la editabas» | Alguien de la oficina la ha modificado. La app la recarga: revisa y repite el cambio. |
 | «No hay conexión. Inténtalo de nuevo» | Busca cobertura y vuelve a pulsar el botón. No se ha guardado nada. |

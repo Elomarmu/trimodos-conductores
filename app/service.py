@@ -4,6 +4,7 @@ import html
 import logging
 import math
 import re
+import unicodedata
 from datetime import datetime
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -21,22 +22,24 @@ COMPANIES = {"stinsa": 1, "transargi": 7}
 
 
 def is_transport_task(task: dict) -> bool:
-    """Orden de transporte = tarea marcada como tal O con una orden de transporte ya generada.
-    (Hay tareas reales, p. ej. la del pedido S2621553, con la marca a False pero con su PDF de orden de transporte.)"""
-    return bool(task.get("is_transport_order") or task.get("tms_transport_order_attachment_id"))
-LOCKED_PACKAGE_STATES = ("done", "cancel")
+    """Orden de transporte = tarea marcada como tal, O con una orden ya generada, O con bultos (lo que se edita).
+    (Hay tareas reales, p. ej. las del pedido S2621553, con la marca a False: con su PDF o aún sin imprimir.)"""
+    return bool(task.get("is_transport_order") or task.get("tms_transport_order_attachment_id") or task.get("tms_package_ids"))
+DEFAULT_EDITABLE_STAGES = ("nuevo", "en desarrollo")
 
 
-def is_editable(task: dict, packages: list[dict]) -> tuple[bool, str | None]:
-    """No editable si la tarea está cerrada, ya tiene facturas o algún bulto está terminado/cancelado."""
-    if task.get("is_closed"):
-        return False, "Esta orden ya está cerrada. Avisa a la oficina."
-    if (task.get("invoice_count") or 0) > 0:
-        return False, "Esta orden ya está facturada. Avisa a la oficina."
-    if any(p.get("state") in LOCKED_PACKAGE_STATES for p in packages):
-        return False, "Esta orden ya está terminada o cancelada. Avisa a la oficina."
-    return True, None
+def _norm(text: str) -> str:
+    """Compara etapas sin importar mayúsculas ni acentos ('En Desarrollo' == 'en desarrollo')."""
+    return "".join(c for c in unicodedata.normalize("NFD", text or "") if unicodedata.category(c) != "Mn").casefold().strip()
 
+
+def is_editable(task: dict, stages=DEFAULT_EDITABLE_STAGES) -> tuple[bool, str | None]:
+    """Una orden solo se puede modificar si la etapa de su tarea es «Nuevo» o «En desarrollo» (configurable)."""
+    stage = (task.get("stage_id") or [0, ""])[1]
+    if _norm(stage) in {_norm(s) for s in stages}:
+        return True, None
+    permitidas = " o ".join(f"«{s.capitalize()}»" for s in stages)
+    return False, f"Esta orden está en la etapa «{stage or 'sin etapa'}». Solo se puede modificar en {permitidas}. Avisa a la oficina."
 
 def _allowed_hosts(settings: Settings) -> set[str]:
     hosts = set(settings.qr_allowed_hosts)
@@ -99,7 +102,7 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
         raise AppError("Escanea el código o escribe el número de pedido.", 400, "faltan_datos")
 
     packages = odoo.read_packages(task.get("tms_package_ids") or [])
-    editable, reason = is_editable(task, packages)
+    editable, reason = is_editable(task, settings.editable_stages)
     session = sign_session(settings.secret_key, task["id"], {p["id"]: p["write_date"] for p in packages}, verified=verified)
     return {
         "tarea": {"id": task["id"], "nombre": task["name"], "pedido": order_label or None, "compania": _m2o(task.get("company_id")), "etapa": _m2o(task.get("stage_id"))},
@@ -157,7 +160,7 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
         raise AppError("No encontramos esta orden. Avisa a la oficina.", 404, "no_encontrada")
     packages = {p["id"]: p for p in odoo.read_packages(task.get("tms_package_ids") or [])}
 
-    editable, reason = is_editable(task, list(packages.values()))
+    editable, reason = is_editable(task, settings.editable_stages)
     if not editable:
         raise AppError(reason, 409, "no_editable")
 

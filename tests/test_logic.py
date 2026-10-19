@@ -86,15 +86,32 @@ def test_pedido_a_mano_exige_empresa():
         assert e.value.code == "falta_empresa"
 
 
-def test_regla_editable():
-    r = service.resolve(MockOdoo(), get_settings(), order_name="S2600001", company="transargi")
-    assert r["editable"] is False and "cerrada" in r["motivo_no_editable"]
-    assert "facturada" in service.is_editable({"is_closed": False, "invoice_count": 2}, [])[1]
-    ok = service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="transargi")
-    assert ok["editable"] is True
-    for state, expected in [("done", False), ("cancel", False), ("transit", True), ("loading", True)]:
-        assert service.is_editable({"is_closed": False, "invoice_count": 0}, [{"state": state}])[0] is expected
-    assert service.is_editable({"is_closed": True, "invoice_count": 0}, [])[0] is False
+def test_regla_editable_solo_en_nuevo_o_en_desarrollo():
+    r = service.resolve(MockOdoo(), get_settings(), order_name="S2600001", company="transargi")     # etapa «Hecho»
+    assert r["editable"] is False and "«Hecho»" in r["motivo_no_editable"] and "«Nuevo» o «En desarrollo»" in r["motivo_no_editable"]
+    assert service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="transargi")["editable"] is True   # «En desarrollo»
+    assert service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="stinsa")["editable"] is True      # «Nuevo»
+
+
+@pytest.mark.parametrize("etapa, esperado", [
+    ("Nuevo", True), ("En desarrollo", True), ("EN DESARROLLO", True), ("  nuevo ", True), ("En desarrolló", True),   # sin importar mayúsculas ni acentos
+    ("Hecho", False), ("Cancelado", False), ("En pruebas", False), ("Nuevo pedido", False), ("", False),
+])
+def test_is_editable_por_etapa(etapa, esperado):
+    assert service.is_editable({"stage_id": [1, etapa]})[0] is esperado
+
+
+def test_is_editable_sin_etapa_y_etapas_configurables():
+    assert service.is_editable({"stage_id": False})[0] is False
+    assert service.is_editable({})[0] is False
+    assert service.is_editable({"stage_id": [9, "En ruta"]}, stages=("en ruta",))[0] is True
+    assert "«En ruta»" in service.is_editable({"stage_id": [9, "Hecho"]}, stages=("en ruta",))[1]
+
+
+def test_las_etapas_editables_se_leen_del_entorno(monkeypatch):
+    assert get_settings().editable_stages == ["nuevo", "en desarrollo"]
+    monkeypatch.setenv("EDITABLE_STAGES", "nuevo, en ruta")
+    assert get_settings().editable_stages == ["nuevo", "en ruta"]
 
 
 def test_resolve_pedido_inexistente_y_vacio():
@@ -212,7 +229,7 @@ def test_update_detecta_cambios_hechos_por_otro():
 def test_update_rechaza_tarea_no_editable():
     odoo = MockOdoo()
     r = service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
-    odoo.tasks[204067]["is_closed"] = True  # se cierra después de cargar
+    odoo.tasks[204067]["stage_id"] = [9, "Hecho"]  # cambia de etapa después de cargar
     with pytest.raises(AppError) as e:
         service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=1)])
     assert e.value.code == "no_editable"
@@ -330,8 +347,6 @@ class FakeOdooServer:
             model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
             self.calls.append((model, method, args, kw))
             result = True
-            if (model, method) == ("project.task", "fields_get"):   # como una v15: la tarea sí tiene invoice_count
-                result = {"invoice_count": {"type": "integer"}, "sale_order_id": {"type": "many2one"}}
             if (model, method) == ("project.task", "read"):
                 result = [{"id": 204067, "tms_transport_order_attachment_id": [555, "x.pdf"]}]
             if (model, method) == ("ir.attachment", "read"):
@@ -566,40 +581,6 @@ def test_la_pagina_tiene_titulo_y_vista_previa_para_compartir():
     assert (root / "img" / "compartir.png").exists()
 
 
-# --- Odoo 18: la tarea ya no tiene invoice_count; se calcula desde el pedido de venta
-def _cliente_v18(monkeypatch, facturas):
-    monkeypatch.setenv("ODOO_URL", "https://odoo18.test")
-    monkeypatch.setenv("ODOO_PASSWORD", "x")
-    c = OdooClient(get_settings())
-    llamadas = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        p = json.loads(request.content)["params"]
-        if p["service"] == "common":
-            return httpx.Response(200, json={"result": 7})
-        model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
-        llamadas.append((model, method, kw.get("fields")))
-        if (model, method) == ("project.task", "fields_get"):
-            return httpx.Response(200, json={"result": {"sale_order_id": {"type": "many2one"}}})   # sin invoice_count
-        if (model, method) == ("project.task", "read"):
-            return httpx.Response(200, json={"result": [{"id": 204067, "sale_order_id": [55, "S2621473"], "is_closed": False}]})
-        if (model, method) == ("sale.order", "read"):
-            return httpx.Response(200, json={"result": [{"id": 55, "invoice_count": facturas}]})
-        return httpx.Response(200, json={"result": True})
-    c._http = httpx.Client(transport=httpx.MockTransport(handler))
-    return c, llamadas
-
-
-@pytest.mark.parametrize("facturas", [0, 2])
-def test_odoo18_invoice_count_se_calcula_desde_el_pedido(monkeypatch, facturas):
-    c, llamadas = _cliente_v18(monkeypatch, facturas)
-    t = c.read_task(204067)
-    assert t["invoice_count"] == facturas
-    campos = next(f for m, me, f in llamadas if (m, me) == ("project.task", "read"))
-    assert "invoice_count" not in campos and "sale_order_id" in campos       # no se pide un campo que no existe
-    assert service.is_editable(t, [])[0] is (facturas == 0)                  # y la regla de "facturada" sigue funcionando
-
-
 @pytest.mark.parametrize("major, esperado", [(15, False), (18, True)])
 def test_nota_interna_declara_html_solo_en_odoo_18(monkeypatch, major, esperado):
     c, srv = _real_client(monkeypatch)
@@ -608,3 +589,14 @@ def test_nota_interna_declara_html_solo_en_odoo_18(monkeypatch, major, esperado)
     kw = srv.calls[-1][3]
     assert ("body_is_html" in kw) is esperado and (kw.get("body_is_html") is True if esperado else True)
     assert kw["subtype_xmlid"] == "mail.mt_note"
+
+
+def test_tarea_con_bultos_pero_sin_orden_generada_ni_marca_se_acepta():
+    """Como el pedido S2621553 tras recrearse la tarea: en «Nuevo», con su bulto, sin PDF de orden todavía."""
+    odoo = MockOdoo()
+    odoo.tasks[300004]["tms_package_ids"] = [287103]
+    odoo.orders[("S2600010", 7)] = [300004]
+    r = service.resolve(odoo, get_settings(), order_name="S2600010", company="transargi")
+    assert r["tarea"]["id"] == 300004 and r["editable"] is True and len(r["bultos"]) == 1
+    out = service.update(odoo, get_settings(), r["sesion"], 300004, [{"package_id": 287103, "number_of_packages": 9}])
+    assert out["ok"] and odoo.prints == [300004]        # se genera la primera orden de transporte

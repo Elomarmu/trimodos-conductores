@@ -10,7 +10,7 @@ from app.odoo_client import (ATTACHMENT_FIELDS, ATTACHMENT_MODEL, EDITABLE_FIELD
                              REPORT_NAME, TASK_FIELDS, TASK_MODEL, OdooClient)
 
 
-OPCIONALES = {"invoice_count"}  # en Odoo 18 la tarea ya no lo tiene: la app lo calcula desde el pedido de venta
+OPCIONALES: set[str] = set()   # campos que pueden faltar sin que la app deje de funcionar (ahora ninguno)
 
 
 def main():

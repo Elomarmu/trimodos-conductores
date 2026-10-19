@@ -16,7 +16,7 @@ PACKAGE_MODEL = "tms.package"
 GOODS_MODEL = "tms.goods"
 ATTACHMENT_MODEL = "ir.attachment"
 
-TASK_FIELDS = ["name", "company_id", "stage_id", "is_transport_order", "tms_package_ids", "tms_transport_order_attachment_id", "is_closed", "invoice_count"]
+TASK_FIELDS = ["name", "company_id", "stage_id", "is_transport_order", "tms_package_ids", "tms_transport_order_attachment_id"]
 PACKAGE_FIELDS = [
     "name", "carrier_tracking_ref", "goods_id", "number_of_packages", "euro_pallet_qty", "shipping_weight",
     "shipping_origin_id", "shipping_destination_id", "pickup_date", "forecast_unload_date", "state", "write_date",
@@ -28,7 +28,6 @@ REPORT_NAME = "tms_reporting.tms_transportation_order"
 # (modelo, método) permitidos. Todo lo demás se rechaza antes de salir hacia Odoo.
 ALLOWED_CALLS = {
     (ORDER_MODEL, "search_read"),
-    (ORDER_MODEL, "read"),           # solo invoice_count (Odoo 18: las tareas ya no lo tienen)
     (TASK_MODEL, "read"),
     (TASK_MODEL, "search_read"),
     (TASK_MODEL, "fields_get"),
@@ -63,8 +62,6 @@ class OdooClient:
         self._http = httpx.Client(timeout=25)   # JSON-RPC y sesión web (informe)
         self._anon = httpx.Client(timeout=40)   # descarga por token, SIN cookies de sesión
         self._major_cache: int | None = None
-        self._task_fields_cache: list[str] | None = None
-        self._task_has_invoice_count = True
 
     # ---- bajo nivel (privado) -------------------------------------------------
     def _rpc(self, service: str, method: str, args: list):
@@ -95,29 +92,6 @@ class OdooClient:
         uid = self._login()
         return self._rpc("object", "execute_kw", [self.s.odoo_db, uid, self.s.odoo_password, model, method, args, kwargs])
 
-    # ---- compatibilidad entre versiones de Odoo --------------------------------
-    def _task_fields(self) -> list[str]:
-        """Campos de tarea a leer. En Odoo 18 `invoice_count` ya no existe en la tarea: se calcula desde el pedido de venta."""
-        if self._task_fields_cache is None:
-            have = self._call(TASK_MODEL, "fields_get", [["invoice_count", "sale_order_id"]], {"attributes": ["type"]})
-            self._task_has_invoice_count = "invoice_count" in have
-            fields = [f for f in TASK_FIELDS if f != "invoice_count" or self._task_has_invoice_count]
-            if not self._task_has_invoice_count and "sale_order_id" in have:
-                fields.append("sale_order_id")
-            self._task_fields_cache = fields
-        return self._task_fields_cache
-
-    def _with_invoice_count(self, tasks: list[dict]) -> list[dict]:
-        if self._task_has_invoice_count:
-            return tasks
-        order_ids = {t["sale_order_id"][0] for t in tasks if t.get("sale_order_id")}
-        counts = {}
-        if order_ids:
-            counts = {o["id"]: o.get("invoice_count") or 0 for o in self._call(ORDER_MODEL, "read", [list(order_ids)], {"fields": ["invoice_count"]})}
-        for t in tasks:
-            t["invoice_count"] = counts.get((t.get("sale_order_id") or [0])[0], 0)
-        return tasks
-
     # ---- operaciones permitidas ----------------------------------------------
     def find_transport_tasks(self, order_name: str, company_id: int) -> list[dict]:
         orders = self._call(
@@ -126,17 +100,16 @@ class OdooClient:
         )
         if not orders or not orders[0]["tasks_ids"]:
             return []
-        fields = self._task_fields()
         tasks = self._call(
             TASK_MODEL, "search_read",
-            [[["id", "in", orders[0]["tasks_ids"]], "|", ["is_transport_order", "=", True], ["tms_transport_order_attachment_id", "!=", False]]],
-            {"fields": fields, "order": "is_transport_order desc, id desc"},  # primero las marcadas, luego la más reciente
+            [[["id", "in", orders[0]["tasks_ids"]], "|", "|", ["is_transport_order", "=", True],
+              ["tms_transport_order_attachment_id", "!=", False], ["tms_package_ids", "!=", False]]],
+            {"fields": TASK_FIELDS, "order": "is_transport_order desc, id desc"},  # primero las marcadas, luego la más reciente
         )
-        return self._with_invoice_count(tasks)
+        return tasks
 
     def read_task(self, task_id: int) -> dict | None:
-        fields = self._task_fields()
-        rows = self._with_invoice_count(self._call(TASK_MODEL, "read", [[task_id]], {"fields": fields}))
+        rows = self._call(TASK_MODEL, "read", [[task_id]], {"fields": TASK_FIELDS})
         return rows[0] if rows else None
 
     def read_packages(self, package_ids: list[int]) -> list[dict]:

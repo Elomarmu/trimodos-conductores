@@ -133,7 +133,7 @@ Si la usan los conductores de la empresa, hay que pasar a **Vercel Pro** u otro 
 - **Sin credenciales en el móvil.** Todo pasa por el backend.
 - **Lista blanca en el cliente Odoo** ([app/odoo_client.py](app/odoo_client.py)): no existe ninguna llamada genérica. Solo se puede leer tareas, bultos, mercancías, adjuntos y pedidos; escribir **únicamente** `goods_id`, `number_of_packages`, `euro_pallet_qty` y `shipping_weight` de `tms.package`; publicar nota **solo** en `project.task`; imprimir **solo** el informe de la orden de transporte. Hay tests que lo garantizan.
 - **El token del QR se valida en el servidor** (comparación en tiempo constante contra el `access_token` del adjunto) y la sesión firmada (30 min) se vuelve a validar al guardar. El servidor comprueba también que los bultos sean de esa tarea y que no hayan cambiado (`write_date`).
-- **Reglas de negocio en el servidor:** enteros ≥ 0, peso > 0 (aviso > 44.000 kg), mercancía existente, orden no cerrada/facturada/terminada.
+- **Reglas de negocio en el servidor:** enteros ≥ 0, peso > 0 (aviso > 44.000 kg), mercancía existente y **etapa de la tarea «Nuevo» o «En desarrollo»** (configurable con `EDITABLE_STAGES`; se compara sin importar mayúsculas ni acentos). En cualquier otra etapa la orden se puede consultar pero no modificar.
 - **Trazabilidad:** cada guardado deja una **nota interna** en la tarea («Modificado desde la app de conductores», fecha/hora y valores antes → ahora) y un log en el servidor sin datos sensibles (las URL con token no se registran).
 - **Cabeceras:** `nosniff`, `no-referrer`, sin marcos, cámara solo para la propia app, y la API nunca se guarda en caché.
 
@@ -160,7 +160,7 @@ $env:ENV_FILE=".env.odoo18"; .\.venv\Scripts\python.exe -X utf8 -m scripts.compr
 
 Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecnativa.net`, base `prod`):
 - **JSON-RPC con clave API:** funciona (la clave API se pone en `ODOO_PASSWORD`). Los modelos y campos del módulo TMS son los mismos y las empresas siguen siendo 1 (STINSA) y 7 (TRANSARGI).
-- **Cambio en la tarea:** `project.task` ya no tiene `invoice_count`; la app lo calcula desde el pedido de venta (`sale_order_id`) y la regla de «ya facturada» sigue funcionando en ambas versiones.
+- **Regla de edición:** solo depende de la etapa de la tarea («Nuevo» o «En desarrollo»), igual en la v15 y la v18; ya no se consultan facturas ni el estado de los bultos.
 - **Notas en la tarea:** Odoo 18 escapa el cuerpo recibido por RPC (se vería el HTML escrito). La app envía `body_is_html=True` solo en Odoo ≥ 18; en la v15 no existe ese parámetro. Comprobado en la plataforma de pruebas.
 - **Guardado completo en la v18 (probado):** escribir los 4 campos, dejar la mercancía en blanco, nota interna e imprimir la orden funcionan; tarda 4-5 s.
 - **Imprimir el PDF NO funciona solo con clave API.** Imprimir exige una sesión web (`/web/session/authenticate`) y Odoo no admite claves API ahí (tampoco por cabeceras Basic/Bearer). Opciones:
@@ -173,7 +173,8 @@ Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecna
 
 ## 10. Datos de Odoo: particularidades detectadas
 
-- Una tarea cuenta como **orden de transporte** si tiene `is_transport_order` **o** una orden de transporte ya generada: hay tareas reales (p. ej. pedido S2621553) con la marca a `False` pero con su PDF.
+- Una tarea cuenta como **orden de transporte** si tiene `is_transport_order`, **o** una orden de transporte ya generada, **o** bultos (`tms_package_ids`): hay tareas reales (p. ej. las del pedido S2621553) con la marca a `False`, con su PDF o todavía sin imprimir. Que se pueda **modificar** lo decide solo la etapa («Nuevo» o «En desarrollo»).
+- Si una tarea se recrea en Odoo, el QR del PDF antiguo apunta a la tarea anterior y deja de encontrarse; hay que escanear el de la orden nueva o escribir el número de pedido.
 - Un bulto puede venir **vacío** (sin mercancía, 0 elementos, 0 euro palets, 0 kg). Se puede dejar la **mercancía en blanco** (`goods_id` no es obligatorio en `tms.package`). Al guardar solo se validan los campos que cambian.
 - El mismo número de pedido puede existir en STINSA y en TRANSARGI: por eso al escribirlo a mano se elige la empresa.
 
