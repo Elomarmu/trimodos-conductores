@@ -600,3 +600,31 @@ def test_tarea_con_bultos_pero_sin_orden_generada_ni_marca_se_acepta():
     assert r["tarea"]["id"] == 300004 and r["editable"] is True and len(r["bultos"]) == 1
     out = service.update(odoo, get_settings(), r["sesion"], 300004, [{"package_id": 287103, "number_of_packages": 9}])
     assert out["ok"] and odoo.prints == [300004]        # se genera la primera orden de transporte
+
+
+def test_impresion_prohibida_deja_rastro_del_motivo_en_el_log(monkeypatch, caplog):
+    """Si Odoo responde 403 al imprimir (usuario sin permiso), la app falla con mensaje claro y deja el motivo en el log."""
+    import logging
+    c, srv = _real_client(monkeypatch)
+    original = srv.handler
+
+    def con_403(request):
+        if request.url.path.startswith("/report/pdf/"):
+            return httpx.Response(403, content=b"<html>Forbidden</html>", headers={"content-type": "text/html"})
+        return original(request)
+    c._http = httpx.Client(transport=httpx.MockTransport(con_403))
+    with caplog.at_level(logging.WARNING, logger="conductores"):
+        with pytest.raises(AppError) as e:
+            c.print_order(204067, 7)
+    assert e.value.code == "pdf_fallo"
+    assert "HTTP 403" in caplog.text and "no tiene permiso" in caplog.text
+
+
+def test_sesion_web_que_no_abre_deja_rastro(monkeypatch, caplog):
+    import logging
+    c, srv = _real_client(monkeypatch)
+    c._http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"result": {"uid": None}})))
+    with caplog.at_level(logging.WARNING, logger="conductores"):
+        with pytest.raises(AppError):
+            c.print_order(204067, 7)
+    assert "sesión web no se abrió" in caplog.text

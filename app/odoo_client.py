@@ -4,11 +4,14 @@ Lectura de tareas/bultos/mercancías/adjuntos; escritura SOLO de 4 campos en tms
 impresión SOLO del informe tms_reporting.tms_transportation_order.
 """
 import json
+import logging
 
 import httpx
 
 from .config import Settings
 from .errors import AppError
+
+log = logging.getLogger("conductores")
 
 ORDER_MODEL = "sale.order"
 TASK_MODEL = "project.task"
@@ -153,17 +156,22 @@ class OdooClient:
                 "params": {"db": self.s.odoo_db, "login": self.s.odoo_user, "password": self.s.odoo_web_password}})
             res = r.json().get("result") or {}
             if not res.get("uid"):
+                log.warning("print_order tarea=%s: la sesión web no se abrió (¿contraseña web, 2FA o clave API en lugar de contraseña?)", task_id)
                 raise fail
             r = self._http.get(f"{self.s.odoo_url}/report/pdf/{REPORT_NAME}/{int(task_id)}",
                                params={"context": json.dumps({"allowed_company_ids": [int(company_id)]})}, timeout=90)
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
+            log.warning("print_order tarea=%s: error de red (%s)", task_id, type(e).__name__)
             raise fail
         if r.status_code != 200 or not r.content.startswith(b"%PDF"):
+            log.warning("print_order tarea=%s: el informe devolvió HTTP %s (%s); 403 = el usuario no tiene permiso para imprimirlo",
+                        task_id, r.status_code, r.headers.get("content-type"))
             raise fail
         task = self.read_task(task_id)
         att_ref = task and task.get("tms_transport_order_attachment_id")
         att = att_ref and self.read_attachment(att_ref[0])
         if not att:
+            log.warning("print_order tarea=%s: se imprimió pero la tarea no tiene orden de transporte nueva", task_id)
             raise fail
         return att
 
