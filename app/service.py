@@ -122,7 +122,7 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
 # ---------------------------------------------------------------------------
 # Guardado
 # ---------------------------------------------------------------------------
-MAX_WEIGHT_WARNING = 44000
+MAX_WEIGHT_WARNING = 27000   # kg de mercancía a partir de los cuales se pide confirmar (posible exceso de la MMA del conjunto)
 FIELD_LABELS = {"goods_id": "Mercancía", "number_of_packages": "Elementos", "euro_pallet_qty": "Euro palets", "shipping_weight": "Peso"}
 
 
@@ -196,7 +196,7 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
     warnings = []
     for pid, vals in changes.items():
         if vals.get("shipping_weight", 0) > MAX_WEIGHT_WARNING:
-            warnings.append(f"{packages[pid]['name']}: el peso supera 44.000 kg.")
+            warnings.append(f"{packages[pid]['name']}: peso superior a 27.000 kg; es posible que el conjunto supere la MMA autorizada.")
 
     lines = _describe(odoo, packages, changes)
     base = {"ok": True, "bultos_modificados": len(changes), "avisos": warnings}
@@ -217,7 +217,7 @@ def update(odoo, settings: Settings, sesion: str, task_id: int, cambios: list[di
         raise AppError("No se han podido guardar todos los cambios. Vuelve a escanear la orden y revísala.", 502, "guardado_fallo")
 
     try:
-        odoo.post_note(task_id, _note_html(lines, ses["verified"]))
+        odoo.post_note(task_id, _note_html(lines, ses["verified"], warnings))
     except Exception:
         log.exception("No se pudo publicar la nota en la tarea %s", task_id)  # los datos ya están guardados: se sigue
 
@@ -285,10 +285,11 @@ def _describe(odoo, packages: dict, changes: dict) -> list[tuple[str, list[str]]
     return out
 
 
-def _note_html(lines: list[tuple[str, list[str]]], verified: bool) -> str:
+def _note_html(lines: list[tuple[str, list[str]]], verified: bool, avisos: list[str] | None = None) -> str:
     when = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%d/%m/%Y %H:%M")
     items = "".join(f"<li><b>{html.escape(name)}</b>: {html.escape('; '.join(rows))}</li>" for name, rows in lines)
     who = "orden abierta con el QR verificado" if verified else "orden abierta por número de pedido (sin QR)"
-    return (f"<p><b>Modificado desde la app de conductores</b> — {when}</p><ul>{items}</ul>"
+    aviso = "".join(f"<p><b>Aviso:</b> {html.escape(a)} La app pidió confirmar el peso.</p>" for a in (avisos or []))
+    return (f"<p><b>Modificado desde la app de conductores</b> — {when}</p><ul>{items}</ul>{aviso}"
             f"<p>Conductor: sin identificar ({who}).</p>")
 

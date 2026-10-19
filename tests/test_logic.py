@@ -664,3 +664,26 @@ def test_el_menu_enlaza_a_la_guia_y_se_guarda_para_uso_sin_conexion():
     raiz = Path(__file__).resolve().parent.parent / "public"
     assert 'id="btn-guia"' in (raiz / "index.html").read_text(encoding="utf-8") and 'href="/guia.html"' in (raiz / "index.html").read_text(encoding="utf-8")
     assert '"/guia.html"' in (raiz / "sw.js").read_text(encoding="utf-8")
+
+
+# --- peso alto: confirmación a partir de 27.000 kg (ya no existe el aviso de 44.000 kg)
+def test_umbral_de_peso_es_27000_y_no_bloquea():
+    assert service.MAX_WEIGHT_WARNING == 27000
+    for peso, hay_aviso in [(26999, False), (27000, False), (27001, True), (45000, True)]:
+        odoo = MockOdoo()
+        r = _sesion(odoo)
+        out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(shipping_weight=peso)])
+        assert bool(out["avisos"]) is hay_aviso, peso
+        assert odoo.packages[287102]["shipping_weight"] == peso       # nunca se rechaza por pesado
+        assert "44.000" not in " ".join(out["avisos"])
+
+
+def test_el_aviso_de_peso_habla_de_la_mma_y_queda_en_la_nota():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(shipping_weight=30000)])
+    assert "MMA autorizada" in out["avisos"][0] and "27.000" in out["avisos"][0]
+    assert "MMA autorizada" in odoo.notes[0][1] and "confirmar el peso" in odoo.notes[0][1]
+    sin = MockOdoo(); r2 = _sesion(sin)
+    service.update(sin, get_settings(), r2["sesion"], 204067, [_cambio(shipping_weight=9000)])
+    assert "Aviso" not in sin.notes[0][1]                              # sin peso alto, la nota queda como siempre

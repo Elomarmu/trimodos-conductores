@@ -2,7 +2,7 @@
 // App de conductores: 4 pantallas (menú, escáner, edición, resumen/resultado). Sin dependencias.
 
 const $ = (id) => document.getElementById(id);
-const MAX_KG_WARNING = 44000;
+const MAX_KG_WARNING = 27000;   // kg de mercancía a partir de los cuales se pide confirmar (posible exceso de la MMA)
 const LOGOS = { trimodos: "/img/trimodos.png", stinsa: "/img/stinsa.png", transargi: "/img/transargi.png" };
 const COMPANY_BY_ID = { 1: "stinsa", 7: "transargi" };
 const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
@@ -130,6 +130,7 @@ window.addEventListener("popstate", (e) => {
   if (!state.data && (target === "edit" || target === "review")) target = "menu";
   if (target === "review" && !pending) target = "edit";
   if (!$("confirm").hidden) $("confirm").hidden = true;
+  if (!$("mma").hidden) $("mma").hidden = true;
   show(target);
 });
 history.replaceState({ s: "menu" }, "");
@@ -356,7 +357,7 @@ function collectChanges() {
       { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: changed.euro_palets },
       { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
     ];
-    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: c.peso > MAX_KG_WARNING });
+    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: changed.peso && c.peso > MAX_KG_WARNING });
   }
   if (!changes.length) throw new Error("No has cambiado ningún dato.");
   return changes;
@@ -365,12 +366,22 @@ let pending = null;
 $("btn-review").addEventListener("click", () => {
   clearError();
   try { pending = collectChanges(); } catch (e) { return showError(e.message); }
+  const pesados = pending.filter((c) => c.heavy);
+  if (!pesados.length) return mostrarResumen();
+  // peso alto: antes del resumen se pide confirmarlo
+  $("mma-list").replaceChildren(...pesados.map((c) => h("li", {}, `${c.pkg.name}: ${fmtNum(c.payload.shipping_weight)} kg`)));
+  $("mma").hidden = false;
+  $("btn-mma-no").focus();
+});
+$("btn-mma-si").addEventListener("click", () => { $("mma").hidden = true; mostrarResumen(); });
+$("btn-mma-no").addEventListener("click", () => { $("mma").hidden = true; });
+
+function mostrarResumen() {
   $("review-title").textContent = "Revisa los cambios";
   $("review-actions").hidden = false;
   $("done-actions").hidden = true;
   const body = $("review-body");
   body.replaceChildren();
-  if (pending.some((c) => c.heavy)) body.append(h("div", { class: "banner warn" }, "Atención: el peso supera 44.000 kg. Puedes continuar."));
   for (const c of pending) {
     body.append(h("section", { class: "diff" }, h("h2", {}, c.name),
       c.rows.map((r) => r.changed
@@ -378,7 +389,7 @@ $("btn-review").addEventListener("click", () => {
         : h("div", { class: "line same" }, `${r.label}: ${r.after} (sin cambios)`))));
   }
   go("review");
-});
+}
 $("btn-back-edit").addEventListener("click", () => go("edit"));
 $("btn-save").addEventListener("click", () => { $("confirm").hidden = false; $("btn-no").focus(); });
 $("btn-no").addEventListener("click", () => { $("confirm").hidden = true; });

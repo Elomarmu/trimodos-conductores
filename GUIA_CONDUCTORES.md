@@ -28,7 +28,7 @@
 | «Esta orden tiene una versión más nueva» | El papel que llevas es antiguo. Trabaja con los datos que ves en pantalla y descarga la orden nueva al terminar. |
 | «Esta orden está en la etapa «…». Solo se puede modificar en «Nuevo» o «En desarrollo»» | La orden ya ha avanzado y no se puede cambiar desde la app. Llama a la oficina. |
 | «Esta orden todavía no tiene creados los lugares de carga y descarga (bultos). Ponte en contacto con tu responsable de tráfico.» | En la oficina aún no han preparado esa orden. Llama a tu responsable de tráfico; desde la app no se puede corregir. |
-| «El peso supera 44.000 kg» | Es solo un aviso. Revisa que el peso sea correcto; puedes continuar. |
+| «Es posible que el conjunto supere la MMA autorizada, confirme que es correcto el peso» | Has puesto más de 27.000 kg. Si es correcto, pulsa **«Sí, es correcto»** y pasarás al resumen. Si te has equivocado, pulsa **«No, corregir»**. |
 | «Esta orden ha cambiado mientras la editabas» | Alguien de la oficina la ha modificado. La app la recarga: revisa y repite el cambio. |
 | «No hay conexión. Inténtalo de nuevo» | Busca cobertura y vuelve a pulsar el botón. No se ha guardado nada. |
 | «Los cambios se han guardado, pero no se ha podido generar la nueva orden» | Pulsa **«Reintentar PDF»**. Si sigue fallando, llama a la oficina: los datos ya están guardados. |

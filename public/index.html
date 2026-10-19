@@ -104,6 +104,16 @@
   </form>
 </div>
 
+<div id="mma" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="mma-q" hidden>
+  <div class="dialog">
+    <h2 id="mma-q">Revisa el peso</h2>
+    <p>Es posible que el conjunto supere la MMA autorizada, confirme que es correcto el peso.</p>
+    <ul id="mma-list" class="mma-list"></ul>
+    <button id="btn-mma-si" class="btn ok huge">Sí, es correcto</button>
+    <button id="btn-mma-no" class="btn danger huge">No, corregir</button>
+  </div>
+</div>
+
 <div id="busy" class="overlay" hidden><div class="dialog"><h2 id="busy-msg">Un momento…</h2></div></div>
 <script src="app.js"></script>
 </body>

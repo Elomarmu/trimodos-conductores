@@ -111,3 +111,5 @@ a.btn { display: flex; align-items: center; justify-content: center; text-align:
 .guia thead { display: none; }
 .guia tr { border: 3px solid var(--line); border-radius: 14px; padding: 12px; margin: 10px 0; background: var(--card); }
 .guia td:first-child { font-weight: 700; color: var(--warn); margin-bottom: 6px; }
+
+.mma-list { margin: 0; padding-left: 1.3rem; font-size: 1.25rem; font-weight: 700; color: var(--warn); }
