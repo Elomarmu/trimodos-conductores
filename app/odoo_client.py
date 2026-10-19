@@ -62,6 +62,7 @@ class OdooClient:
         self._uid: int | None = None
         self._http = httpx.Client(timeout=25)   # JSON-RPC y sesión web (informe)
         self._anon = httpx.Client(timeout=40)   # descarga por token, SIN cookies de sesión
+        self._major_cache: int | None = None
         self._task_fields_cache: list[str] | None = None
         self._task_has_invoice_count = True
 
@@ -157,10 +158,18 @@ class OdooClient:
             raise PermissionError("Campo no permitido")
         self._call(PACKAGE_MODEL, "write", [[int(package_id)], values])
 
+    def _major(self) -> int:
+        if self._major_cache is None:
+            self._major_cache = int(self._rpc("common", "version", [])["server_version_info"][0])
+        return self._major_cache
+
     def post_note(self, task_id: int, html_body: str) -> None:
         """Nota interna (sin avisar a seguidores) en la tarea."""
-        self._call(TASK_MODEL, "message_post", [[int(task_id)]],
-                   {"body": html_body, "message_type": "comment", "subtype_xmlid": "mail.mt_note"})
+        kwargs = {"body": html_body, "message_type": "comment", "subtype_xmlid": "mail.mt_note"}
+        if self._major() >= 18:
+            # Odoo 18 escapa el cuerpo que llega por RPC (se vería el HTML escrito); hay que declararlo como HTML.
+            kwargs["body_is_html"] = True
+        self._call(TASK_MODEL, "message_post", [[int(task_id)]], kwargs)
 
     def print_order(self, task_id: int, company_id: int) -> dict:
         """Imprime la orden de transporte (Odoo crea un adjunto nuevo en la tarea) y devuelve ese adjunto."""

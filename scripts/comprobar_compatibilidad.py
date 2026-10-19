@@ -1,4 +1,4 @@
-﻿"""Comprobación de COMPATIBILIDAD con una versión de Odoo (p. ej. la 18). SOLO LECTURA: no escribe ni imprime nada.
+"""Comprobación de COMPATIBILIDAD con una versión de Odoo (p. ej. la 18). SOLO LECTURA: no escribe ni imprime nada.
 
 Uso (con ENV_FILE apuntando al entorno a probar):
     $env:ENV_FILE=".env.odoo18"; .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_compatibilidad
@@ -8,6 +8,9 @@ import sys
 from app.config import get_settings
 from app.odoo_client import (ATTACHMENT_FIELDS, ATTACHMENT_MODEL, EDITABLE_FIELDS, GOODS_MODEL, PACKAGE_FIELDS, PACKAGE_MODEL,
                              REPORT_NAME, TASK_FIELDS, TASK_MODEL, OdooClient)
+
+
+OPCIONALES = {"invoice_count"}  # en Odoo 18 la tarea ya no lo tiene: la app lo calcula desde el pedido de venta
 
 
 def main():
@@ -38,7 +41,10 @@ def main():
         if have is None:
             continue
         missing = [f for f in wanted if f not in have]
-        check(not missing, f"{model}: {len(wanted) - len(missing)}/{len(wanted)} campos" + (f"  FALTAN: {missing}" if missing else ""))
+        opcionales = [f for f in missing if f in OPCIONALES]   # la app tiene alternativa para estos
+        graves = [f for f in missing if f not in OPCIONALES]
+        check(not graves, f"{model}: {len(wanted) - len(missing)}/{len(wanted)} campos"
+              + (f"  FALTAN: {graves}" if graves else "") + (f"  (ausentes pero con alternativa: {opcionales})" if opcionales else ""))
     check(EDITABLE_FIELDS <= set(o.describe_fields(PACKAGE_MODEL, [""])), f"{PACKAGE_MODEL}: existen los 4 campos editables")
     try:
         o.search_goods("a", 1)

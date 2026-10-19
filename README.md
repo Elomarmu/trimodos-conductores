@@ -161,8 +161,10 @@ $env:ENV_FILE=".env.odoo18"; .\.venv\Scripts\python.exe -X utf8 -m scripts.compr
 Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecnativa.net`, base `prod`):
 - **JSON-RPC con clave API:** funciona (la clave API se pone en `ODOO_PASSWORD`). Los modelos y campos del módulo TMS son los mismos y las empresas siguen siendo 1 (STINSA) y 7 (TRANSARGI).
 - **Cambio en la tarea:** `project.task` ya no tiene `invoice_count`; la app lo calcula desde el pedido de venta (`sale_order_id`) y la regla de «ya facturada» sigue funcionando en ambas versiones.
+- **Notas en la tarea:** Odoo 18 escapa el cuerpo recibido por RPC (se vería el HTML escrito). La app envía `body_is_html=True` solo en Odoo ≥ 18; en la v15 no existe ese parámetro. Comprobado en la plataforma de pruebas.
+- **Guardado completo en la v18 (probado):** escribir los 4 campos, dejar la mercancía en blanco, nota interna e imprimir la orden funcionan; tarda 4-5 s.
 - **Imprimir el PDF NO funciona solo con clave API.** Imprimir exige una sesión web (`/web/session/authenticate`) y Odoo no admite claves API ahí (tampoco por cabeceras Basic/Bearer). Opciones:
-  1. Usuario técnico **sin verificación en dos pasos (2FA)** y con contraseña, puesta en `ODOO_WEB_PASSWORD` (la clave API sigue en `ODOO_PASSWORD`). Con 2FA activado, Odoo responde `{uid: null}` y no se puede imprimir.
+  1. (Verificado: funciona) Usuario técnico **sin verificación en dos pasos (2FA)** y con contraseña, puesta en `ODOO_WEB_PASSWORD` (la clave API sigue en `ODOO_PASSWORD`). Con 2FA activado, Odoo responde `{uid: null}` y no se puede imprimir.
   2. Pedir a Tecnativa un **método público** en la tarea que genere la orden y devuelva el adjunto (sin sesión web, solo con clave API).
 
 - Tema oscuro y de alto contraste pensado para la cabina (poca luz, guantes). Todos los colores están en variables al inicio de `public/styles.css`.

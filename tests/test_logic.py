@@ -315,14 +315,17 @@ def test_fmt_num():
 
 # --- cliente real contra un Odoo falso (sin red)
 class FakeOdooServer:
-    def __init__(self):
+    def __init__(self, major=15):
         self.calls = []
+        self.major = major
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/jsonrpc":
             p = json.loads(request.content)["params"]
             if p["service"] == "common":
+                if p["method"] == "version":
+                    return httpx.Response(200, json={"result": {"server_version": f"{self.major}.0", "server_version_info": [self.major, 0, 0, "final", 0, ""]}})
                 return httpx.Response(200, json={"result": 7})
             model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
             self.calls.append((model, method, args, kw))
@@ -595,3 +598,13 @@ def test_odoo18_invoice_count_se_calcula_desde_el_pedido(monkeypatch, facturas):
     campos = next(f for m, me, f in llamadas if (m, me) == ("project.task", "read"))
     assert "invoice_count" not in campos and "sale_order_id" in campos       # no se pide un campo que no existe
     assert service.is_editable(t, [])[0] is (facturas == 0)                  # y la regla de "facturada" sigue funcionando
+
+
+@pytest.mark.parametrize("major, esperado", [(15, False), (18, True)])
+def test_nota_interna_declara_html_solo_en_odoo_18(monkeypatch, major, esperado):
+    c, srv = _real_client(monkeypatch)
+    srv.major = major
+    c.post_note(204067, "<p>hola</p>")
+    kw = srv.calls[-1][3]
+    assert ("body_is_html" in kw) is esperado and (kw.get("body_is_html") is True if esperado else True)
+    assert kw["subtype_xmlid"] == "mail.mt_note"
