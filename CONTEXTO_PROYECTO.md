@@ -53,6 +53,7 @@ Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_id
 - Todo texto de la app en español, mensajes claros y no técnicos; un solo botón grande en el menú.
 - Secretos: nunca en el chat ni en git; el usuario los escribe en los `.env`.
 - Windows/PowerShell: usar los `.cmd` para arrancar (los `.ps1` están bloqueados); `ENV_FILE` elige el entorno y `load_dotenv` **no pisa** variables ya cargadas (ejecutar cada usuario en un proceso aparte); ojo con `\n` literal en cadenas y con filtros `-notmatch 'INFO'` (también cazan «Informe»).
+- Mac: mismos arranques en `.sh` (`./preparar.sh` la primera vez: el `python3` del Mac es 3.9 y la app necesita ≥ 3.10). `.gitattributes` mantiene los `.sh` con saltos de línea de Unix. La prueba de navegador usa Edge en Windows y Chrome en Mac (`NAVEGADOR` para forzarlo).
 
 ## 7. Comandos clave
 ```powershell
@@ -64,6 +65,14 @@ Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_id
 .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_compatibilidad     # con ENV_FILE, solo lectura
 .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_permisos
 .\.venv\Scripts\python.exe -X utf8 -m scripts.generar_guia                  # tras editar GUIA_CONDUCTORES.md
+```
+```bash
+# Mac
+./preparar.sh                      # solo la primera vez: crea .venv con un Python ≥ 3.10
+./iniciar-demo.sh | ./iniciar.sh | ./iniciar-v18.sh [archivo]
+.venv/bin/python -m pytest -q
+.venv/bin/python -X utf8 -m scripts.prueba_navegador
+ENV_FILE=.env.odoo18 .venv/bin/python -X utf8 -m scripts.comprobar_compatibilidad
 ```
 
 ## 8. Pendiente / siguientes pasos

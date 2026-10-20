@@ -1,0 +1,3 @@
+# Los scripts de Mac (.sh) siempre con saltos de línea de Unix, aunque se editen o se suban desde Windows:
+# con los de Windows (CRLF) el Mac no los puede ejecutar.
+*.sh text eol=lf

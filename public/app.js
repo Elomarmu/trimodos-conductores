@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const LOGOS = { trimodos: "/img/trimodos.png", stinsa: "/img/stinsa.png", transargi: "/img/transargi.png" };
 const COMPANY_BY_ID = { 1: "stinsa", 7: "transargi" };
 const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
-const state = { data: null, edits: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, health: {} };
+const state = { data: null, edits: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, pdfLoading: null, health: {} };
 
 // ---------- utilidades ----------
 function h(tag, attrs = {}, ...children) {
@@ -140,7 +140,30 @@ document.addEventListener("click", (e) => {
 });
 
 // ---------- pantalla 2: escáner ----------
-let stream = null, scanTimer = null, html5 = null, html5Ready = null, scanGen = 0;
+// Un solo escáner para todos los móviles: la cámara se pide en alta resolución (sin pedirla, iPhone da 640x480 y un
+// QR pequeño no se lee). Lee el lector del sistema (BarcodeDetector: Android) o, si no hay o falla (iPhone), jsQR
+// sobre el centro de la imagen, que es lo que se ve en pantalla, sin reducirla.
+let stream = null, scanTimer = null, scanGen = 0;
+const SCAN_EVERY_MS = 200;
+const JSQR_MAX_SIDE = 1200;   // lado máximo (px) del recorte que analiza jsQR
+const DETECTOR_MAX_FAILS = 8; // fallos seguidos del lector del sistema antes de pasar a jsQR
+
+async function systemDetector() {
+  if (!("BarcodeDetector" in window)) return null;
+  try {
+    if (!(await BarcodeDetector.getSupportedFormats()).includes("qr_code")) return null;
+    return new BarcodeDetector({ formats: ["qr_code"] });
+  } catch { return null; }   // existe pero no funciona (pasa en algunos iPhone con la opción experimental activada)
+}
+
+function readWithJsQR(v, canvas, ctx) {
+  const side = Math.min(v.videoWidth, v.videoHeight);
+  const n = Math.round(side * Math.min(1, JSQR_MAX_SIDE / side));
+  if (canvas.width !== n) { canvas.width = n; canvas.height = n; }
+  ctx.drawImage(v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, 0, 0, n, n);
+  const code = jsQR(ctx.getImageData(0, 0, n, n).data, n, n, { inversionAttempts: "dontInvert" });
+  return code ? code.data : null;
+}
 
 async function startScan() {
   const gen = ++scanGen;
@@ -150,50 +173,65 @@ async function startScan() {
     return;
   }
   try {
-    if ("BarcodeDetector" in window) {
-      const detector = new BarcodeDetector({ formats: ["qr_code"] });
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-      if (gen !== scanGen) { s.getTracks().forEach((t) => t.stop()); return; } // ya se salió de la pantalla
-      stream = s;
-      const v = $("video");
-      v.srcObject = s;
-      await v.play();
-      scanTimer = setInterval(async () => {
-        try {
-          const codes = await detector.detect(v);
-          if (codes.length) onQr(codes[0].rawValue);
-        } catch { /* fotograma no válido: se ignora */ }
-      }, 250);
-    } else {
-      await loadScript("/vendor/html5-qrcode.min.js");
+    const s = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    if (gen !== scanGen) { s.getTracks().forEach((t) => t.stop()); return; } // ya se salió de la pantalla
+    stream = s;
+    const v = $("video");
+    v.srcObject = s;
+    await v.play();
+    // Cámara frontal (la del ordenador): se ve como en un espejo, que es lo natural al acercarle el papel.
+    const facing = s.getVideoTracks()[0]?.getSettings?.().facingMode;
+    $("cam").classList.toggle("mirror", facing === "user" || (!facing && matchMedia("(pointer: fine)").matches));
+    $("cam").classList.add("live");
+    let detector = await systemDetector();
+    if (!detector) await loadScript("/vendor/jsQR.js");
+    if (gen !== scanGen) return;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let fails = 0;
+    const tick = async () => {
       if (gen !== scanGen) return;
-      const c = new Html5Qrcode("reader");
-      html5 = c;
-      html5Ready = c.start({ facingMode: "environment" }, { fps: 10, qrbox: (w, h) => { const s = Math.max(50, Math.floor(Math.min(w, h) * 0.85)); return { width: s, height: s }; } }, (text) => onQr(text), () => {});
-      await html5Ready;
-    }
-  } catch {
-    if (gen === scanGen) $("cam-msg").textContent = "No se puede usar la cámara. Revisa el permiso o escribe el número de pedido.";
+      let text = null;
+      if (v.videoWidth) {
+        if (detector) {
+          try {
+            const codes = await detector.detect(v);
+            if (codes.length) text = codes[0].rawValue;
+            fails = 0;
+          } catch {
+            if (++fails >= DETECTOR_MAX_FAILS) { await loadScript("/vendor/jsQR.js"); detector = null; }
+          }
+        } else {
+          text = readWithJsQR(v, canvas, ctx);
+        }
+      }
+      if (gen !== scanGen) return;
+      if (text) return onQr(text);
+      scanTimer = setTimeout(() => tick().catch(scanFailed(gen)), SCAN_EVERY_MS);
+    };
+    await tick();
+  } catch (e) {
+    scanFailed(gen)(e);
   }
 }
+const scanFailed = (gen) => () => {
+  if (gen === scanGen) $("cam-msg").textContent = "No se puede usar la cámara. Revisa el permiso o escribe el número de pedido.";
+};
 function loadScript(src) {
   return new Promise((ok, fail) => {
-    if (window.Html5Qrcode) return ok();
+    if (window.jsQR) return ok();
     document.head.append(h("script", { src, onload: ok, onerror: fail }));
   });
 }
 function stopScan() {
   scanGen++;
-  clearInterval(scanTimer); scanTimer = null;
+  clearTimeout(scanTimer); scanTimer = null;
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   $("video").srcObject = null;
-  if (html5) {
-    const c = html5, ready = html5Ready;
-    html5 = null; html5Ready = null;
-    // esperar a que termine de arrancar antes de pararla; cualquier fallo aquí es irrelevante
-    Promise.resolve(ready).then(() => c.stop()).then(() => c.clear()).catch(() => {});
-  }
-}let scanning = false;
+  $("cam").classList.remove("live");
+}
+let scanning = false;
 function onQr(text) {
   if (scanning) return;
   scanning = true;
@@ -209,7 +247,9 @@ for (const b of document.querySelectorAll(".seg-btn")) {
     for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", String(x === b));
   });
 }
-$("btn-order").addEventListener("click", () => {
+// Es un formulario: «Intro» en el ordenador o «Buscar» en el teclado del móvil también buscan.
+$("order-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
   clearError();
   if (!state.company) return showError("Elige la empresa: TRANSARGI o STINSA.");
   const n = $("order").value.trim();
@@ -304,14 +344,15 @@ function packageCard(p, index) {
       } catch (e) { showError(e.message); }
     }, 300);
   });
-  const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Ahora en Odoo: " + (p.mercancia?.name || "(en blanco)")));
+  // «Antes: …» solo se ve en los campos que se cambian (lo controla la clase .changed); es el mismo «Antes» del resumen.
+  const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Antes: " + (p.mercancia?.name || "(en blanco)")));
 
   const numField = (key, label, value, dec) => {
     const input = h("input", { type: "text", inputmode: dec ? "decimal" : "numeric", pattern: "[0-9.,]*", id: `${key}-${p.id}`, value: fmtNum(value), disabled: ro, autocomplete: "off" });
     input.addEventListener("input", () => { setEdit(p, key, parseNum(input.value)); markChanged(); });
     input.addEventListener("blur", () => { const n = parseNum(input.value); if (!Number.isNaN(n)) input.value = fmtNum(n); });
     input.addEventListener("focus", () => input.select());
-    return h("div", { class: "field", "data-key": key }, h("label", { for: input.id }, label), input, h("div", { class: "was" }, "Ahora en Odoo: " + fmtNum(p[key])));
+    return h("div", { class: "field", "data-key": key }, h("label", { for: input.id }, label), input, h("div", { class: "was" }, "Antes: " + fmtNum(p[key])));
   };
   const c = current(p);
   card.append(goodsField,
@@ -379,19 +420,22 @@ function mostrarResumen() {
   $("review-title").textContent = "Revisa los cambios";
   $("review-actions").hidden = false;
   $("done-actions").hidden = true;
-  const body = $("review-body");
-  body.replaceChildren();
-  for (const c of pending) {
-    body.append(h("section", { class: "diff" }, h("h2", {}, c.name),
+  $("review-body").replaceChildren(h("div", { class: "diffs" }, pending.map((c) =>
+    h("section", { class: "diff" }, h("h2", {}, c.name),
       c.rows.map((r) => r.changed
         ? h("div", { class: "line changed" }, h("div", { class: "lbl" }, r.label), h("div", { class: "before" }, "Antes: " + r.before), h("div", { class: "after" }, "Ahora: " + r.after))
-        : h("div", { class: "line same" }, `${r.label}: ${r.after} (sin cambios)`))));
-  }
+        : h("div", { class: "line same" }, `${r.label}: ${r.after} (sin cambios)`))))));
   go("review");
 }
 $("btn-back-edit").addEventListener("click", () => go("edit"));
 $("btn-save").addEventListener("click", () => { $("confirm").hidden = false; $("btn-no").focus(); });
 $("btn-no").addEventListener("click", () => { $("confirm").hidden = true; });
+// En el ordenador, «Esc» responde «No» en los avisos (nunca guarda nada).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("confirm").hidden) $("btn-no").click();
+  else if (!$("mma").hidden) $("btn-mma-no").click();
+});
 $("btn-yes").addEventListener("click", save);
 
 async function save() {
@@ -399,8 +443,6 @@ async function save() {
   busy("Guardando y generando la orden…");
   try {
     const r = await post("/api/update", { task_id: state.data.tarea.id, sesion: state.data.sesion, cambios: pending.map((c) => c.payload) });
-    state.pdfUrl = r.pdf_url;
-    state.pdfBlob = null;
     renderDone(r);
   } catch (e) {
     if (e.code === "datos_cambiados") {
@@ -426,17 +468,21 @@ $("btn-retry").addEventListener("click", async () => {
   busy("Generando la orden…");
   try {
     const r = await post("/api/reprint", { task_id: state.data.tarea.id, sesion: state.data.sesion });
-    state.pdfUrl = r.pdf_url; state.pdfBlob = null;
     $("btn-retry").hidden = true;
     renderDone({ ...r, bultos_modificados: pending.length });
   } catch (e) { showError(e.message); } finally { busy(null); }
 });
 
+const CHECK_SVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M11 25 l9 9 l18 -19" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function renderDone(r) {
+  state.pdfUrl = r.pdf_url; state.pdfBlob = null; state.pdfLoading = null;
+  loadPdf().catch(() => { /* se reintenta al pulsar un botón del PDF */ });
   $("review-title").textContent = "Orden generada";
-  const body = $("review-body");
-  body.replaceChildren(...[
-    h("div", { class: "done-mark" }, "✓"),
+  const mark = h("div", { class: "done-mark" });
+  mark.innerHTML = CHECK_SVG;
+  $("review-body").replaceChildren(...[
+    mark,
     h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte (${r.bultos_modificados} ${r.bultos_modificados === 1 ? "lugar modificado" : "lugares modificados"}).`),
     r.modo_aviso ? h("div", { class: "banner info" }, r.modo_aviso) : null,
   ].filter(Boolean));
@@ -448,26 +494,41 @@ function renderDone(r) {
   window.scrollTo({ top: 0 });
 }
 
-async function getPdf() {
-  if (state.pdfBlob) return state.pdfBlob;
-  busy("Preparando el PDF…");
-  try {
-    let res;
-    try { res = await fetch(state.pdfUrl, { headers: authHeaders() }); } catch { throw new Error("No hay conexión. Inténtalo de nuevo."); }
-    if (!res.ok) throw new Error("No se ha podido descargar el PDF. Inténtalo de nuevo.");
-    state.pdfBlob = await res.blob();
-    return state.pdfBlob;
-  } finally { busy(null); }
+// El PDF se descarga en segundo plano nada más generarse. Así, al pulsar «Abrir» o «Compartir», se abre en el mismo
+// toque: el iPhone solo deja abrir ventanas y compartir justo al pulsar, no después de esperar a la red.
+function loadPdf() {
+  if (!state.pdfLoading) {
+    const url = state.pdfUrl;
+    state.pdfLoading = fetch(url, { headers: authHeaders() })
+      .catch(() => { throw new Error("No hay conexión. Inténtalo de nuevo."); })
+      .then((res) => { if (!res.ok) throw new Error("No se ha podido descargar el PDF. Inténtalo de nuevo."); return res.blob(); })
+      .then((b) => { if (state.pdfUrl === url) state.pdfBlob = b; return b; })
+      .catch((e) => { if (state.pdfUrl === url) state.pdfLoading = null; throw e; });
+  }
+  return state.pdfLoading;
 }
 const pdfName = () => `orden-${(state.data.tarea.pedido || state.data.tarea.id)}.pdf`;
-async function pdfAction(fn) { clearError(); try { await fn(await getPdf()); } catch (e) { showError(e.message); } }
+function pdfAction(fn) {
+  clearError();
+  const run = (b) => {   // se llama sin esperas intermedias: abrir y compartir ocurren dentro del toque
+    try { const r = fn(b); if (r && r.catch) r.catch((e) => showError(e.message)); } catch (e) { showError(e.message); }
+  };
+  if (state.pdfBlob) { run(state.pdfBlob); return; }   // ya descargado: se usa dentro del mismo toque
+  busy("Preparando el PDF…");
+  loadPdf().finally(() => busy(null)).then(run, (e) => showError(e.message));
+}
+function pdfObjectUrl(b) {
+  const u = URL.createObjectURL(b);
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+  return u;
+}
 
 $("btn-open").addEventListener("click", () => pdfAction((b) => {
-  const w = window.open(URL.createObjectURL(b), "_blank");
+  const w = window.open(pdfObjectUrl(b), "_blank");
   if (!w) showError("El navegador ha bloqueado la ventana. Usa «Descargar PDF».");
 }));
 $("btn-download").addEventListener("click", () => pdfAction((b) => {
-  const a = h("a", { href: URL.createObjectURL(b), download: pdfName() });
+  const a = h("a", { href: pdfObjectUrl(b), download: pdfName() });
   document.body.append(a); a.click(); a.remove();
 }));
 $("btn-share").addEventListener("click", () => pdfAction(async (b) => {

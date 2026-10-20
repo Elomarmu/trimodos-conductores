@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
 <meta name="description" content="Corrige mercancía, elementos, euro palets y peso de la orden de transporte.">
 <meta name="robots" content="noindex, nofollow">
 <!-- Vista previa al compartir el enlace (WhatsApp, Teams, correo...). Las imágenes necesitan dirección absoluta. -->
@@ -27,6 +28,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="DECA Trimodos">
 <title>Modificación DECA - Trimodos</title>
+<link rel="preload" href="/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -44,18 +46,20 @@
 <!-- PANTALLA 2: escáner -->
 <main id="s-scan" class="screen" hidden>
   <h1>Escanea el código QR</h1>
-  <div id="cam" class="cam"><video id="video" playsinline muted></video><div id="reader"></div></div>
-  <p id="cam-msg" class="hint">Apunta al código QR de la orden.</p>
-  <button id="btn-test-qr" class="btn secondary" hidden>Usar QR de prueba</button>
-  <section class="manual">
+  <div class="scan-cam">
+    <div id="cam" class="cam"><video id="video" playsinline muted></video></div>
+    <p id="cam-msg" class="hint" aria-live="polite">Apunta al código QR de la orden.</p>
+    <button id="btn-test-qr" class="btn secondary" hidden>Usar QR de prueba</button>
+  </div>
+  <form id="order-form" class="manual" novalidate>
     <h2>¿No se lee? Escribe el pedido</h2>
     <div class="seg" role="radiogroup" aria-label="Empresa">
       <button type="button" class="btn seg-btn" data-company="transargi" role="radio" aria-checked="false">TRANSARGI</button>
       <button type="button" class="btn seg-btn" data-company="stinsa" role="radio" aria-checked="false">STINSA</button>
     </div>
-    <input id="order" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="S2621473" aria-label="Número de pedido">
-    <button id="btn-order" class="btn primary">Buscar pedido</button>
-  </section>
+    <input id="order" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="S2621473" aria-label="Número de pedido">
+    <button id="btn-order" type="submit" class="btn primary">Buscar pedido</button>
+  </form>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
 </main>
 
@@ -64,19 +68,21 @@
   <h1 id="edit-title">Orden</h1>
   <div id="edit-banners"></div>
   <div id="packages"></div>
-  <button id="btn-review" class="btn primary">Revisar cambios</button>
-  <button class="btn ghost" data-go="menu">Cancelar</button>
+  <div class="actions">
+    <button id="btn-review" class="btn primary">Revisar cambios</button>
+    <button class="btn ghost" data-go="menu">Cancelar</button>
+  </div>
 </main>
 
 <!-- PANTALLA 4: resumen, confirmación y resultado -->
 <main id="s-review" class="screen" hidden>
   <h1 id="review-title">Revisa los cambios</h1>
   <div id="review-body"></div>
-  <div id="review-actions">
+  <div id="review-actions" class="actions">
     <button id="btn-save" class="btn primary">Guardar cambios</button>
     <button id="btn-back-edit" class="btn ghost">Volver y corregir</button>
   </div>
-  <div id="done-actions" hidden>
+  <div id="done-actions" class="actions" hidden>
     <button id="btn-retry" class="btn primary" hidden>Reintentar PDF</button>
     <button id="btn-open" class="btn primary">Abrir PDF</button>
     <button id="btn-download" class="btn secondary">Descargar PDF</button>
@@ -114,7 +120,9 @@
   </div>
 </div>
 
-<div id="busy" class="overlay" hidden><div class="dialog"><h2 id="busy-msg">Un momento…</h2></div></div>
+<div id="busy" class="overlay" hidden>
+  <div class="dialog" role="status" aria-live="polite"><h2 id="busy-msg">Un momento…</h2><div class="progress" aria-hidden="true"><span></span></div></div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>
