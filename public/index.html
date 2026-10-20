@@ -38,7 +38,11 @@
 <!-- PANTALLA 1: menú -->
 <main id="s-menu" class="screen">
   <h1>DECA - Trimodos</h1>
-  <button id="btn-scan" class="btn primary huge">Escanear orden de transporte</button>
+  <p class="lead">Corrige la mercancía, los bultos, los palets y el peso de la orden de transporte.</p>
+  <button id="btn-scan" class="btn primary huge">
+    <svg class="qr" viewBox="0 0 21 21" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" fill-rule="evenodd" d="M0 0h7v7H0zM1 1v5h5V1zM2 2h3v3H2zM14 0h7v7h-7zM15 1v5h5V1zM16 2h3v3h-3zM0 14h7v7H0zM1 15v5h5v-5zM2 16h3v3H2zM9 0h2v2H9zM9 4h3v2H9zM8 8h2v3H8zM12 8h2v2h-2zM0 9h2v2H0zM4 9h3v2H4zM16 9h2v2h-2zM19 9h2v3h-2zM10 12h3v2h-3zM14 12h3v2h-3zM9 15h2v2H9zM13 15h2v3h-2zM17 15h4v2h-4zM9 19h3v2H9zM16 18h2v3h-2zM19 19h2v2h-2z"/></svg>
+    <span>Escanear orden de transporte</span>
+  </button>
   <a id="btn-guia" class="btn ghost" href="/guia.html">Cómo se usa (guía)</a>
   <p id="modo" class="hint" hidden></p>
 </main>
@@ -54,8 +58,8 @@
   <form id="order-form" class="manual" novalidate>
     <h2>¿No se lee? Escribe el pedido</h2>
     <div class="seg" role="radiogroup" aria-label="Empresa">
-      <button type="button" class="btn seg-btn" data-company="transargi" role="radio" aria-checked="false">TRANSARGI</button>
-      <button type="button" class="btn seg-btn" data-company="stinsa" role="radio" aria-checked="false">STINSA</button>
+      <button type="button" class="btn seg-btn" data-company="transargi" role="radio" aria-checked="false"><img src="/img/transargi.png" alt="TRANSARGI"></button>
+      <button type="button" class="btn seg-btn" data-company="stinsa" role="radio" aria-checked="false"><img src="/img/stinsa.png" alt="STINSA"></button>
     </div>
     <input id="order" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="S2621473" aria-label="Número de pedido">
     <button id="btn-order" type="submit" class="btn primary">Buscar pedido</button>

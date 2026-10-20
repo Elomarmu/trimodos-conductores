@@ -316,7 +316,7 @@ function packageCard(p, index) {
   const ro = !state.data.editable;
   const route = [p.origen?.name, p.destino?.name].filter(Boolean).join(" → ");
   const card = h("section", { class: "pkg" },
-    h("h2", {}, `Lugar ${index + 1} · ${p.name}`),
+    h("h2", {}, `Lugar ${index + 1}`, h("span", { class: "code" }, p.name)),
     h("div", { class: "route" }, route),
   );
 
@@ -379,7 +379,8 @@ function collectChanges() {
   const changes = [];
   for (const p of state.data.bultos) {
     const c = current(p);
-    const name = `Lugar ${state.data.bultos.indexOf(p) + 1} · ${p.name}`;
+    const place = `Lugar ${state.data.bultos.indexOf(p) + 1}`;
+    const name = `${place} · ${p.name}`;   // en los avisos; en pantalla, lugar y bulto van por separado
     const changed = {
       goods: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
       elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
@@ -397,7 +398,7 @@ function collectChanges() {
       { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: changed.euro_palets },
       { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
     ];
-    changes.push({ pkg: p, name, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: changed.peso && c.peso > state.data.umbral_peso_kg });   // el umbral lo manda el servidor
+    changes.push({ pkg: p, name, place, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: changed.peso && c.peso > state.data.umbral_peso_kg });   // el umbral lo manda el servidor
   }
   if (!changes.length) throw new Error("No has cambiado ningún dato.");
   return changes;
@@ -420,11 +421,12 @@ function mostrarResumen() {
   $("review-title").textContent = "Revisa los cambios";
   $("review-actions").hidden = false;
   $("done-actions").hidden = true;
+  $("review-body").className = "";
   $("review-body").replaceChildren(h("div", { class: "diffs" }, pending.map((c) =>
-    h("section", { class: "diff" }, h("h2", {}, c.name),
+    h("section", { class: "diff" }, h("h2", {}, c.place, h("span", { class: "code" }, c.pkg.name)),
       c.rows.map((r) => r.changed
-        ? h("div", { class: "line changed" }, h("div", { class: "lbl" }, r.label), h("div", { class: "before" }, "Antes: " + r.before), h("div", { class: "after" }, "Ahora: " + r.after))
-        : h("div", { class: "line same" }, `${r.label}: ${r.after} (sin cambios)`))))));
+        ? h("div", { class: "line changed" }, h("span", { class: "lbl" }, r.label), h("span", { class: "before" }, "Antes: " + r.before), h("span", { class: "after" }, "Ahora: " + r.after))
+        : h("div", { class: "line same" }, h("span", { class: "lbl" }, r.label), h("span", { class: "val" }, r.after, h("small", {}, " (sin cambios)"))))))));
   go("review");
 }
 $("btn-back-edit").addEventListener("click", () => go("edit"));
@@ -456,6 +458,7 @@ async function save() {
 
 function renderPdfFailed(msg) {
   $("review-title").textContent = "Cambios guardados";
+  $("review-body").className = "";
   $("review-body").replaceChildren(h("div", { class: "banner warn" }, msg));
   $("review-actions").hidden = true;
   $("done-actions").hidden = false;
@@ -481,6 +484,7 @@ function renderDone(r) {
   $("review-title").textContent = "Orden generada";
   const mark = h("div", { class: "done-mark" });
   mark.innerHTML = CHECK_SVG;
+  $("review-body").className = "result";
   $("review-body").replaceChildren(...[
     mark,
     h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte (${r.bultos_modificados} ${r.bultos_modificados === 1 ? "lugar modificado" : "lugares modificados"}).`),

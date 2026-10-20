@@ -8,133 +8,168 @@
 }
 
 /* Colores: negro puro (cabina de noche, pantallas OLED), un solo color por empresa y verde/rojo solo para sí/no.
-   Todos los textos superan 4,5:1 de contraste; los botones de color llevan texto negro (6,5-7,9:1). */
+   El color de la empresa marca solo lo importante: franja, botón principal, lo que se ha cambiado y el visor.
+   Todos los textos superan 4,5:1 de contraste y los bordes de los campos 3:1; los botones de color llevan texto negro. */
 :root {
   color-scheme: dark;
-  --bg: #000; --fg: #fff; --muted: #c8c8c8; --surface: #161616; --surface-hover: #262626; --line: #6b6b6b;
-  --brand: #fcda00; --brand-tint: #2b2400;            /* amarillo Grupo Trimodos (por defecto) */
+  --bg: #000; --surface: #131313; --surface-2: #1d1d1d; --surface-hover: #282828;
+  --line: #2e2e2e; --line-strong: #626262;          /* fina: separa; fuerte: borde de lo que se toca o se escribe */
+  --fg: #fff; --muted: #ababab;
+  --brand: #fcda00; --brand-tint: #1f1a00;           /* amarillo Grupo Trimodos (por defecto) */
   --warn: #ffd400; --ok: #00e060; --bad: #ff5a5a; --info: #5cc8ff;
-  --tap: 76px; --tap-big: 110px; --field: 68px;       /* alturas pensadas para el dedo (con guantes) */
-  --gutter: 16px; --radius: 16px;
+  --tap: 60px; --tap-big: 68px; --field: 56px;       /* alturas pensadas para el dedo (con guantes) */
+  --gutter: 18px; --r-sm: 12px; --r: 14px; --r-lg: 20px;
 }
-body[data-company="stinsa"]    { --brand: #009f92; --brand-tint: #002825; }   /* verde STINSA */
-body[data-company="transargi"] { --brand: #f17e49; --brand-tint: #2e1508; }   /* naranja TRANSARGI */
+body[data-company="stinsa"]    { --brand: #009f92; --brand-tint: #001f1c; }   /* verde STINSA */
+body[data-company="transargi"] { --brand: #f17e49; --brand-tint: #261108; }   /* naranja TRANSARGI */
 
 * { box-sizing: border-box; }
-html { font-size: 22px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html { font-size: 18px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
   background: var(--bg); color: var(--fg);
   font-family: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  line-height: 1.35;
+  line-height: 1.4;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 [hidden] { display: none !important; }
 button, input { font: inherit; color: inherit; }
 
 /* Cada pantalla ocupa el alto que queda bajo la franja de marca (sin scroll en el menú). */
-.screen { flex: 1 0 auto; width: 100%; max-width: 640px; margin: 0 auto; padding: var(--gutter); display: flex; flex-direction: column; gap: 14px; }
-h1 { font-size: 1.6rem; line-height: 1.15; margin: 8px 0 0; text-wrap: balance; }   /* sin palabras sueltas en la 2.ª línea */
-h2 { font-size: 1.2rem; line-height: 1.2; margin: 0 0 8px; text-wrap: balance; }
-.hint { color: var(--muted); margin: 0; }
+.screen { flex: 1 0 auto; width: 100%; max-width: 560px; margin: 0 auto; padding: 22px var(--gutter) 32px; display: flex; flex-direction: column; gap: 16px; }
+/* Escala: 15 · 18 · 20 · 28 px. Títulos un punto más apretados; sin palabras sueltas en la 2.ª línea. */
+h1 { font-size: 1.55rem; line-height: 1.15; font-weight: 750; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.12rem; line-height: 1.25; font-weight: 700; margin: 0; text-wrap: balance; }
+.hint { color: var(--muted); font-size: .94rem; margin: 0; }
+.num, input[inputmode=numeric], input[inputmode=decimal] { font-variant-numeric: tabular-nums; }
 
 /* ---- Botones ---- */
+/* Principal: color de la empresa. Secundario: relleno gris. Ghost: solo borde (volver, cancelar). */
 .btn {
-  min-height: var(--tap); width: 100%; border-radius: var(--radius); border: 3px solid var(--fg); background: var(--surface); color: var(--fg);
-  font-size: 1.15rem; font-weight: 700; line-height: 1.2; padding: 12px 16px; cursor: pointer;
+  min-height: var(--tap); width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  border-radius: var(--r); border: 1.5px solid var(--line-strong); background: var(--surface-2); color: var(--fg);
+  font-size: 1.05rem; font-weight: 700; line-height: 1.2; padding: 10px 20px; text-align: center; text-decoration: none; cursor: pointer;
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
-.btn:active:not(:disabled) { transform: scale(.98); }
-:focus-visible { outline: 4px solid var(--info); outline-offset: 3px; }
+.btn:active:not(:disabled) { transform: scale(.985); }
+:focus-visible { outline: 3px solid var(--info); outline-offset: 3px; }
 .btn.primary { background: var(--brand); color: #000; border-color: var(--brand); }
-.btn.secondary { background: #fff; color: #000; border-color: #fff; }
 .btn.ok { background: var(--ok); color: #000; border-color: var(--ok); }
-.btn.danger { background: var(--bad); color: #000; border-color: var(--bad); }
-.btn.ghost { background: transparent; border-color: var(--line); }   /* secundario: no compite con el principal */
-.btn.huge { min-height: var(--tap-big); font-size: 1.5rem; }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
-a.btn { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
-.actions { display: flex; flex-direction: column; gap: 14px; }
-@media (prefers-reduced-motion: no-preference) { .btn { transition: transform .08s, filter .12s, background-color .12s; } }
+.btn.danger { background: transparent; color: var(--bad); border-color: var(--bad); }   /* «No»: rojo, pero sin tapar al «Sí» */
+.btn.ghost { background: transparent; border-color: #3d3d3d; }                        /* no compite con el principal */
+.btn.huge { min-height: var(--tap-big); font-size: 1.2rem; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.actions { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+@media (prefers-reduced-motion: no-preference) { .btn { transition: transform .08s, filter .12s, background-color .12s, border-color .12s; } }
 
-/* ---- Marca: franja blanca con el logo (los logos llevan texto de color) y borde del color de la empresa ---- */
-.brandbar { background: #fff; display: flex; align-items: center; justify-content: center; padding: 10px 16px; border-bottom: 8px solid var(--brand); }
-.brandbar a { display: flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; }
+/* ---- Marca: franja blanca con el logo (los logos llevan texto de color) y raya del color de la empresa ---- */
+.brandbar { background: #fff; display: flex; align-items: center; justify-content: center; padding: 12px 16px; border-bottom: 4px solid var(--brand); }
+.brandbar a { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
 /* Tamaño por MÁXIMOS con alto y ancho automáticos: el navegador reduce el logo siempre en proporción. */
-.brandbar img { height: auto; width: auto; max-height: 48px; max-width: 70%; object-fit: contain; display: block; }
+.brandbar img { height: auto; width: auto; max-height: 34px; max-width: 62%; object-fit: contain; display: block; }
+.brandbar a > img { max-width: 62vw; }   /* en la guía el logo va dentro de un enlace: el % sería del propio enlace */
+/* Sin empresa todavía (menú, escáner, guía): raya del grupo con los tres colores, como en /img/compartir.png. */
+body:not([data-company]) .brandbar { border-image: linear-gradient(90deg, #fcda00 0 33.34%, #009f92 0 66.67%, #f17e49 0) 1; }
 body[data-screen="menu"] .brandbar { padding: 22px 16px; }
-body[data-screen="menu"] .brandbar img { max-height: 72px; max-width: 80%; }
+body[data-screen="menu"] .brandbar img { max-height: 58px; max-width: 76%; }
 
-/* ---- Avisos ---- */
-.banner { padding: 14px 16px; border-radius: 14px; font-weight: 700; border: 3px solid; margin: 6px 0; }
-.banner.bad { border-color: var(--bad); background: #2a0000; }
-.banner.warn { border-color: var(--warn); color: var(--warn); background: #221c00; }
-.banner.info { border-color: var(--info); color: var(--info); background: #001a26; }
-#err { position: sticky; top: 0; z-index: 30; margin: 0; border-radius: 0; border-width: 0 0 3px; color: #fff; font-size: 1.1rem; }
+/* ---- Avisos: raya de color a la izquierda, texto blanco ---- */
+.banner { padding: 12px 14px; border-radius: var(--r-sm); font-weight: 600; border: 1px solid; border-left-width: 5px; margin: 0; }
+.banner.bad { border-color: var(--bad); background: #250808; }
+.banner.warn { border-color: var(--warn); background: #1f1a00; }
+.banner.info { border-color: var(--info); background: #04161f; }
+#err { position: sticky; top: 0; z-index: 30; border-radius: 0; border-width: 0 0 2px; padding: 14px var(--gutter); font-size: 1rem; }
+#edit-banners { display: flex; flex-direction: column; gap: 10px; }
+#edit-banners:empty { display: none; }
 
-/* ---- Pantalla 1: menú ---- */
-#s-menu { justify-content: center; }
-/* «DECA - Trimodos» mide ~8 veces el tamaño de letra: se reduce lo justo para que quepa en una línea en móviles estrechos. */
-#s-menu h1 { text-align: center; font-size: min(2rem, calc((100vw - 2 * var(--gutter)) / 8.2)); margin: 0 0 6px; }
-#s-menu #btn-scan { min-height: 38vh; font-size: 1.9rem; }
-#s-menu #btn-guia { min-height: 64px; font-size: 1.05rem; }   /* secundario: el botón grande sigue siendo uno solo */
-
-/* ---- Pantalla 2: escáner ---- */
-.scan-cam { display: flex; flex-direction: column; gap: 14px; }
-.cam { position: relative; background: #111; border-radius: var(--radius); overflow: hidden; aspect-ratio: 1 / 1; max-height: 46vh; width: 100%; border: 3px solid var(--line); }
-.cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cam.mirror video { transform: scaleX(-1); }   /* cámara frontal (ordenador): se ve como en un espejo */
-/* Visor: esquinas del color de la empresa sobre la zona que se analiza (el centro de la imagen). */
-.cam.live::after {
-  content: ""; position: absolute; top: 50%; left: 50%; height: 72%; aspect-ratio: 1 / 1; transform: translate(-50%, -50%); pointer-events: none;
-  --c: var(--brand); --l: 22%; --w: 6px;
+/* ---- Visor: cuatro esquinas, el mismo dibujo en el botón del menú y sobre la cámara (color y tamaño en --c, --l, --w) ---- */
+#s-menu #btn-scan::before, .cam.live::after {
   background:
     linear-gradient(var(--c) 0 0) left top / var(--l) var(--w), linear-gradient(var(--c) 0 0) left top / var(--w) var(--l),
     linear-gradient(var(--c) 0 0) right top / var(--l) var(--w), linear-gradient(var(--c) 0 0) right top / var(--w) var(--l),
     linear-gradient(var(--c) 0 0) left bottom / var(--l) var(--w), linear-gradient(var(--c) 0 0) left bottom / var(--w) var(--l),
     linear-gradient(var(--c) 0 0) right bottom / var(--l) var(--w), linear-gradient(var(--c) 0 0) right bottom / var(--w) var(--l);
   background-repeat: no-repeat;
+}
+
+/* ---- Pantalla 1: menú ---- */
+#s-menu { justify-content: center; gap: 18px; }
+/* «DECA - Trimodos» mide ~8 veces el tamaño de letra: se reduce lo justo para que quepa en una línea en móviles estrechos. */
+#s-menu h1 { text-align: center; font-size: min(1.9rem, calc((100vw - 2 * var(--gutter)) / 8.2)); }
+#s-menu .lead { text-align: center; color: var(--muted); margin: -8px auto 6px; max-width: 30ch; }
+#s-menu #btn-scan { position: relative; min-height: min(40vh, 320px); flex-direction: column; gap: 18px; border-radius: var(--r-lg); padding: 32px; font-size: 1.4rem; }
+#s-menu #btn-scan::before { content: ""; position: absolute; inset: 16px; pointer-events: none; --c: rgba(0, 0, 0, .85); --l: 30px; --w: 5px; }
+#btn-scan .qr { width: 60px; height: 60px; display: block; }
+#btn-scan span { max-width: 13ch; text-wrap: balance; }
+#s-menu #btn-guia { min-height: 54px; font-size: 1rem; }   /* secundario: el botón grande sigue siendo uno solo */
+#s-menu #modo { text-align: center; }
+
+/* ---- Pantalla 2: escáner ---- */
+.scan-cam { display: flex; flex-direction: column; gap: 12px; }
+.cam { position: relative; background: #0d0d0d; border-radius: var(--r-lg); overflow: hidden; aspect-ratio: 1 / 1; max-height: 46vh; width: 100%; border: 1px solid var(--line); }
+.cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam.mirror video { transform: scaleX(-1); }   /* cámara frontal (ordenador): se ve como en un espejo */
+/* Visor: esquinas del color de la empresa sobre la zona que se analiza (el centro de la imagen). */
+.cam.live::after {
+  content: ""; position: absolute; top: 50%; left: 50%; height: 72%; aspect-ratio: 1 / 1; transform: translate(-50%, -50%); pointer-events: none;
+  --c: var(--brand); --l: 20%; --w: 5px;
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, .8));
 }
-.manual { border-top: 2px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 12px; }
-.manual h2 { margin: 0; }
+.manual { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-direction: column; gap: 12px; }
+/* Empresa: su logo (de /img, un solo color: se lee sobre oscuro). La elegida se ve como la franja que tendrá la orden:
+   logo sobre blanco, con el borde del color de la empresa. */
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.seg-btn[aria-checked="true"] { background: var(--brand); color: #000; border-color: var(--brand); }
-.seg-btn[data-company="stinsa"][aria-checked="true"]    { background: #009f92; border-color: #009f92; }
-.seg-btn[data-company="transargi"][aria-checked="true"] { background: #f17e49; border-color: #f17e49; }
+.seg-btn { --co: var(--brand); padding: 10px 14px; }
+.seg-btn[data-company="stinsa"]    { --co: #009f92; }
+.seg-btn[data-company="transargi"] { --co: #f17e49; }
+.seg-btn img { height: 26px; width: auto; max-width: 100%; object-fit: contain; display: block; pointer-events: none; }
+.seg-btn[aria-checked="true"] { background: #fff; border-color: var(--co); box-shadow: 0 0 0 2px var(--co); }
 
 input[type=text], input[type=password] {
-  width: 100%; min-height: var(--field); font-size: 1.4rem; padding: 10px 14px; border-radius: 14px;
-  border: 3px solid var(--line); background: #000; color: var(--fg);
+  width: 100%; min-height: var(--field); font-size: 1.25rem; padding: 10px 14px; border-radius: var(--r-sm);
+  border: 1.5px solid var(--line-strong); background: #000; color: var(--fg);
 }
-input::placeholder { color: #9a9a9a; opacity: 1; }
-input[inputmode=numeric], input[inputmode=decimal], .num { font-variant-numeric: tabular-nums; }
-input[type=text]:disabled { color: var(--muted); background: #0d0d0d; -webkit-text-fill-color: var(--muted); opacity: 1; }
+input[type=text]:focus-visible, input[type=password]:focus-visible { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 35%, transparent); }
+input::placeholder { color: #8a8a8a; opacity: 1; }
+input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-color: var(--line); -webkit-text-fill-color: var(--muted); opacity: 1; }
 
 /* ---- Pantalla 3: datos y edición ---- */
-.pkg { background: var(--surface); border: 3px solid var(--line); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
-.pkg h2 { margin: 0; }
-.route { color: var(--muted); font-size: 1rem; }
-.field label { display: block; font-weight: 700; margin-bottom: 6px; }
+/* Cada lugar se lee como la orden de papel: cabecera (lugar y bulto), ruta, y casillas con su etiqueta encima. */
+.pkg { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
+.pkg h2, .diff h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.code { color: var(--muted); font-size: .88rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.route { color: var(--muted); font-size: .94rem; margin-top: -8px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.field label { display: block; font-size: .88rem; font-weight: 650; color: var(--muted); margin-bottom: 6px; }
+.field.changed label { color: var(--brand); }
 .field.changed input { border-color: var(--brand); }
 /* Valor anterior: solo aparece en lo que se cambia (mismo «Antes» que en el resumen). */
-.field .was { display: none; color: var(--muted); font-size: .9rem; margin-top: 4px; }
+.field .was { display: none; color: var(--muted); font-size: .85rem; margin-top: 6px; }
 .field.changed .was { display: block; }
-.sugg { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.sugg { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .sugg:empty { display: none; }
-.sugg .btn { min-height: 60px; text-align: left; }
+.sugg .btn { min-height: 52px; justify-content: flex-start; text-align: left; font-weight: 600; border-color: var(--line); }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* ---- Pantalla 4: resumen y resultado ---- */
-.diff { border: 3px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--surface); }
-.diff h2 { margin-bottom: 10px; }
-.diff .line { display: grid; grid-template-columns: 1fr; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line); }
-.diff .line.changed { background: var(--brand-tint); border: 3px solid var(--brand); border-radius: 12px; padding: 10px; margin: 6px 0; }
-.diff .line .lbl { font-weight: 700; }
+.diffs { display: flex; flex-direction: column; gap: 14px; }
+.diff { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 4px 18px 6px; overflow: hidden; }
+.diff h2 { padding: 14px 0; }
+.diff .line { display: grid; gap: 2px; padding: 12px 0; border-top: 1px solid var(--line); }
+/* Lo cambiado: fila entera con fondo y raya del color de la empresa; lo demás, en gris y en una línea. */
+.diff .line.changed { position: relative; margin: 0 -18px; padding: 12px 18px 12px 22px; background: var(--brand-tint); }
+.diff .line.changed::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--brand); }
+.diff .lbl { font-weight: 700; font-size: .94rem; }
 .diff .before { color: var(--muted); text-decoration: line-through; font-variant-numeric: tabular-nums; }
-.diff .after { font-size: 1.3rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; }
-.diff .same { color: var(--muted); }
-.done-mark { width: 96px; height: 96px; margin: 0 auto; color: var(--ok); }
+.diff .after { font-size: 1.25rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; }
+.diff .line.same { grid-template-columns: 1fr auto; gap: 12px; color: var(--muted); }
+.diff .line.same .lbl { font-weight: 600; }
+.diff .line.same .val { font-variant-numeric: tabular-nums; text-align: right; }
+.diff .line.same small { font-size: .85rem; }
+/* Resultado: marca de hecho a la izquierda del texto, todo alineado con el título. */
+#review-body.result { display: grid; grid-template-columns: 56px 1fr; column-gap: 16px; row-gap: 14px; align-items: center; }
+#review-body.result > .banner { grid-column: 1 / -1; }
+#review-body.result > p { margin: 0; font-size: 1.05rem; max-width: 60ch; }
+.done-mark { width: 56px; height: 56px; padding: 11px; border-radius: 50%; background: rgba(0, 224, 96, .14); color: var(--ok); }
 .done-mark svg { width: 100%; height: 100%; display: block; }
 @media (prefers-reduced-motion: no-preference) {
   .done-mark path { stroke-dasharray: 60; stroke-dashoffset: 60; animation: trazo .45s .1s ease-out forwards; }
@@ -142,13 +177,13 @@ input[type=text]:disabled { color: var(--muted); background: #0d0d0d; -webkit-te
 @keyframes trazo { to { stroke-dashoffset: 0; } }
 
 /* ---- Ventanas (código, confirmación, peso, espera) ---- */
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .88); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 40; }
-.dialog { background: #111; border: 4px solid var(--brand); border-radius: 20px; padding: 20px; width: 100%; max-width: 560px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
-.dialog h2 { font-size: 1.8rem; margin: 0; }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .82); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 40; }
+.dialog { background: #151515; border: 1px solid #333; border-top: 4px solid var(--brand); border-radius: var(--r-lg); padding: 22px; width: 100%; max-width: 480px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.dialog h2 { font-size: 1.5rem; }
 .dialog p { margin: 0; }
-.mma-list { margin: 0; padding-left: 1.3rem; font-size: 1.25rem; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
+.mma-list { margin: 0; padding-left: 1.2rem; font-size: 1.12rem; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
 /* Barra de espera (guardar e imprimir tarda unos segundos) */
-.progress { height: 10px; border-radius: 5px; background: #333; overflow: hidden; }
+.progress { height: 6px; border-radius: 3px; background: #2e2e2e; overflow: hidden; }
 .progress span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--brand); }
 @media (prefers-reduced-motion: no-preference) { .progress span { animation: progreso 1.3s ease-in-out infinite; } }
 @media (prefers-reduced-motion: reduce) { .progress span { width: 100%; animation: pulso 1.6s ease-in-out infinite alternate; } }
@@ -156,52 +191,66 @@ input[type=text]:disabled { color: var(--muted); background: #0d0d0d; -webkit-te
 @keyframes pulso { from { opacity: .35; } to { opacity: 1; } }
 
 /* ---- Guía (generada desde GUIA_CONDUCTORES.md) ---- */
-.guia { gap: 10px; padding-bottom: 28px; }
-.guia h1 { font-size: 1.5rem; margin: 10px 0 4px; }
-.guia h2 { font-size: 1.25rem; margin: 22px 0 6px; color: var(--brand); border-bottom: 2px solid var(--line); padding-bottom: 4px; }
-.guia p, .guia li { font-size: 1.02rem; margin: .45rem 0; }
-.guia ol, .guia ul { padding-left: 1.5rem; margin: .3rem 0; }
-.guia li { margin: .7rem 0; }
+.guia { gap: 10px; padding-bottom: 32px; }
+.guia > a.btn:first-child { background: transparent; color: var(--fg); border-color: #3d3d3d; }   /* arriba, discreto; el de abajo, el principal */
+.guia h1 { margin: 12px 0 4px; }
+.guia h2 { margin: 24px 0 4px; color: var(--brand); padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.guia p, .guia li { margin: .45rem 0; }
+.guia ol, .guia ul { padding-left: 1.4rem; margin: .3rem 0; }
+.guia li { margin: .65rem 0; }
+.guia li::marker { color: var(--muted); font-weight: 700; }
 .guia strong { color: #fff; }
 .guia em { color: var(--muted); }
 .guia table, .guia tbody, .guia tr, .guia td { display: block; }   /* la tabla de avisos pasa a tarjetas: cabe en el móvil */
 .guia thead { display: none; }
-.guia tr { border: 3px solid var(--line); border-radius: 14px; padding: 12px; margin: 10px 0; background: var(--surface); }
-.guia td:first-child { font-weight: 700; color: var(--warn); margin-bottom: 6px; }
+.guia tr { border: 1px solid var(--line); border-left: 5px solid var(--warn); border-radius: var(--r-sm); padding: 12px 14px; margin: 10px 0; background: var(--surface); }
+.guia td:first-child { font-weight: 700; color: var(--warn); margin-bottom: 4px; }
 
 /* ================= Ordenador ================= */
 /* Con ratón: letra y alturas más contenidas (no hay guantes ni dedos), y respuesta al pasar el ratón. */
 @media (hover: hover) and (pointer: fine) {
-  html { font-size: 18px; }
-  :root { --tap: 56px; --tap-big: 72px; --field: 56px; }
-  .btn:hover:not(:disabled) { filter: brightness(1.12); }
-  .btn.ghost:hover:not(:disabled), .seg-btn:not([aria-checked="true"]):hover, .sugg .btn:hover { background: var(--surface-hover); border-color: var(--fg); filter: none; }
-  #s-menu #btn-guia { min-height: 52px; }
+  html { font-size: 17px; }
+  :root { --tap: 50px; --tap-big: 56px; --field: 50px; }
+  .btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn:not(.primary):not(.ok):not(.danger):not([aria-checked="true"]):hover:not(:disabled) { background: var(--surface-hover); border-color: #8a8a8a; filter: none; }
+  .btn.danger:hover:not(:disabled) { background: #2a0c0c; filter: none; }
+  #s-menu #btn-guia { min-height: 48px; }
 }
 
 /* Pantalla ancha: se aprovecha el espacio en columnas; los textos largos no pasan de ~75 caracteres por línea. */
 @media (min-width: 900px) {
   :root { --gutter: 32px; }
-  .screen { max-width: 1120px; padding-top: 28px; padding-bottom: 40px; gap: 18px; }
-  #s-menu { max-width: 560px; }
-  #s-menu #btn-scan { min-height: min(38vh, 300px); }
-  .brandbar img { max-height: 52px; }
+  .screen { max-width: 1080px; padding-top: 40px; padding-bottom: 56px; gap: 22px; }
+  h1 { font-size: 2rem; }
+  .brandbar { padding: 14px 32px; }
+  .brandbar img { max-height: 40px; }
+  body[data-screen="menu"] .brandbar img { max-height: 60px; }
+  #s-menu { max-width: 520px; }
+  #s-menu h1 { font-size: 2.2rem; }
+  #s-menu #btn-scan { min-height: 280px; }
 
   /* escáner: cámara a la izquierda, pedido escrito a mano a la derecha */
-  #s-scan { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 32px; row-gap: 18px; align-items: start; }
+  #s-scan { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); column-gap: 32px; row-gap: 22px; align-items: start; }
   #s-scan > h1, #s-scan > .btn { grid-column: 1 / -1; }
-  #s-scan > .btn { justify-self: start; width: auto; min-width: 260px; }
-  .cam { max-height: 52vh; aspect-ratio: 4 / 3; }
-  .manual { border: 3px solid var(--line); border-radius: 18px; padding: 20px; background: var(--surface); }
+  #s-scan > .btn { justify-self: start; width: auto; min-width: 220px; }
+  .cam { max-height: 58vh; aspect-ratio: 4 / 3; }
+  .manual { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 24px; background: var(--surface); gap: 14px; }
 
-  /* edición y resumen: tarjetas en cuadrícula */
-  #packages, .diffs { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 20px; align-items: start; }
-  .pkg, .diff { margin-bottom: 0; }
-  #edit-banners .banner, #review-body > .banner, #review-body > p { max-width: 760px; }
+  /* edición: fichas en dos columnas. Resumen: una ficha bajo otra, leída como tabla (dato, antes, ahora) */
+  #packages { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; align-items: start; }
+  .diffs { max-width: 820px; gap: 20px; }
+  .pkg { padding: 22px; margin-bottom: 0; }
+  .diff { padding: 4px 22px 6px; }
+  .diff .line { grid-template-columns: 9rem minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; align-items: baseline; }
+  .diff .line.changed { margin: 0 -22px; padding: 12px 22px 12px 26px; }
+  .diff .line.same { grid-template-columns: 9rem minmax(0, 1fr); }
+  .diff .line.same .val { text-align: left; }
+  #edit-banners .banner, #review-body > .banner { max-width: 760px; }
+  #review-body.result { max-width: 760px; }
 
   /* botones de acción en fila, alineados a la izquierda como el contenido; el principal, el primero (como en el móvil) */
   .actions { flex-direction: row; flex-wrap: wrap; }
-  .actions .btn { width: auto; min-width: 220px; }
+  .actions .btn { width: auto; min-width: 200px; padding-inline: 28px; }
 
   .guia { max-width: 760px; }
   .guia > a.btn { width: auto; align-self: flex-start; padding-inline: 28px; }
