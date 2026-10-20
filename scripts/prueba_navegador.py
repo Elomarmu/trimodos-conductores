@@ -1,7 +1,10 @@
 """Prueba de extremo a extremo en un navegador real (Edge/Chrome) con una cámara simulada que muestra un QR.
 
 Uso (con el entorno de desarrollo instalado: pip install -r requirements-dev.txt):
-    .\\.venv\\Scripts\\python.exe -X utf8 -m scripts.prueba_navegador
+    Windows:  .\\.venv\\Scripts\\python.exe -X utf8 -m scripts.prueba_navegador
+    Mac:      .venv/bin/python -X utf8 -m scripts.prueba_navegador
+Usa el navegador instalado: Edge en Windows (viene de serie) y Chrome en Mac. Se puede forzar con
+NAVEGADOR=msedge, NAVEGADOR=chrome o NAVEGADOR=chromium (este último lo descarga «playwright install chromium»).
 
 Arranca su propio servidor en modo SIMULADO (puerto 8765): no toca Odoo.
 """
@@ -23,6 +26,7 @@ BASE = f"http://localhost:{PORT}"
 CODIGO = "codigo-de-prueba"
 QR_TEXT ="https://www.stinsa.com/web/content/900002?access_token=11111111-aaaa-bbbb-cccc-000000000001&download=true"
 SALIDA = Path(os.environ.get("PRUEBA_CAPTURAS", tempfile.gettempdir()))
+NAVEGADOR = os.environ.get("NAVEGADOR") or ("msedge" if sys.platform == "win32" else "chrome")
 
 
 def crear_video_qr(destino: Path, texto: str) -> None:
@@ -67,7 +71,7 @@ def main():
     try:
         esperar_servidor()
         with sync_playwright() as p:
-            navegador = p.chromium.launch(channel="msedge", headless=True, args=[
+            navegador = p.chromium.launch(channel=None if NAVEGADOR == "chromium" else NAVEGADOR, headless=True, args=[
                 "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", f"--use-file-for-fake-video-capture={video}"])
             ctx = navegador.new_context(viewport={"width": 390, "height": 844}, permissions=["camera"], accept_downloads=True)
             pg = ctx.new_page()
