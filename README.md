@@ -8,33 +8,47 @@ PWA para móvil que permite al conductor corregir, al cargar, la **mercancía, l
 
 ---
 
-## 1. Arrancar en local (Windows)
+## 1. Arrancar en local (Windows y Mac)
+
+Funciona igual en los dos: los archivos **`.cmd` son para Windows** y los **`.sh` para Mac**. Todo se ejecuta en la terminal de VS Code, dentro de la carpeta del proyecto.
 
 ### Una sola vez
-1. **Instalar Python y Git** (PowerShell):
+
+**Windows** (PowerShell):
+1. **Instalar Python y Git:**
    ```powershell
    winget install -e --id Python.Python.3.12
    winget install -e --id Git.Git
    ```
    Cierra y vuelve a abrir VS Code y comprueba: `python --version` y `git --version`.
-2. **Preparar el proyecto** (en la carpeta del proyecto):
+2. **Preparar el proyecto:**
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
    ```
-3. **Crear el `.env`**: copia `.env.example` como `.env` y rellénalo (ver [Configuración](#2-configuración-env)). **Nunca lo subas a git** (ya está en `.gitignore`).
+
+**Mac** (Terminal):
+1. **Python 3.10 o más nuevo.** El que trae el Mac es antiguo (3.9). Si no tienes otro: `brew install python@3.12` (o descárgalo de [python.org](https://www.python.org/downloads/)).
+2. **Preparar el proyecto:** `./preparar.sh` (busca un Python que valga, crea `.venv` e instala lo necesario).
+
+**En los dos:** crea el `.env` copiando `.env.example` como `.env` y rellénalo (ver [Configuración](#2-configuración-env)). **Nunca lo subas a git** (ya está en `.gitignore`).
 
 ### Cada vez que quieras usarla
-| Quiero… | Ejecuta |
-|---|---|
-| Probar **sin tocar Odoo** (datos simulados) | `.\iniciar-demo.cmd` |
-| Usar el modo del `.env` (normalmente `real`) | `.\iniciar.cmd` |
+| Quiero… | Windows | Mac |
+|---|---|---|
+| Probar **sin tocar Odoo** (datos simulados) | `.\iniciar-demo.cmd` | `./iniciar-demo.sh` |
+| Usar el modo del `.env` (normalmente `real`) | `.\iniciar.cmd` | `./iniciar.sh` |
+| Usar el Odoo 18 de pruebas (`.env.odoo18`) | `.\iniciar-v18.cmd [archivo]` | `./iniciar-v18.sh [archivo]` |
 
 Después abre **http://localhost:8000** en el navegador. La cámara web funciona porque `localhost` se considera seguro.
 
 - **¿Funciona?** En `http://localhost:8000/api/health` debe salir `{"ok":true,"modo":"mock"...}` (o `"real"`). En modo simulado la pantalla inicial muestra «Modo de prueba» y la pantalla del escáner tiene un botón «Usar QR de prueba».
 - **Parar el servidor:** `Ctrl+C` en la terminal donde lo arrancaste.
 - Si Windows dice que *«la ejecución de scripts está deshabilitada»*, usa los `.cmd` (no los `.ps1`).
+- Si el Mac dice *«permission denied»* al lanzar un `.sh`, ejecútalo con `bash`, por ejemplo `bash iniciar-demo.sh`.
+- Las variables que ya estén puestas en la terminal **mandan sobre el `.env`** (`load_dotenv` no las pisa): arranca cada modo en una terminal limpia.
+
+**Comandos de Python:** en este README salen con la ruta de Windows (`.\.venv\Scripts\python.exe`). En el Mac es `.venv/bin/python`, y las variables se ponen delante del comando: `ENV_FILE=.env.odoo18 .venv/bin/python …` en lugar de `$env:ENV_FILE=".env.odoo18"; …`.
 
 ## 2. Configuración (`.env`)
 
@@ -61,6 +75,7 @@ Después abre **http://localhost:8000** en el navegador. La cámara web funciona
 .\.venv\Scripts\python.exe -X utf8 -m scripts.diagnostico S2621473        # SOLO LECTURA contra Odoo (.env en real)
 .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_permisos          # permisos del usuario de Odoo, sin escribir nada
 ```
+En el Mac, los mismos con `.venv/bin/python` (por ejemplo `.venv/bin/python -m pytest -q`). La prueba de navegador usa Edge en Windows y Chrome en Mac (se puede forzar con `NAVEGADOR=chrome`, `msedge` o `chromium`).
 
 **Producción solo con el pedido de prueba S2621473** (tarea 204067, bulto PK2627486, id 287102) y con permiso expreso: cada guardado real crea un PDF y una nota nuevos en la tarea, que no se borran solos.
 
@@ -70,15 +85,15 @@ La cámara del móvil exige **HTTPS**; `localhost` solo vale en el propio ordena
 
 **Cloudflare (sin cuenta):**
 ```powershell
-winget install -e --id Cloudflare.cloudflared
-# 1) arranca la app:   .\iniciar-demo.cmd      (recomendado: datos simulados)
+winget install -e --id Cloudflare.cloudflared          # en el Mac: brew install cloudflared
+# 1) arranca la app:   .\iniciar-demo.cmd              (Mac: ./iniciar-demo.sh; recomendado: datos simulados)
 # 2) en otra terminal: cloudflared tunnel --url http://localhost:8000
 ```
 Copia la dirección `https://….trycloudflare.com` que aparece y ábrela en el Android (Chrome → ⋮ → *Instalar aplicación*). Cierra el túnel con `Ctrl+C`.
 
 **ngrok (alternativa):** instala ngrok, crea cuenta gratuita, `ngrok config add-authtoken <token>` y `ngrok http 8000`.
 
-> ⚠️ Mientras el túnel esté abierto, **cualquiera con la dirección puede usar la app**. Úsalo con `iniciar-demo.cmd`; con datos reales, solo el tiempo imprescindible.
+> ⚠️ Mientras el túnel esté abierto, **cualquiera con la dirección puede usar la app**. Úsalo con `iniciar-demo.cmd` / `iniciar-demo.sh`; con datos reales, solo el tiempo imprescindible.
 
 ## 5. Usuario técnico en Odoo (sustituir a tu usuario administrador)
 
@@ -98,7 +113,7 @@ El cambio es **solo tocar el `.env`** (`ODOO_USER`, `ODOO_PASSWORD`). Aun con tu
 
 3. **Comprobarlo sin escribir nada** (con el `.env` apuntando al usuario nuevo):
    ```powershell
-   .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_permisos
+   .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_permisos     # Mac: .venv/bin/python -X utf8 -m scripts.comprobar_permisos
    ```
    Debe terminar en «Todo correcto». Con un administrador salen varios «FALLA»: es lo esperado. Esta comprobación solo ve los permisos por modelo; **las reglas de registro (record rules) y la impresión real conviene validarlas con Tecnativa** y con una prueba autorizada sobre S2621473.
 4. Rotar la contraseña si alguna vez se ha pegado en un chat o se ha compartido.
@@ -156,6 +171,7 @@ La app puede apuntar a otro Odoo **sin tocar el `.env` de producción**: crea un
 ```powershell
 $env:ENV_FILE=".env.odoo18"; .\.venv\Scripts\python.exe -X utf8 -m scripts.comprobar_compatibilidad   # SOLO LECTURA
 .\iniciar-v18.cmd                                                                                  # arranca la app contra ese Odoo
+# Mac:  ENV_FILE=.env.odoo18 .venv/bin/python -X utf8 -m scripts.comprobar_compatibilidad   y   ./iniciar-v18.sh
 ```
 
 Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecnativa.net`, base `prod`):
@@ -167,8 +183,10 @@ Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecna
   1. (Verificado: funciona) Usuario técnico **sin verificación en dos pasos (2FA)** y con contraseña, puesta en `ODOO_WEB_PASSWORD` (la clave API sigue en `ODOO_PASSWORD`). Con 2FA activado, Odoo responde `{uid: null}` y no se puede imprimir.
   2. Pedir a Tecnativa un **método público** en la tarea que genere la orden y devuelva el adjunto (sin sesión web, solo con clave API).
 
-- **Guía dentro de la app:** el botón «Cómo se usa (guía)» del menú abre `public/guia.html`, que se **genera** desde `GUIA_CONDUCTORES.md` (una sola fuente). Tras editar el `.md`, ejecuta `.\.venv\Scripts\python.exe -X utf8 -m scripts.generar_guia` (un test falla si `guia.html` se queda desfasada). Funciona sin conexión.
-- Tema oscuro y de alto contraste pensado para la cabina (poca luz, guantes). Todos los colores están en variables al inicio de `public/styles.css`.
+- **Guía dentro de la app:** el botón «Cómo se usa (guía)» del menú abre `public/guia.html`, que se **genera** desde `GUIA_CONDUCTORES.md` (una sola fuente). Tras editar el `.md`, ejecuta `.\.venv\Scripts\python.exe -X utf8 -m scripts.generar_guia` (Mac: `.venv/bin/python -X utf8 -m scripts.generar_guia`; un test falla si `guia.html` se queda desfasada). Funciona sin conexión.
+- Tema oscuro y de alto contraste pensado para la cabina (poca luz, guantes). Todos los colores están en variables al inicio de `public/styles.css`. Todos los textos superan 4,5:1 de contraste.
+- **Tipografía:** Atkinson Hyperlegible Next (Braille Institute, licencia SIL OFL en `public/fonts/OFL.txt`), elegida porque distingue bien 1/l/I y 0/O en números de pedido y pesos. Va dentro de la app (`public/fonts/`), así que funciona sin conexión.
+- **Versión de ordenador:** es la misma dirección; la pantalla se adapta sola. Con ratón la letra y los botones son más contenidos (base 18 px en lugar de 22 px); a partir de 900 px de ancho el escáner pone la cámara y el pedido escrito lado a lado, y los lugares y el resumen se ven en cuadrícula. «Intro» busca el pedido y «Esc» responde «No» en los avisos. La cámara del ordenador se ve en espejo.
 - **Marca:** franja blanca con el logo y color de acento por empresa: Grupo Trimodos **#fcda00**, STINSA **#009f92**, TRANSARGI **#f17e49** (texto negro sobre los botones: contraste 6,5-7,9:1). El acento cambia según la empresa de la orden (o la elegida al escribir el pedido).
 - Los logos se preparan con `scripts/preparar_logos.py` (recorta márgenes y los deja en `public/img/`). Al cambiar archivos de la carcasa, **sube la versión de caché** en `public/sw.js` (`conductores-v2` → `v3`).
 
@@ -192,6 +210,6 @@ scripts/                diagnóstico, permisos, prueba de navegador, iconos
 tests/                  pruebas del backend
 ```
 
-**Librería de terceros incluida:** `public/vendor/html5-qrcode.min.js` (html5-qrcode 2.3.8, Apache-2.0), reserva para navegadores sin `BarcodeDetector`. Se sirve desde la propia app para que funcione sin depender de un CDN.
+**Librería de terceros incluida:** `public/vendor/jsQR.js` (jsQR 1.4.0, Apache-2.0): lee el QR en los móviles sin lector del sistema (`BarcodeDetector`), como el iPhone. La cámara se pide en alta resolución (1920x1080) y se analiza el centro de la imagen sin reducirla: con la resolución por defecto del iPhone (640x480) un QR pequeño no se leía. Se sirve desde la propia app para que funcione sin depender de un CDN.
 
 **API:** `POST /api/resolve-qr` · `GET /api/goods?q=` · `POST /api/update` · `POST /api/reprint` · `GET /api/pdf/{id}?token=` · `GET /api/health`.
