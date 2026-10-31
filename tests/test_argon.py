@@ -154,3 +154,32 @@ def test_excel_en_base64(monkeypatch):
     r = c.post("/api/argon/procesar?modo=prueba&hoy=2026-10-30", content=cuerpo, headers={"x-clave": "secreto", "content-type": "application/json"})
     assert r.status_code == 200, r.text
     assert c.post("/api/argon/procesar", content=b'{"otra":1}', headers={"x-clave": "secreto"}).status_code == 400
+
+
+def test_enlaces_en_el_correo(monkeypatch):
+    """Nº de pedido con enlace a Odoo y datos que faltan con enlace a su celda de la Excel."""
+    import base64, json as _json
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import argon_api as A
+
+    class OdooConEnlace(OdooFalso):
+        def enlace(self, i):
+            return f"https://stinsa18.x/odoo/action-sale.action_orders/{i}"
+
+    o = OdooConEnlace()
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert all(p["url"].endswith(f"/{p['pedido'][1:]}") for p in r["pedidos_creados"])
+    for x in r["pendientes_de_datos"]:
+        assert x["celda"] and all(i["celda"] and "!" in i["celda"] for i in x["ir"]), x
+    monkeypatch.setenv("ARGON_CLAVE", "secreto")
+    monkeypatch.setattr(E, "Odoo", lambda *a, **k: OdooConEnlace())
+    for v, x in (("ARGON_ODOO_URL", "https://stinsa18.x"), ("ARGON_ODOO_DB", "d"), ("ARGON_ODOO_USER", "u"), ("ARGON_ODOO_PASSWORD", "p")):
+        monkeypatch.setenv(v, x)
+    app = FastAPI(); app.include_router(A.router); c = TestClient(app)
+    cuerpo = _json.dumps({"excel_b64": base64.b64encode(Path(EXCEL).read_bytes()).decode(),
+                          "url_excel": "https://sp.example/Doc.aspx?sourcedoc=%7BX%7D&file=ARGON.xlsx"})
+    j = c.post("/api/argon/procesar?modo=real&hoy=2026-10-30", content=cuerpo, headers={"x-clave": "secreto"}).json()
+    assert 'href="https://stinsa18.x/odoo/action-sale.action_orders/' in j["correo_html"]
+    if j["odoo"]["pendientes_de_datos"]:
+        assert "activeCell=" in j["correo_html"]

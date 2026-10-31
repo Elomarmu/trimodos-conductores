@@ -36,6 +36,10 @@ class Odoo:
             raise RuntimeError("Odoo no acepta el usuario o la clave API")
         self.llamadas = 0
 
+    def enlace(self, pedido_id: int) -> str:
+        """Dirección del pedido en Odoo (para el hipervínculo del correo)."""
+        return f"{self.url}/odoo/action-sale.action_orders/{pedido_id}"
+
     def _rpc(self, servicio, metodo, args):
         datos = json.dumps({"jsonrpc": "2.0", "method": "call", "params": {"service": servicio, "method": metodo, "args": args}})
         req = urllib.request.Request(self.url + "/jsonrpc", data=datos.encode(), headers={"Content-Type": "application/json"})
@@ -64,6 +68,10 @@ def preparar(servicios: list[F.Servicio], desde: dt.date) -> dict[str, list[F.Se
             por_rot[s.rotacion].append(s)
     return {r: sorted(l, key=lambda x: (x.fecha, x.id_servicio)) for r, l in por_rot.items()
             if any(x.estado == "LISTO PARA ODOO" for x in l)}
+
+
+def enlace(odoo, pedido_id):
+    return odoo.enlace(pedido_id) if hasattr(odoo, "enlace") else None
 
 
 def clave_linea(product_id, fecha, equipo_id):
@@ -122,7 +130,8 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                     odoo("sale.order", "write", [[abierto["id"]], {"order_line": [(0, 0, l) for l in nuevas]}])
                     if abierto["state"] in ("draft", "sent"):
                         odoo("sale.order", "action_confirm", [[abierto["id"]]])
-                res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas)})
+                res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas),
+                                                 "url": enlace(odoo, abierto["id"])})
             else:
                 sufijo = f"|{len(de_rot) + 1}" if de_rot else ""
                 pedido = {"partner_id": cfg["cliente_id"], "company_id": cfg["empresa_id"], "origin": base + sufijo,
@@ -130,12 +139,13 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                           "order_line": [(0, 0, l) for l in nuevas]}
                 if cfg.get("tipo_pedido_id"):
                     pedido["type_id"] = cfg["tipo_pedido_id"]
-                nombre = "(prueba)"
+                nombre, oid = "(prueba)", None
                 if real:
                     oid = odoo("sale.order", "create", [pedido])
                     odoo("sale.order", "action_confirm", [[oid]])
                     nombre = odoo("sale.order", "search_read", [[["id", "=", oid]]], fields=["name"])[0]["name"]
                 res["pedidos_creados"].append({"pedido": nombre, "contenedor": cont, "lineas": len(nuevas),
+                                               "url": enlace(odoo, oid) if oid else None,
                                                "importe": round(sum(l.get("price_unit", 0) * l.get("product_uom_qty", 1)
                                                                     for l in nuevas), 2)})
             res["lineas_nuevas"] += len(nuevas)
@@ -159,6 +169,8 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
                     os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
     res = escribir(odoo, rot, cfg, real, limite_s)
     res["pendientes_de_datos"] = [{"fecha": s.fecha, "contenedor": s.contenedor, "servicio": s.servicio,
-                                   "texto": s.texto, "falta": "; ".join(s.falta)}
+                                   "texto": s.texto, "falta": "; ".join(s.falta),
+                                   "celda": f"'{F.L.HOJA}'!{s.celda}" if s.celda else None,
+                                   "ir": [{"dato": f, "celda": s.ir.get(f)} for f in s.falta]}
                                   for s in servicios if s.fecha >= desde.isoformat() and s.estado == "FALTAN DATOS"]
     return res
