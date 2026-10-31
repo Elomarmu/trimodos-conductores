@@ -324,6 +324,11 @@ def _tarifa(s: Servicio, tarifas: list, fecha: str):
     return mejor
 
 
+def _col_ref(hoja, col_ref, col_id):
+    """La columna de referencia (la que se rellena a mano) si la tabla ya la tiene; si no, la del ID."""
+    return col_ref if col_ref in COLS.get(hoja, {}) else col_id
+
+
 def donde_rellenar(s: Servicio, falta: list, p_fila, t, cond: dict, tablas: dict) -> dict:
     """Para cada dato que falta, la celda de la Excel donde se rellena (para el enlace del correo)."""
     t_fila = t.get("_fila") if t else None
@@ -335,7 +340,8 @@ def donde_rellenar(s: Servicio, falta: list, p_fila, t, cond: dict, tablas: dict
             ir[f] = ref("PRODUCTOS", "¿Se factura?", p_fila)
         elif f == "producto":
             # el tren lleva un producto por tramo: se rellena en TARIFAS (la fila del tramo o una nueva)
-            ir[f] = ref("TARIFAS", "ID producto", t_fila) if (t_fila or s.servicio == "TREN") else ref("PRODUCTOS", "ID producto", p_fila)
+            h = "TARIFAS" if (t_fila or s.servicio == "TREN") else "PRODUCTOS"
+            ir[f] = ref(h, _col_ref(h, "Ref. producto", "ID producto"), t_fila if h == "TARIFAS" else p_fila)
         elif f == "cuenta analítica":
             ir[f] = ref("TARIFAS", "Cuenta analítica (ID)", t_fila) if t_fila else ref("PRODUCTOS", "Cuenta analítica (ID)", p_fila)
         elif f == "precio":
@@ -343,9 +349,9 @@ def donde_rellenar(s: Servicio, falta: list, p_fila, t, cond: dict, tablas: dict
         elif f == "coste":
             ir[f] = ref("TARIFAS", "Coste €", t_fila)
         elif f == "proveedor":
-            ir[f] = ref("TARIFAS", "ID proveedor", t_fila)
+            ir[f] = ref("TARIFAS", _col_ref("TARIFAS", "Ref./NIF proveedor", "ID proveedor"), t_fila)
         elif f.startswith("ficha de proveedor"):
-            ir[f] = ref("CONDUCTORES", "ID proveedor", cond.get("_fila"))
+            ir[f] = ref("CONDUCTORES", _col_ref("CONDUCTORES", "Ref./NIF proveedor", "ID proveedor"), cond.get("_fila"))
         elif f.startswith("conductor "):
             ir[f] = ref("CONDUCTORES", "ID conductor en Odoo" if cond else "Código", cond.get("_fila"))
         elif f.startswith("chasis "):
@@ -480,10 +486,12 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
     return servicios
 
 
-def calcular(ruta, desde=None, hasta=None):
+def calcular(ruta, desde=None, hasta=None, completar=None):
+    """completar(tablas): opcional, completa productos y proveedores desde su referencia en Odoo antes de tarificar."""
     conts, estados = L.leer(ruta)
     movs = L.movimientos(estados)
     tablas = leer_tablas(ruta)
+    calcular.excel = completar(tablas) if completar else {"escrituras": [], "avisos": []}
     servs = construir(movs, tablas["tipos"]) + codigos_pactados(movs, tablas)
     rotaciones(servs)                       # antes de filtrar fechas: la rotación puede empezar antes
     cruce = cruzar_reservas(servs, tablas["reservas"])

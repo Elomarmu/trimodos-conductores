@@ -19,10 +19,12 @@ from collections import defaultdict
 
 import argon_facturacion as F
 import argon_odoo as AO
+import argon_referencias as R
 
 PERMITIDO = {
     ("sale.order", "search_read"), ("sale.order", "create"), ("sale.order", "write"), ("sale.order", "action_confirm"),
     ("sale.order.line", "search_read"), ("tms.equipment", "search_read"), ("tms.equipment", "create"),
+    ("product.product", "search_read"), ("res.partner", "search_read"),  # referencias de la Excel (solo lectura)
 }
 
 
@@ -158,8 +160,6 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
 
 def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0):
     desde = desde or dt.date.fromisoformat(cfg.get("fecha_inicio", "2026-10-15"))
-    servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60))  # 60 días antes: para saber dónde empieza cada rotación
-    rot = preparar(servicios, desde)
     if odoo is None:
         # Variables propias de ARGON: las ODOO_* de Vercel son las de producción de la app de conductores
         faltan = [v for v in ("ARGON_ODOO_URL", "ARGON_ODOO_DB", "ARGON_ODOO_USER", "ARGON_ODOO_PASSWORD") if not os.environ.get(v)]
@@ -167,7 +167,11 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
             raise RuntimeError("Faltan variables en Vercel: " + ", ".join(faltan) + " (datos del Odoo 18 de pruebas)")
         odoo = Odoo(os.environ["ARGON_ODOO_URL"], os.environ["ARGON_ODOO_DB"], os.environ["ARGON_ODOO_USER"],
                     os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
+    # 60 días antes: para saber dónde empieza cada rotación. Productos y proveedores desde su referencia en Odoo.
+    servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo))
+    rot = preparar(servicios, desde)
     res = escribir(odoo, rot, cfg, real, limite_s)
+    res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     res["pendientes_de_datos"] = [{"fecha": s.fecha, "contenedor": s.contenedor, "servicio": s.servicio,
                                    "texto": s.texto, "falta": "; ".join(s.falta),
                                    "celda": f"'{F.L.HOJA}'!{s.celda}" if s.celda else None,

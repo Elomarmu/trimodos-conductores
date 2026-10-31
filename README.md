@@ -229,4 +229,8 @@ SharePoint (`General/CARBUROS/Daily/Pruebas/ARGON.xlsx`).
 - Variables nuevas en Vercel: `ARGON_CLAVE` (obligatoria; la misma en n8n) y, opcional, `ARGON_CONFIG`
   (JSON: `cliente_id`, `empresa_id`, `tipo_pedido_id`, `fecha_inicio`). Y las del Odoo 18 de pruebas, **propias de ARGON** (las `ODOO_*` son las de producción de la app): `ARGON_ODOO_URL`, `ARGON_ODOO_DB`, `ARGON_ODOO_USER`
   y `ARGON_ODOO_PASSWORD` (clave API).
+- Productos y proveedores por **referencia**: en TARIFAS, PRODUCTOS, CONDUCTORES y RESERVAS se rellena «Ref. producto»
+  (código entre corchetes) y «Ref./NIF proveedor» (referencia del contacto o NIF). El servicio busca nombre e ID en Odoo
+  (solo lectura) y devuelve `escrituras_excel`; n8n las escribe en la Excel con Graph (y crea las columnas si no están).
+- Correo: nº de pedido con enlace a Odoo y cada dato que falta con enlace a su celda de la Excel (`url_excel`).
 - Pruebas: `ARGON_EXCEL_PRUEBA=ruta\ARGON.xlsx pytest tests/test_argon.py` (la Excel no se sube al repositorio).

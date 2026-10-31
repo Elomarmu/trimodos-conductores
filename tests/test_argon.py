@@ -20,6 +20,8 @@ class OdooFalso:
     def __call__(self, modelo, metodo, args, **kw):
         assert (modelo, metodo) in E.PERMITIDO, (modelo, metodo)
         self.llamadas += 1
+        if modelo in ("product.product", "res.partner"):
+            return []  # referencias de la Excel: sin datos en el Odoo simulado
         if modelo == "tms.equipment" and metodo == "search_read":
             return [{"id": i, "name": n} for n, i in self.eq.items() if n in args[0][0][2]]
         if modelo == "tms.equipment" and metodo == "create":
@@ -183,3 +185,37 @@ def test_enlaces_en_el_correo(monkeypatch):
     assert 'href="https://stinsa18.x/odoo/action-sale.action_orders/' in j["correo_html"]
     if j["odoo"]["pendientes_de_datos"]:
         assert "activeCell=" in j["correo_html"]
+
+
+def test_referencias_completan_la_excel():
+    """Con la referencia se completan nombre e ID; con el ID, la referencia. Ambiguas → aviso."""
+    import argon_facturacion as F
+    import argon_referencias as R
+    F.COLS.clear()
+    F.COLS.update({"TARIFAS": {"Servicio": "A", "Producto en Odoo": "E", "ID producto": "F", "Proveedor": "G", "ID proveedor": "H"},
+                   "PRODUCTOS": {"Código": "A", "Producto en Odoo": "E", "ID producto": "F", "Proveedor por defecto": "J", "ID proveedor": "K"},
+                   "CONDUCTORES": {"Código": "A", "ID proveedor": "G"}, "RESERVAS": {"Proveedor": "B", "ID proveedor": "C"}})
+    t1 = {"_fila": 4, "Servicio": "TREN", "Producto en Odoo": "[2250] LLAGOSTA-AMBERES", "ID producto": None, "Proveedor": None, "ID proveedor": 18310}
+    t2 = {"_fila": 5, "Servicio": "TREN", "Ref. producto": "1", "Ref./NIF proveedor": "B12345678"}
+    tablas = {"tarifas": [t1, t2], "productos": {}, "conductores": {}, "reservas": []}
+
+    class O:
+        def __call__(self, modelo, metodo, args, **kw):
+            dom = args[0]
+            if modelo == "product.product":
+                if dom[0][0] == "default_code":
+                    return [{"id": 1, "default_code": "1", "display_name": "[1] A"}, {"id": 2, "default_code": "1", "display_name": "[1] B"}]
+                return []
+            if dom[0] == "|":
+                return [{"id": 7, "ref": False, "vat": "ESB12345678", "display_name": "EMPRESA SL", "parent_id": False, "supplier_rank": 1},
+                        {"id": 8, "ref": False, "vat": "ESB12345678", "display_name": "EMPRESA SL, Almacén", "parent_id": [7, ""], "supplier_rank": 0}]
+            return [{"id": 18310, "ref": False, "vat": "CHE123", "display_name": "HUPAC INTERMODAL SA", "parent_id": False, "supplier_rank": 1}]
+
+    r = R.completar(tablas, O())
+    celdas = {(e["hoja"], e["celda"]): e["valor"] for e in r["escrituras"]}
+    ref_p, ref_v = F.COLS["TARIFAS"]["Ref. producto"], F.COLS["TARIFAS"]["Ref./NIF proveedor"]
+    assert celdas[("TARIFAS", f"{ref_p}3")] == "Ref. producto"           # cabecera nueva
+    assert t2["ID proveedor"] == 7 and t2["Proveedor"] == "EMPRESA SL"   # por NIF, la empresa principal
+    assert celdas[("TARIFAS", f"{ref_v}4")] == "CHE123"                  # referencia desde el ID
+    assert any("repetido" in a["texto"] for a in r["avisos"])            # producto [1] ambiguo
+    assert any("[2250] no existe" in a["texto"] for a in r["avisos"])      # «[2250]» escrito en el nombre se busca

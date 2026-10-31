@@ -80,6 +80,15 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
                    [(f(x["fecha"]), x["contenedor"], x["servicio"], ("html", a_excel(x["texto"], x.get("celda"))),
                      ("html", "; ".join(a_excel(i["dato"], i["celda"]) for i in x.get("ir", [])) or e(x["falta"])))
                     for x in odoo_res["pendientes_de_datos"]]))
+    no_encontradas = odoo_res.get("excel", {}).get("avisos", [])
+    if no_encontradas:
+        p.append(h3("Referencias de la Excel que no se encuentran en Odoo") +
+                 tabla(["Hoja", "Dato"], [(x["hoja"], ("html", a_excel(x["texto"], f"'{x['hoja']}'!{x['celda']}")))
+                                          for x in no_encontradas]))
+    escritas = odoo_res.get("excel", {}).get("escrituras", [])
+    if escritas:
+        p.append(f"<p style='font:10pt Calibri,Arial;color:#555'>Se completan {len(escritas)} celdas de la Excel "
+                 "(nombres, ID y referencias de productos y proveedores).</p>")
     p.append(h3("Bloqueados hoy") + tabla(["Contenedor", "Motivo"], [(k.matricula, u.texto) for k, u in av["bloqueados"]]))
     p.append(h3(f"Sin anotar desde hace {D.DIAS_SIN_ANOTAR} días o más") +
              tabla(["Contenedor", "Última anotación", "Fecha", "Días"],
@@ -135,4 +144,5 @@ def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) 
     av["sl_sin_numero"] = [x for x in estados if x.tipo == "SALIDA_TREN" and not x.referencia and desde7 <= x.fecha <= dia.isoformat()]
     av["vencimientos"] = D.vencimientos(ruta, dia)
     return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
+            "escrituras_excel": res.get("excel", {}).get("escrituras", []),
             "correo_html": correo(dia, res, av, url_excel), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
