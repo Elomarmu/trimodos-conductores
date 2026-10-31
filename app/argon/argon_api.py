@@ -85,9 +85,11 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict) -> str:
 @router.post("/procesar")
 async def procesar(request: Request, modo: str = "prueba", hoy: str | None = None):
     clave = os.environ.get("ARGON_CLAVE", "")
-    # Comparación en bytes: la clave puede llevar tildes o «ñ» (las cabeceras llegan en latin-1 con los bytes UTF-8)
+    # Comparación en bytes: la clave puede llevar tildes, «ñ» o «·». Según quién llame, esos caracteres viajan
+    # en UTF-8 (2 bytes) o en latin-1 (1 byte, así lo hace n8n); se aceptan las dos formas.
     recibida = request.headers.get("x-clave", "").encode("latin-1", "replace")
-    if not clave or not hmac.compare_digest(recibida, clave.encode("utf-8")):
+    formas = [clave.encode("utf-8")] + ([clave.encode("latin-1")] if all(ord(c) < 256 for c in clave) else [])
+    if not clave or not any(hmac.compare_digest(recibida, f) for f in formas):
         raise HTTPException(status_code=401, detail="Clave incorrecta")
     cuerpo = await request.body()
     if not cuerpo.startswith(b"PK"):

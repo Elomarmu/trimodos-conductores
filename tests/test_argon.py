@@ -125,3 +125,15 @@ def test_clave_con_tildes(monkeypatch):
     assert mala.status_code == 401
     buena = c.post("/api/argon/procesar", content=b"no-excel", headers={"x-clave": "Contraseña-Camión".encode("utf-8")})
     assert buena.status_code == 400  # la clave pasa; falla solo porque el cuerpo no es una Excel
+
+
+def test_clave_con_punto_medio_en_latin1(monkeypatch):
+    """n8n manda «·» en latin-1 (1 byte): también debe valer."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import argon_api as A
+    monkeypatch.setenv("ARGON_CLAVE", "Argon·Prueba")
+    app = FastAPI(); app.include_router(A.router); c = TestClient(app)
+    assert c.post("/api/argon/procesar", content=b"x", headers={"x-clave": "Argon·Prueba".encode("latin-1")}).status_code == 400
+    assert c.post("/api/argon/procesar", content=b"x", headers={"x-clave": "Argon·Prueba".encode("utf-8")}).status_code == 400
+    assert c.post("/api/argon/procesar", content=b"x", headers={"x-clave": b"Argon.Prueba"}).status_code == 401
