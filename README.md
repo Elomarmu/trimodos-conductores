@@ -215,3 +215,18 @@ tests/                  pruebas del backend
 **Librería de terceros incluida:** `public/vendor/jsQR.js` (jsQR 1.4.0, Apache-2.0): lee el QR en los móviles sin lector del sistema (`BarcodeDetector`), como el iPhone. La cámara se pide en alta resolución (1920x1080) y se analiza el centro de la imagen sin reducirla: con la resolución por defecto del iPhone (640x480) un QR pequeño no se leía. Se sirve desde la propia app para que funcione sin depender de un CDN.
 
 **API:** `POST /api/resolve-qr` · `GET /api/goods?q=` · `POST /api/update` · `POST /api/reprint` · `GET /api/pdf/{id}?token=` · `GET /api/health`.
+
+## Proceso ARGON (Excel de Carburos → Odoo 18)
+
+Servicio aparte de la app de conductores, en `app/argon/`. Lo llama n8n cada día a las 5:00 con la Excel de
+SharePoint (`General/CARBUROS/Daily/Pruebas/ARGON.xlsx`).
+
+- `POST /api/argon/procesar?modo=prueba|real` · cuerpo: la Excel · cabecera `X-Clave: <ARGON_CLAVE>`.
+- Crea o amplía los pedidos de venta de Carburos desde el 15/10/2026: uno por contenedor, de descarga a descarga,
+  con las líneas en orden de fecha (las de pago y las «INFO ·» del producto de seguimiento a 0 €).
+- No duplica (pedido + producto + fecha + contenedor), va por tandas de 18 s (n8n repite si quedan) y **solo
+  escribe en Odoo de pruebas (stinsa18)** salvo `ARGON_PERMITIR_PRODUCCION=1`. Lista blanca: no puede borrar.
+- Variables nuevas en Vercel: `ARGON_CLAVE` (obligatoria; la misma en n8n) y, opcional, `ARGON_CONFIG`
+  (JSON: `cliente_id`, `empresa_id`, `tipo_pedido_id`, `fecha_inicio`). Usa `ODOO_URL`, `ODOO_DB`, `ODOO_USER`
+  y `ODOO_PASSWORD` (clave API) que ya existen.
+- Pruebas: `ARGON_EXCEL_PRUEBA=ruta\ARGON.xlsx pytest tests/test_argon.py` (la Excel no se sube al repositorio).

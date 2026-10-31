@@ -155,6 +155,11 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+# Proceso ARGON (Excel de Carburos → pedidos en Odoo 18). Protegido por su propia clave (ARGON_CLAVE).
+from .argon import argon_api  # noqa: E402
+
+app.include_router(argon_api.router)
+
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")
 _public = Path(__file__).resolve().parent.parent / "public"
