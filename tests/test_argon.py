@@ -137,3 +137,20 @@ def test_clave_con_punto_medio_en_latin1(monkeypatch):
     assert c.post("/api/argon/procesar", content=b"x", headers={"x-clave": "Argon·Prueba".encode("latin-1")}).status_code == 400
     assert c.post("/api/argon/procesar", content=b"x", headers={"x-clave": "Argon·Prueba".encode("utf-8")}).status_code == 400
     assert c.post("/api/argon/procesar", content=b"x", headers={"x-clave": b"Argon.Prueba"}).status_code == 401
+
+
+def test_excel_en_base64(monkeypatch):
+    """n8n envía la Excel como JSON {"excel_b64": ...}."""
+    import base64, json as _json
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import argon_api as A
+    monkeypatch.setenv("ARGON_CLAVE", "secreto")
+    monkeypatch.setattr(E, "Odoo", lambda *a, **k: OdooFalso())
+    for v, x in (("ARGON_ODOO_URL", "https://stinsa18.x"), ("ARGON_ODOO_DB", "d"), ("ARGON_ODOO_USER", "u"), ("ARGON_ODOO_PASSWORD", "p")):
+        monkeypatch.setenv(v, x)
+    app = FastAPI(); app.include_router(A.router); c = TestClient(app)
+    cuerpo = _json.dumps({"excel_b64": base64.b64encode(Path(EXCEL).read_bytes()).decode()})
+    r = c.post("/api/argon/procesar?modo=prueba&hoy=2026-10-30", content=cuerpo, headers={"x-clave": "secreto", "content-type": "application/json"})
+    assert r.status_code == 200, r.text
+    assert c.post("/api/argon/procesar", content=b'{"otra":1}', headers={"x-clave": "secreto"}).status_code == 400
