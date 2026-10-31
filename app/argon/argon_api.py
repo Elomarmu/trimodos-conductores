@@ -1,6 +1,6 @@
 """Servicio web ARGON (FastAPI) para el servidor de la app de conductores (Vercel).
 
-POST /api/argon/procesar   cuerpo = la Excel (.xlsx) tal cual; cabecera X-Clave = ARGON_CLAVE
+POST /api/argon/procesar   cuerpo = la Excel (.xlsx) tal cual o JSON {"excel_b64": ...}; cabecera X-Clave = ARGON_CLAVE
     ?modo=prueba|real   (prueba: lo calcula todo pero no escribe en Odoo)
     ?hoy=AAAA-MM-DD     (opcional, para pruebas)
 Responde JSON: resumen de Odoo, restantes (si hay que volver a llamar), correo de avisos (HTML) y recordatorios.
@@ -10,6 +10,7 @@ ARGON_CONFIG (JSON con cliente_id, empresa_id, tipo_pedido_id, fecha_inicio).
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import html
 import hmac
@@ -92,6 +93,11 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
     if not clave or not any(hmac.compare_digest(recibida, f) for f in formas):
         raise HTTPException(status_code=401, detail="Clave incorrecta")
     cuerpo = await request.body()
+    if cuerpo[:1] == b"{":  # n8n: {"excel_b64": "..."} (su ejecutor de código no envía bien los binarios)
+        try:
+            cuerpo = base64.b64decode(json.loads(cuerpo)["excel_b64"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON sin «excel_b64» válido") from None
     if not cuerpo.startswith(b"PK"):
         raise HTTPException(status_code=400, detail="El cuerpo debe ser la Excel (.xlsx)")
     dia = dt.date.fromisoformat(hoy) if hoy else dt.datetime.now().date()
