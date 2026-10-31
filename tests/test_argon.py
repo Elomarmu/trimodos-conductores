@@ -112,3 +112,16 @@ def test_api_sin_variables_argon_explica_el_fallo(monkeypatch):
     app = FastAPI(); app.include_router(A.router); c = TestClient(app)
     r = c.post("/api/argon/procesar?modo=prueba", content=Path(EXCEL).read_bytes(), headers={"x-clave": "secreto"})
     assert r.status_code == 500 and "ARGON_ODOO_URL" in r.json()["detail"]
+
+
+def test_clave_con_tildes(monkeypatch):
+    """Una ARGON_CLAVE con «ñ» o tildes no debe romper el servicio (antes: 500 TypeError)."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import argon_api as A
+    monkeypatch.setenv("ARGON_CLAVE", "Contraseña-Camión")
+    app = FastAPI(); app.include_router(A.router); c = TestClient(app)
+    mala = c.post("/api/argon/procesar", content=b"PK", headers={"x-clave": "otra"})
+    assert mala.status_code == 401
+    buena = c.post("/api/argon/procesar", content=b"no-excel", headers={"x-clave": "Contraseña-Camión".encode("utf-8")})
+    assert buena.status_code == 400  # la clave pasa; falla solo porque el cuerpo no es una Excel
