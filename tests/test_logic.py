@@ -429,8 +429,20 @@ def test_todas_las_rutas_api_exigen_codigo_salvo_health():
     rutas = [r for r in app.routes if getattr(r, "path", "").startswith("/api/")]
     assert len(rutas) >= 6
     for r in rutas:
+        if r.path.startswith("/api/argon/"):
+            continue  # proceso ARGON: lo llama n8n con su propia clave (ARGON_CLAVE); se comprueba abajo
         protegida = require_access in [d.call for d in r.dependant.dependencies]
         assert protegida == (r.path != "/api/health"), r.path
+
+
+def test_argon_exige_su_clave(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    monkeypatch.delenv("ARGON_CLAVE", raising=False)
+    assert c.post("/api/argon/procesar", content=b"PK").status_code == 401          # sin clave configurada: cerrado
+    monkeypatch.setenv("ARGON_CLAVE", "una-clave-larga")
+    assert c.post("/api/argon/procesar", content=b"PK", headers={"X-Clave": "otra"}).status_code == 401
 
 
 def test_codigo_obligatorio_y_correcto(con_codigo):
