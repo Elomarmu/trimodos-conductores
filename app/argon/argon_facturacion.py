@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 sys.path.insert(0, str(Path(__file__).parent))
 import argon_lector as L  # noqa: E402
@@ -66,6 +67,8 @@ class Servicio:
     estado: str = ""
     falta: list = field(default_factory=list)
     notas: list = field(default_factory=list)
+    celda: str | None = None          # celda de la hoja diaria donde está anotado
+    ir: dict = field(default_factory=dict)  # dato que falta → celda de la Excel donde rellenarlo («'HOJA'!B5»)
 
 
 # ------------------------------------------------------------------ tablas de la Excel
@@ -86,12 +89,25 @@ def _filas(wb, hoja, fila_cab=3):
         return []
     ws = wb[hoja]
     cab = [str(c.value or "").strip() for c in ws[fila_cab]]
-    res = []
-    for fila in ws.iter_rows(min_row=fila_cab + 1, values_only=True):
+    COLS[hoja] = {n: get_column_letter(i + 1) for i, n in enumerate(cab) if n}
+    res, fin = [], fila_cab + 1
+    for n, fila in enumerate(ws.iter_rows(min_row=fila_cab + 1, values_only=True), start=fila_cab + 1):
         if not any(v not in (None, "") for v in fila):
             continue
-        res.append(dict(zip(cab, fila)))
+        res.append({**dict(zip(cab, fila)), "_fila": n})
+        fin = n + 1
+    FIN[hoja] = fin
     return res
+
+
+COLS: dict = {}  # hoja → {cabecera: letra de columna}
+FIN: dict = {}   # hoja → primera fila libre debajo de la tabla
+
+
+def ref(hoja: str, columna: str, fila=None) -> str:
+    """Celda donde rellenar un dato: la fila encontrada o, si no hay, la primera libre de la tabla."""
+    letra = COLS.get(hoja, {}).get(columna, "A")
+    return f"'{hoja}'!{letra}{fila or FIN.get(hoja, 4)}"
 
 
 def leer_tablas(ruta) -> dict:
@@ -193,7 +209,7 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
             id_servicio=sid, fecha=m["fecha"], fecha_fin=fin, contenedor=m["contenedor"], codigo_corto=m["codigo_corto"],
             servicio=servicio, origen=origen, destino=destino, via=via, expedicion=m.get("referencia"),
             cargado={"CARGADO": "Cargado", "VACIO": "Vacío"}.get(m["carga"], ""), cantidad=cantidad, unidad=unidad,
-            conductor_codigo=m.get("iniciales"), chasis=m.get("chasis"), texto=m["texto"],
+            conductor_codigo=m.get("iniciales"), chasis=m.get("chasis"), texto=m["texto"], celda=m.get("celda"),
             cancelada=bool(m.get("cancelada")), forzar=m.get("forzar")))
 
     for cont, lst in por_cont.items():
@@ -283,7 +299,7 @@ def codigos_pactados(movs: list[dict], tablas: dict) -> list[Servicio]:
                         fecha_fin=None, contenedor=m["contenedor"], codigo_corto=m["codigo_corto"], servicio=cod,
                         origen=None, destino=m["ubicacion"], via=None, expedicion=m.get("referencia"),
                         cargado="", cantidad=1, unidad="servicio", conductor_codigo=m.get("iniciales"),
-                        chasis=m.get("chasis"), texto=m["texto"]))
+                        chasis=m.get("chasis"), texto=m["texto"], celda=m.get("celda")))
                     break
     return extra
 
@@ -308,6 +324,45 @@ def _tarifa(s: Servicio, tarifas: list, fecha: str):
     return mejor
 
 
+def _col_ref(hoja, col_ref, col_id):
+    """La columna de referencia (la que se rellena a mano) si la tabla ya la tiene; si no, la del ID."""
+    return col_ref if col_ref in COLS.get(hoja, {}) else col_id
+
+
+def donde_rellenar(s: Servicio, falta: list, p_fila, t, cond: dict, tablas: dict) -> dict:
+    """Para cada dato que falta, la celda de la Excel donde se rellena (para el enlace del correo)."""
+    t_fila = t.get("_fila") if t else None
+    hoja_dia = f"'{L.HOJA}'!{s.celda}" if s.celda else None
+    ch = tablas["chasis"].get((s.chasis or "").lstrip("R")) or {}
+    ir = {}
+    for f in falta:
+        if f == "pactar si se factura":
+            ir[f] = ref("PRODUCTOS", "¿Se factura?", p_fila)
+        elif f == "producto":
+            # el tren lleva un producto por tramo: se rellena en TARIFAS (la fila del tramo o una nueva)
+            h = "TARIFAS" if (t_fila or s.servicio == "TREN") else "PRODUCTOS"
+            ir[f] = ref(h, _col_ref(h, "Ref. producto", "ID producto"), t_fila if h == "TARIFAS" else p_fila)
+        elif f == "cuenta analítica":
+            ir[f] = ref("TARIFAS", "Cuenta analítica (ID)", t_fila) if t_fila else ref("PRODUCTOS", "Cuenta analítica (ID)", p_fila)
+        elif f == "precio":
+            ir[f] = ref("TARIFAS", "Precio venta €", t_fila)
+        elif f == "coste":
+            ir[f] = ref("TARIFAS", "Coste €", t_fila)
+        elif f == "proveedor":
+            ir[f] = ref("TARIFAS", _col_ref("TARIFAS", "Ref./NIF proveedor", "ID proveedor"), t_fila)
+        elif f.startswith("ficha de proveedor"):
+            ir[f] = ref("CONDUCTORES", _col_ref("CONDUCTORES", "Ref./NIF proveedor", "ID proveedor"), cond.get("_fila"))
+        elif f.startswith("conductor "):
+            ir[f] = ref("CONDUCTORES", "ID conductor en Odoo" if cond else "Código", cond.get("_fila"))
+        elif f.startswith("chasis "):
+            ir[f] = ref("CHASIS", "ID remolque en Odoo" if ch else "Nº en la Excel", ch.get("_fila"))
+        elif f == "crear en Odoo el producto informativo":
+            ir[f] = ref("PRODUCTOS", "ID producto", tablas["productos"].get("INFORMATIVO", {}).get("_fila"))
+        elif hoja_dia:  # destino del tren, confirmar la salida, código de conductor…: en la propia celda del día
+            ir[f] = hoja_dia
+    return ir
+
+
 def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
     for s in servicios:
         p = tablas["productos"].get(s.servicio, {})
@@ -317,6 +372,7 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
         s.precio, s.coste = _num(p.get("Precio por defecto €")), _num(p.get("Coste por defecto €"))
         s.proveedor, s.proveedor_id = p.get("Proveedor por defecto"), _int(p.get("ID proveedor"))
         t = _tarifa(s, tablas["tarifas"], s.fecha)
+        p_fila = p.get("_fila")
         if not t and s.servicio == "TREN" and tablas["tipos"].get(L.norm(s.origen or "")) == "TERMINAL DE PASO":
             # sale desde una terminal de paso (SL ZGZA → LEIXOES): vale la tarifa del mismo destino si solo hay una
             c = {"Cargado": "CARGADO", "Vacío": "VACIO"}.get(s.cargado, "")
@@ -425,14 +481,17 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
         if any(n.startswith("DEDUCIDO") for n in s.notas):
             falta.append("confirmar la salida en tren (no está anotada)")
         s.falta = falta
+        s.ir = donde_rellenar(s, falta, p_fila, t, cond, tablas)
         s.estado = "LISTO PARA ODOO" if not falta else "FALTAN DATOS"
     return servicios
 
 
-def calcular(ruta, desde=None, hasta=None):
+def calcular(ruta, desde=None, hasta=None, completar=None):
+    """completar(tablas): opcional, completa productos y proveedores desde su referencia en Odoo antes de tarificar."""
     conts, estados = L.leer(ruta)
     movs = L.movimientos(estados)
     tablas = leer_tablas(ruta)
+    calcular.excel = completar(tablas) if completar else {"escrituras": [], "avisos": []}
     servs = construir(movs, tablas["tipos"]) + codigos_pactados(movs, tablas)
     rotaciones(servs)                       # antes de filtrar fechas: la rotación puede empezar antes
     cruce = cruzar_reservas(servs, tablas["reservas"])

@@ -19,10 +19,12 @@ from collections import defaultdict
 
 import argon_facturacion as F
 import argon_odoo as AO
+import argon_referencias as R
 
 PERMITIDO = {
     ("sale.order", "search_read"), ("sale.order", "create"), ("sale.order", "write"), ("sale.order", "action_confirm"),
     ("sale.order.line", "search_read"), ("tms.equipment", "search_read"), ("tms.equipment", "create"),
+    ("product.product", "search_read"), ("res.partner", "search_read"),  # referencias de la Excel (solo lectura)
 }
 
 
@@ -35,6 +37,10 @@ class Odoo:
         if not self.uid:
             raise RuntimeError("Odoo no acepta el usuario o la clave API")
         self.llamadas = 0
+
+    def enlace(self, pedido_id: int) -> str:
+        """Dirección del pedido en Odoo (para el hipervínculo del correo)."""
+        return f"{self.url}/odoo/action-sale.action_orders/{pedido_id}"
 
     def _rpc(self, servicio, metodo, args):
         datos = json.dumps({"jsonrpc": "2.0", "method": "call", "params": {"service": servicio, "method": metodo, "args": args}})
@@ -64,6 +70,10 @@ def preparar(servicios: list[F.Servicio], desde: dt.date) -> dict[str, list[F.Se
             por_rot[s.rotacion].append(s)
     return {r: sorted(l, key=lambda x: (x.fecha, x.id_servicio)) for r, l in por_rot.items()
             if any(x.estado == "LISTO PARA ODOO" for x in l)}
+
+
+def enlace(odoo, pedido_id):
+    return odoo.enlace(pedido_id) if hasattr(odoo, "enlace") else None
 
 
 def clave_linea(product_id, fecha, equipo_id):
@@ -122,7 +132,8 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                     odoo("sale.order", "write", [[abierto["id"]], {"order_line": [(0, 0, l) for l in nuevas]}])
                     if abierto["state"] in ("draft", "sent"):
                         odoo("sale.order", "action_confirm", [[abierto["id"]]])
-                res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas)})
+                res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas),
+                                                 "url": enlace(odoo, abierto["id"])})
             else:
                 sufijo = f"|{len(de_rot) + 1}" if de_rot else ""
                 pedido = {"partner_id": cfg["cliente_id"], "company_id": cfg["empresa_id"], "origin": base + sufijo,
@@ -130,12 +141,13 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                           "order_line": [(0, 0, l) for l in nuevas]}
                 if cfg.get("tipo_pedido_id"):
                     pedido["type_id"] = cfg["tipo_pedido_id"]
-                nombre = "(prueba)"
+                nombre, oid = "(prueba)", None
                 if real:
                     oid = odoo("sale.order", "create", [pedido])
                     odoo("sale.order", "action_confirm", [[oid]])
                     nombre = odoo("sale.order", "search_read", [[["id", "=", oid]]], fields=["name"])[0]["name"]
                 res["pedidos_creados"].append({"pedido": nombre, "contenedor": cont, "lineas": len(nuevas),
+                                               "url": enlace(odoo, oid) if oid else None,
                                                "importe": round(sum(l.get("price_unit", 0) * l.get("product_uom_qty", 1)
                                                                     for l in nuevas), 2)})
             res["lineas_nuevas"] += len(nuevas)
@@ -148,8 +160,6 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
 
 def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0):
     desde = desde or dt.date.fromisoformat(cfg.get("fecha_inicio", "2026-10-15"))
-    servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60))  # 60 días antes: para saber dónde empieza cada rotación
-    rot = preparar(servicios, desde)
     if odoo is None:
         # Variables propias de ARGON: las ODOO_* de Vercel son las de producción de la app de conductores
         faltan = [v for v in ("ARGON_ODOO_URL", "ARGON_ODOO_DB", "ARGON_ODOO_USER", "ARGON_ODOO_PASSWORD") if not os.environ.get(v)]
@@ -157,8 +167,14 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
             raise RuntimeError("Faltan variables en Vercel: " + ", ".join(faltan) + " (datos del Odoo 18 de pruebas)")
         odoo = Odoo(os.environ["ARGON_ODOO_URL"], os.environ["ARGON_ODOO_DB"], os.environ["ARGON_ODOO_USER"],
                     os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
+    # 60 días antes: para saber dónde empieza cada rotación. Productos y proveedores desde su referencia en Odoo.
+    servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo))
+    rot = preparar(servicios, desde)
     res = escribir(odoo, rot, cfg, real, limite_s)
+    res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     res["pendientes_de_datos"] = [{"fecha": s.fecha, "contenedor": s.contenedor, "servicio": s.servicio,
-                                   "texto": s.texto, "falta": "; ".join(s.falta)}
+                                   "texto": s.texto, "falta": "; ".join(s.falta),
+                                   "celda": f"'{F.L.HOJA}'!{s.celda}" if s.celda else None,
+                                   "ir": [{"dato": f, "celda": s.ir.get(f)} for f in s.falta]}
                                   for s in servicios if s.fecha >= desde.isoformat() and s.estado == "FALTAN DATOS"]
     return res
