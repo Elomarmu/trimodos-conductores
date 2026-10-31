@@ -151,8 +151,12 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
     servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60))  # 60 días antes: para saber dónde empieza cada rotación
     rot = preparar(servicios, desde)
     if odoo is None:
-        odoo = Odoo(os.environ["ODOO_URL"], os.environ.get("ODOO_DB", "prod"), os.environ["ODOO_USER"],
-                    os.environ["ODOO_PASSWORD"], cfg["empresa_id"])
+        # Variables propias de ARGON: las ODOO_* de Vercel son las de producción de la app de conductores
+        faltan = [v for v in ("ARGON_ODOO_URL", "ARGON_ODOO_DB", "ARGON_ODOO_USER", "ARGON_ODOO_PASSWORD") if not os.environ.get(v)]
+        if faltan:
+            raise RuntimeError("Faltan variables en Vercel: " + ", ".join(faltan) + " (datos del Odoo 18 de pruebas)")
+        odoo = Odoo(os.environ["ARGON_ODOO_URL"], os.environ["ARGON_ODOO_DB"], os.environ["ARGON_ODOO_USER"],
+                    os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
     res = escribir(odoo, rot, cfg, real, limite_s)
     res["pendientes_de_datos"] = [{"fecha": s.fecha, "contenedor": s.contenedor, "servicio": s.servicio,
                                    "texto": s.texto, "falta": "; ".join(s.falta)}

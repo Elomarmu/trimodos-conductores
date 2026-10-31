@@ -90,7 +90,7 @@ def test_api_prueba(monkeypatch):
     import argon_api as A
     monkeypatch.setenv("ARGON_CLAVE", "secreto")
     monkeypatch.setattr(E, "Odoo", lambda *a, **k: OdooFalso())
-    monkeypatch.setenv("ODOO_URL", "https://stinsa18.tecnativa.net"); monkeypatch.setenv("ODOO_USER", "u"); monkeypatch.setenv("ODOO_PASSWORD", "p")
+    monkeypatch.setenv("ARGON_ODOO_URL", "https://stinsa18.tecnativa.net"); monkeypatch.setenv("ARGON_ODOO_DB", "d"); monkeypatch.setenv("ARGON_ODOO_USER", "u"); monkeypatch.setenv("ARGON_ODOO_PASSWORD", "p")
     app = FastAPI(); app.include_router(A.router); c = TestClient(app)
     datos = Path(EXCEL).read_bytes()
     assert c.post("/api/argon/procesar", content=datos, headers={"x-clave": "mala"}).status_code == 401
@@ -98,3 +98,17 @@ def test_api_prueba(monkeypatch):
     assert r.status_code == 200, r.text
     j = r.json()
     assert j["ok"] and "ARGON · lectura del 30/10/2026" in j["correo_html"] and j["odoo"]["modo"] == "prueba"
+
+
+def test_api_sin_variables_argon_explica_el_fallo(monkeypatch):
+    """Con solo las ODOO_* de producción (app de conductores) no escribe y dice qué falta."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import argon_api as A
+    monkeypatch.setenv("ARGON_CLAVE", "secreto")
+    monkeypatch.setenv("ODOO_URL", "https://www.stinsa.com")
+    for v in ("ARGON_ODOO_URL", "ARGON_ODOO_DB", "ARGON_ODOO_USER", "ARGON_ODOO_PASSWORD"):
+        monkeypatch.delenv(v, raising=False)
+    app = FastAPI(); app.include_router(A.router); c = TestClient(app)
+    r = c.post("/api/argon/procesar?modo=prueba", content=Path(EXCEL).read_bytes(), headers={"x-clave": "secreto"})
+    assert r.status_code == 500 and "ARGON_ODOO_URL" in r.json()["detail"]

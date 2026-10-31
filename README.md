@@ -227,6 +227,6 @@ SharePoint (`General/CARBUROS/Daily/Pruebas/ARGON.xlsx`).
 - No duplica (pedido + producto + fecha + contenedor), va por tandas de 18 s (n8n repite si quedan) y **solo
   escribe en Odoo de pruebas (stinsa18)** salvo `ARGON_PERMITIR_PRODUCCION=1`. Lista blanca: no puede borrar.
 - Variables nuevas en Vercel: `ARGON_CLAVE` (obligatoria; la misma en n8n) y, opcional, `ARGON_CONFIG`
-  (JSON: `cliente_id`, `empresa_id`, `tipo_pedido_id`, `fecha_inicio`). Usa `ODOO_URL`, `ODOO_DB`, `ODOO_USER`
-  y `ODOO_PASSWORD` (clave API) que ya existen.
+  (JSON: `cliente_id`, `empresa_id`, `tipo_pedido_id`, `fecha_inicio`). Y las del Odoo 18 de pruebas, **propias de ARGON** (las `ODOO_*` son las de producción de la app): `ARGON_ODOO_URL`, `ARGON_ODOO_DB`, `ARGON_ODOO_USER`
+  y `ARGON_ODOO_PASSWORD` (clave API).
 - Pruebas: `ARGON_EXCEL_PRUEBA=ruta\ARGON.xlsx pytest tests/test_argon.py` (la Excel no se sube al repositorio).

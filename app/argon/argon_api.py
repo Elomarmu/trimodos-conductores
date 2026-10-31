@@ -5,7 +5,7 @@ POST /api/argon/procesar   cuerpo = la Excel (.xlsx) tal cual; cabecera X-Clave 
     ?hoy=AAAA-MM-DD     (opcional, para pruebas)
 Responde JSON: resumen de Odoo, restantes (si hay que volver a llamar), correo de avisos (HTML) y recordatorios.
 
-Variables de entorno: ARGON_CLAVE, ODOO_URL, ODOO_DB, ODOO_USER, ODOO_PASSWORD (clave API) y opcionalmente
+Variables de entorno: ARGON_CLAVE, ARGON_ODOO_URL, ARGON_ODOO_DB, ARGON_ODOO_USER, ARGON_ODOO_PASSWORD (clave API) y opcionalmente
 ARGON_CONFIG (JSON con cliente_id, empresa_id, tipo_pedido_id, fecha_inicio).
 """
 from __future__ import annotations
@@ -95,14 +95,20 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
         t.write(cuerpo)
         ruta = t.name
     try:
-        cfg = config()
-        res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0)
-        conts, estados = L.leer(ruta)
-        av = D.avisos(conts, estados, [], dia)
-        desde7 = (dia - dt.timedelta(days=7)).isoformat()
-        av["sl_sin_numero"] = [x for x in estados if x.tipo == "SALIDA_TREN" and not x.referencia and desde7 <= x.fecha <= dia.isoformat()]
-        av["vencimientos"] = D.vencimientos(ruta, dia)
-        return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
-                "correo_html": correo(dia, res, av), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
+        return _procesar(ruta, modo, dia)
+    except Exception as e:  # el detalle vuelve a n8n y sale en el error del nodo (no contiene claves)
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
     finally:
         os.unlink(ruta)
+
+
+def _procesar(ruta: str, modo: str, dia: dt.date) -> dict:
+    cfg = config()
+    res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0)
+    conts, estados = L.leer(ruta)
+    av = D.avisos(conts, estados, [], dia)
+    desde7 = (dia - dt.timedelta(days=7)).isoformat()
+    av["sl_sin_numero"] = [x for x in estados if x.tipo == "SALIDA_TREN" and not x.referencia and desde7 <= x.fecha <= dia.isoformat()]
+    av["vencimientos"] = D.vencimientos(ruta, dia)
+    return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
+            "correo_html": correo(dia, res, av), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
