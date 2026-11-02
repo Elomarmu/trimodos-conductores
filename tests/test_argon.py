@@ -244,3 +244,21 @@ def test_cr_a_es_circulando_y_reexp_es_otro_tren():
     movs2 = movs[:3] + [_mov("2026-11-05", "SALIDA_TREN", "MORROT", "SL MORROT")] + movs[3:]
     trenes2 = [(s.origen, s.destino) for s in F.construir(movs2, tipos) if s.servicio == "TREN"]
     assert trenes2 == [("AMBERES", "MORROT"), ("MORROT", "MADRID")]
+
+
+def test_variantes_de_rex():
+    import argon_lector as L
+    import argon_facturacion as F
+    for t in ("MORROT REX", "MORROT (REX)", "MORROT(REX)", "MORROT-REX", "MORROT REEXP", "LA LLAGOSTA(REX)"):
+        assert L.RE_REEX.search(L.norm(t)), t
+    for t in ("REXACH", "GENT W", "SL MORROT 914616"):
+        assert not L.RE_REEX.search(L.norm(t)), t
+    # varios días «MORROT (REX)» seguidos: un solo tramo nuevo, desde el último
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "MORROT": "TERMINAL FERROVIARIA", "MADRID": "TERMINAL FERROVIARIA"}
+    movs = [_mov("2026-11-02", "SALIDA_TREN", "AMBERES", "SL AMBERES"),
+            _mov("2026-11-04", "SITUACION", "MORROT", "MORROT (REX)", reexpedicion=True),
+            _mov("2026-11-05", "SITUACION", "MORROT", "MORROT (REX)", reexpedicion=True),
+            _mov("2026-11-06", "SITUACION", "MADRID", "MADRID"),
+            _mov("2026-11-07", "DESCARGA", None, "DESCARGA")]
+    trenes = [(s.origen, s.destino, s.fecha) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
+    assert trenes == [("AMBERES", "MORROT", "2026-11-02"), ("MORROT", "MADRID", "2026-11-05")]

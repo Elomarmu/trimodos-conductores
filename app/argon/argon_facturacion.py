@@ -228,10 +228,10 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 res[-1].notas.append("DEDUCIDO: no hay «SL» en la Excel; llega a otra terminal con hora")
                 fin_tren = m["fecha"]
             if m.get("reexpedicion") and m["ubicacion"] and not m["bloqueado"]:
-                # coge otro tren en esta terminal: tramo nuevo desde aquí (salvo que luego anoten «SL» desde el mismo sitio)
-                sig = next((x for x in lst[i + 1:] if x["tipo"] != "CIRCULANDO" and x["ubicacion"] != m["ubicacion"]
-                            or x["tipo"] == "SALIDA_TREN"), None)
-                if not (sig and sig["tipo"] == "SALIDA_TREN" and sig["ubicacion"] == m["ubicacion"]):
+                # coge otro tren en esta terminal: tramo nuevo desde aquí. Si sigue en la misma terminal al día siguiente
+                # (varios días «MORROT (REX)») sale desde el último; si luego anotan «SL» desde ahí, el tramo es ese «SL».
+                sig = next((x for x in lst[i + 1:] if x["tipo"] != "CIRCULANDO"), None)
+                if not (sig and sig["ubicacion"] == m["ubicacion"]):
                     t = "SALIDA_TREN"
             if t == "SALIDA_TREN" and id(m) in incluidas:
                 continue

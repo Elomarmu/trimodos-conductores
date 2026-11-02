@@ -79,7 +79,7 @@ class Estado:
     avisos: list = field(default_factory=list)
     cancelada: bool = False   # «ROZ CL CANCELADA»
     forzar: str | None = None  # «FACT» = facturar aunque esté cancelada o en rojo · «NOFACT» = no facturar
-    reexpedicion: bool = False  # «MORROT REEXP»: en esa terminal coge otro tren (tramo nuevo)
+    reexpedicion: bool = False  # «MORROT REX» / «(REX)» / «-REX» / «REEXP»: en esa terminal coge otro tren (tramo nuevo)
 
 
 def color_rgb(color, tema: dict) -> str | None:
@@ -143,6 +143,8 @@ RE_INICIALES = re.compile(r"\s+([A-Z]{1,3})$")
 RE_NOFACT = re.compile(r"\bNO ?FACT\b")
 RE_FACT = re.compile(r"\bFACT\b")
 RE_CANCEL = re.compile(r"\b(CANCELAD[OA]|ANULAD[OA])\b")
+# Reexpedición (coge otro tren en esa terminal): REX, (REX), -REX, REEX, REEXP… Al normalizar se escribe «REX».
+RE_REEX = re.compile(r"(?<![A-Z])RE?EXP?(?![A-Z])")
 
 
 def marcas(texto: str) -> tuple[bool, str | None]:
@@ -156,6 +158,7 @@ def _limpia(t: str) -> str:
     t = RE_NOFACT.sub("", t)
     t = RE_FACT.sub("", t)
     t = RE_CANCEL.sub("", t)
+    t = RE_REEX.sub("", t)
     t = RE_HORA.sub("", t)
     t = RE_REF.sub("", t)
     t = RE_DURACION.sub("", t)
@@ -309,7 +312,7 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
                 carga=carga, bloqueado=bloq, cancelada=marcas(celda.value)[0], forzar=marcas(celda.value)[1],
                 comentario=(celda.comment.text.split(":", 1)[-1].strip() if celda.comment else None),
                 celda=celda.coordinate, avisos=avisos,
-                reexpedicion=bool(re.search(r"\bREEX", norm(celda.value)))))
+                reexpedicion=bool(RE_REEX.search(norm(celda.value)))))
     return conts, estados
 
 
