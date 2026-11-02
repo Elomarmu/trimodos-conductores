@@ -21,7 +21,7 @@ class OdooFalso:
     def __call__(self, modelo, metodo, args, **kw):
         assert (modelo, metodo) in E.PERMITIDO, (modelo, metodo)
         self.llamadas += 1
-        if modelo in ("product.product", "res.partner"):
+        if modelo in ("product.product", "res.partner", "account.analytic.account"):
             return []  # referencias de la Excel: sin datos en el Odoo simulado
         if modelo == "tms.equipment" and metodo == "search_read":
             return [{"id": i, "name": n} for n, i in self.eq.items() if n in args[0][0][2]]
@@ -307,3 +307,48 @@ def test_formatear_mantiene_lo_que_lee_el_automatismo(monkeypatch, tmp_path):
     clave = lambda r: [(s.id_servicio, s.precio, s.producto_id, s.proveedor_id, s.estado) for s in F.calcular(r)]  # noqa: E731
     assert clave(str(nuevo)) == clave(EXCEL)
     assert next(x for x in j["resumen"] if x["hoja"] == "TARIFAS")["columnas"][:5] == ["Servicio", "Origen", "Destino", "Cargado/Vacío", "¿Se factura?"]
+
+
+def test_nombres_ubicaciones_y_cuentas():
+    """Con el nombre (sin referencia) también se completa; ubicaciones y cuentas analíticas igual; dudas → aviso con enlaces."""
+    import argon_facturacion as F
+    import argon_referencias as R
+    F.COLS.clear()
+    F.COLS.update({"TARIFAS": {"Servicio": "A", "Producto en Odoo": "B", "ID producto": "C", "Proveedor": "D", "ID proveedor": "E",
+                               "Cuenta analítica (ID)": "F"},
+                   "PRODUCTOS": {}, "CONDUCTORES": {}, "RESERVAS": {},
+                   "UBICACIONES": {"Texto escrito en la Excel": "A", "Ubicación normalizada": "B", "ID en Odoo": "G"}})
+    t = {"_fila": 4, "Servicio": "TREN", "Producto en Odoo": "llagosta-amberes", "Proveedor": "Hupac Intermodal SA",
+         "Cuenta analítica": "TECO + LAR"}
+    u1 = {"_fila": 4, "Ubicación normalizada": "LA NEGRILLA", "Nombre en Odoo": "TERMINAL SEVILLA LA NEGRILLA"}
+    u2 = {"_fila": 5, "Ubicación normalizada": "MORROT", "Nombre en Odoo": "MORROT"}
+    tablas = {"tarifas": [t], "productos": {}, "conductores": {}, "reservas": [], "ubicaciones": [u1, u2], "ids_ubic": {}}
+
+    class O:
+        url = "https://stinsa18.x"
+
+        def __call__(self, modelo, metodo, args, **kw):
+            dom = args[0]
+            if modelo == "product.product":
+                return [{"id": 9, "default_code": "2250", "name": "LLAGOSTA-AMBERES", "display_name": "[2250] LLAGOSTA-AMBERES"}]
+            if modelo == "account.analytic.account":
+                return [{"id": 88082, "code": "TECO", "name": "ST FERROCARRIL", "display_name": "[TECO] ST FERROCARRIL"},
+                        {"id": 95387, "code": False, "name": "LAR", "display_name": "LAR"}]
+            nombre = dom[0][2] if dom and dom[0][0] == "name" else ""
+            if nombre.upper() == "HUPAC INTERMODAL SA":
+                return [{"id": 18310, "ref": False, "vat": "CHE123", "name": "HUPAC INTERMODAL SA", "display_name": "HUPAC INTERMODAL SA",
+                         "parent_id": False, "supplier_rank": 1}]
+            if nombre == "TERMINAL SEVILLA LA NEGRILLA":
+                return [{"id": 9420, "ref": False, "vat": False, "name": nombre, "display_name": nombre, "parent_id": False, "supplier_rank": 0}]
+            if nombre == "MORROT":
+                return [{"id": i, "ref": False, "vat": False, "name": "MORROT", "display_name": f"MORROT {i}", "parent_id": False,
+                         "supplier_rank": 0} for i in (1, 2)]
+            return []
+
+    r = R.completar(tablas, O())
+    assert t["ID producto"] == 9 and t["Ref. producto"] == "2250" and t["Producto en Odoo"] == "[2250] LLAGOSTA-AMBERES"
+    assert t["ID proveedor"] == 18310 and t["Ref./NIF proveedor"] == "CHE123"
+    assert t["Cuenta analítica (ID)"] == "88082,95387"
+    assert u1["ID en Odoo"] == 9420 and tablas["ids_ubic"] == {"LA NEGRILLA": 9420}
+    av = [a for a in r["avisos"] if "MORROT" in a["texto"]]
+    assert av and av[0]["odoo"][0]["url"] == "https://stinsa18.x/odoo/res.partner/1" and av[0]["celda"].startswith(F.COLS["UBICACIONES"]["Nombre en Odoo"])

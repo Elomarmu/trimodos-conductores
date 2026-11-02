@@ -114,7 +114,8 @@ def leer_tablas(ruta) -> dict:
     wb = openpyxl.load_workbook(ruta, data_only=True)
     alias = L.leer_alias(wb)
     ids_ubic, tipos = {}, {}
-    for f in _filas(wb, "UBICACIONES"):
+    ubicaciones = _filas(wb, "UBICACIONES")
+    for f in ubicaciones:
         if f.get("Ubicación normalizada") and f.get("Tipo"):
             tipos[L.norm(f["Ubicación normalizada"])] = L.norm(f["Tipo"])
         if f.get("Ubicación normalizada") and _int(f.get("ID en Odoo")):
@@ -139,7 +140,7 @@ def leer_tablas(ruta) -> dict:
                              "_o": alias.get(L.norm(f["Origen"]), L.norm(f["Origen"])),
                              "_d": alias.get(L.norm(f.get("Destino") or ""), L.norm(f.get("Destino") or "")),
                              "_c": L.norm(f.get("Contenedor") or "").replace(" ", "")})
-    return {"alias": alias, "ids_ubic": ids_ubic, "tipos": tipos, "productos": productos, "tarifas": tarifas,
+    return {"alias": alias, "ids_ubic": ids_ubic, "tipos": tipos, "ubicaciones": ubicaciones, "productos": productos, "tarifas": tarifas,
             "conductores": conductores, "chasis": chasis, "reservas": reservas}
 
 
