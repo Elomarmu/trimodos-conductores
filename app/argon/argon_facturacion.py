@@ -196,7 +196,6 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
     tipos = tipos or {}
     es_terminal = lambda u: tipos.get(L.norm(u or "")) in ("TERMINAL FERROVIARIA", "TERMINAL DE PASO")  # noqa: E731
     de_paso = lambda u: tipos.get(L.norm(u or "")) == "TERMINAL DE PASO"  # noqa: E731
-    en_ruta = set()  # CR anotadas con el tren en camino: no son servicio aparte
     incluidas = set()  # salidas en tren desde una terminal de paso que ya van dentro del tramo anterior
     por_cont = defaultdict(list)
     for m in movs:
@@ -228,6 +227,12 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 res[-1].cargado = {"CARGADO": "Cargado", "VACIO": "Vacío"}.get(m["carga"], res[-1].cargado)
                 res[-1].notas.append("DEDUCIDO: no hay «SL» en la Excel; llega a otra terminal con hora")
                 fin_tren = m["fecha"]
+            if m.get("reexpedicion") and m["ubicacion"] and not m["bloqueado"]:
+                # coge otro tren en esta terminal: tramo nuevo desde aquí (salvo que luego anoten «SL» desde el mismo sitio)
+                sig = next((x for x in lst[i + 1:] if x["tipo"] != "CIRCULANDO" and x["ubicacion"] != m["ubicacion"]
+                            or x["tipo"] == "SALIDA_TREN"), None)
+                if not (sig and sig["tipo"] == "SALIDA_TREN" and sig["ubicacion"] == m["ubicacion"]):
+                    t = "SALIDA_TREN"
             if t == "SALIDA_TREN" and id(m) in incluidas:
                 continue
             if t == "SALIDA_TREN":
@@ -237,10 +242,12 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 for n in lst[i + 1:]:
                     if destino and (dt.date.fromisoformat(n["fecha"]) - f0).days > 12:
                         break  # más de 12 días: ya no es el mismo viaje
-                    if n["tipo"] == "CARRETERA":
-                        via.append(n["texto"])
-                        en_ruta.add(id(n))  # «CR A PORT BOU» mientras el tren va de camino: es el mismo viaje
+                    if n["tipo"] == "CIRCULANDO":
+                        via.append(n["texto"])  # «CR A PORT BOU» = circulando a: va en la línea del tren («por …»)
                         continue
+                    if n.get("reexpedicion") and n["ubicacion"] and n["ubicacion"] != origen:
+                        destino, fin = n["ubicacion"], n["fecha"]  # «MORROT REEXP»: aquí acaba este tren y sale otro
+                        break
                     if n["bloqueado"]:
                         break
                     if n["tipo"] == "SALIDA_TREN" and de_paso(n["ubicacion"]) and (destino is None or destino == n["ubicacion"]
@@ -264,10 +271,10 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                         destino, fin = n["ubicacion"] if n["tipo"] != "TRAYECTO" else n["origen"], n["fecha"]
                         break
                 nuevo(m, "TREN", origen, destino, fin=fin, via=" · ".join(via) or None)
+                if m.get("reexpedicion"):
+                    res[-1].notas.append(f"reexpedición en {origen}: sale en otro tren")
                 fin_tren = fin or m["fecha"]
-            elif t == "CARRETERA":
-                if id(m) not in en_ruta:
-                    nuevo(m, "CARRETERA", ultimo_sitio, m["ubicacion"])
+            # «CR A …» (circulando a) nunca es un servicio: solo explica por dónde va el tren
             elif t == "TRAYECTO":
                 nuevo(m, "TRAYECTO", m["origen"], m["ubicacion"])
             elif t == "CARGA":
@@ -277,9 +284,9 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
             elif t == "DESCARGA":
                 nuevo(m, "DESCARGA", None, m["ubicacion"])
             # códigos pactados escritos en la celda (TRASVASE, PESAR…) se añaden en tarificar()
-            if t not in ("SALIDA_TREN", "CARRETERA") and m["ubicacion"]:
+            if t not in ("SALIDA_TREN", "CIRCULANDO") and m["ubicacion"]:
                 ultimo_sitio = m["ubicacion"]
-            elif t == "CARRETERA" and m["ubicacion"]:
+            elif t == "CIRCULANDO" and m["ubicacion"]:
                 ultimo_sitio = m["ubicacion"]
     return res
 
