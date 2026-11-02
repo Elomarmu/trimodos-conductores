@@ -143,19 +143,34 @@ def leer_tablas(ruta) -> dict:
             "conductores": conductores, "chasis": chasis, "reservas": reservas}
 
 
-def rotaciones(servicios: list[Servicio]) -> None:
+def bloqueos(movs: list[dict]) -> dict:
+    """Días en que cada contenedor está bloqueado (letra roja: taller, embarcado a destino…). No cuentan las
+    canceladas (también van en rojo) ni lo marcado FACT."""
+    res = defaultdict(list)
+    for m in movs:
+        if m["bloqueado"] and not m.get("cancelada") and m.get("forzar") != "FACT":
+            res[m["contenedor"]].append(m["fecha"])
+    return {c: sorted(set(f)) for c, f in res.items()}
+
+
+def rotaciones(servicios: list[Servicio], bloqueados: dict | None = None) -> None:
     """Un pedido por contenedor desde la descarga anterior hasta la siguiente descarga (incluida): entra todo lo
-    que pasa entre medias (vuelta en vacío, carga, tren cargado y acarreo a la planta de descarga)."""
+    que pasa entre medias (vuelta en vacío, carga, tren cargado y acarreo a la planta de descarga).
+    El pedido también se cierra cuando el contenedor queda bloqueado (letra roja): lo siguiente va a un pedido nuevo."""
+    bloqueados = bloqueados or {}
     por_cont = defaultdict(list)
     for sv in servicios:
         por_cont[sv.contenedor].append(sv)
     for cont, lst in por_cont.items():
         lst.sort(key=lambda x: (x.fecha, 1 if x.servicio == "DESCARGA" else 0))
-        actual, descargado = f"{cont}|{lst[0].fecha}", None
+        actual, descargado, ultima = f"{cont}|{lst[0].fecha}", None, lst[0].fecha
+        rojos = bloqueados.get(cont, [])
         for sv in lst:
-            if descargado and sv.fecha > descargado:
+            bloqueado_entre = any(ultima <= b < sv.fecha for b in rojos)
+            if (descargado and sv.fecha > descargado) or bloqueado_entre:
                 actual, descargado = f"{cont}|{sv.fecha}", None
             sv.rotacion = actual
+            ultima = sv.fecha
             if sv.servicio == "DESCARGA":
                 descargado = sv.fecha
 
@@ -500,7 +515,7 @@ def calcular(ruta, desde=None, hasta=None, completar=None):
     tablas = leer_tablas(ruta)
     calcular.excel = completar(tablas) if completar else {"escrituras": [], "avisos": []}
     servs = construir(movs, tablas["tipos"]) + codigos_pactados(movs, tablas)
-    rotaciones(servs)                       # antes de filtrar fechas: la rotación puede empezar antes
+    rotaciones(servs, bloqueos(movs))       # antes de filtrar fechas: la rotación puede empezar antes
     cruce = cruzar_reservas(servs, tablas["reservas"])
     if desde:
         servs = [s for s in servs if s.fecha >= desde.isoformat()]

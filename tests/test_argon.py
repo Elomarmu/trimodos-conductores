@@ -262,3 +262,19 @@ def test_variantes_de_rex():
             _mov("2026-11-07", "DESCARGA", None, "DESCARGA")]
     trenes = [(s.origen, s.destino, s.fecha) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
     assert trenes == [("AMBERES", "MORROT", "2026-11-02"), ("MORROT", "MADRID", "2026-11-05")]
+
+
+def test_bloqueo_cierra_el_pedido():
+    import argon_facturacion as F
+    movs = [_mov("2026-11-02", "SALIDA_TREN", "AMBERES", "SL AMBERES"),
+            _mov("2026-11-04", "SITUACION", "MORROT", "MORROT"),
+            _mov("2026-11-05", "SITUACION", "MORROT", "TALLER", bloqueado=True),
+            _mov("2026-11-06", "SITUACION", "MORROT", "TALLER", bloqueado=True),
+            _mov("2026-11-09", "SALIDA_TREN", "MORROT", "SL MORROT"),
+            _mov("2026-11-10", "SITUACION", "MADRID", "MADRID"),
+            _mov("2026-11-11", "SITUACION", "MADRID", "ROZ CANCELADA", bloqueado=True, cancelada=True),
+            _mov("2026-11-12", "SALIDA_TREN", "MADRID", "SL MADRID")]
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "MORROT": "TERMINAL FERROVIARIA", "MADRID": "TERMINAL FERROVIARIA"}
+    s = [x for x in F.construir(movs, tipos) if x.servicio == "TREN"]
+    F.rotaciones(s, F.bloqueos(movs))
+    assert [x.rotacion.split("|")[1] for x in s] == ["2026-11-02", "2026-11-09", "2026-11-09"]  # la cancelada no corta

@@ -114,7 +114,9 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             eid = eq[nombre_eq]
             base = f"ARGON|{cont}|ROT {inicio}"
             de_rot = [p for p in previos if p["origin"] == base or p["origin"].startswith(base + "|")]
-            ya = set().union(*(lineas_prev[p["id"]] for p in de_rot)) if de_rot else set()
+            # una línea ya existe si está en cualquier pedido ARGON (mismo producto, fecha y contenedor): así no se
+            # duplica aunque cambie dónde se corta el pedido (descarga o bloqueo)
+            ya = set().union(*lineas_prev.values()) if lineas_prev else set()
             nuevas = []
             for s in servs:
                 if clave_linea(s.producto_id, AO.utc_mediodia(s.fecha), eid) in ya:
