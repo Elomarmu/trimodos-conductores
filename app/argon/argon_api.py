@@ -80,6 +80,14 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
                    [(f(x["fecha"]), x["contenedor"], x["servicio"], ("html", a_excel(x["texto"], x.get("celda"))),
                      ("html", "; ".join(a_excel(i["dato"], i["celda"]) for i in x.get("ir", [])) or e(x["falta"])))
                     for x in odoo_res["pendientes_de_datos"]]))
+    largos = odoo_res.get("bloqueos_largos", [])
+    if largos:
+        p.append(h3("Pedidos cerrados por bloqueo de más de 7 días") +
+                 "<p style='font:10pt Calibri,Arial;color:#555'>El contenedor lleva más de 7 días en rojo (taller, embarcado a "
+                 "destino…): su pedido se ha cerrado ahí y lo siguiente que haga va a un pedido nuevo.</p>" +
+                 tabla(["Contenedor", "Motivo", "Desde", "Hasta", "Días"],
+                       [(x["contenedor"], ("html", a_excel(x["texto"], x["celda"])), f(x["inicio"]),
+                         f(x["salida"]) if x["salida"] else "sigue", x["dias"]) for x in largos]))
     no_encontradas = odoo_res.get("excel", {}).get("avisos", [])
     if no_encontradas:
         p.append(h3("Referencias de la Excel que no se encuentran en Odoo") +

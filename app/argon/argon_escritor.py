@@ -174,6 +174,12 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
     rot = preparar(servicios, desde)
     res = escribir(odoo, rot, cfg, real, limite_s)
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
+    # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
+    hace7 = (dt.date.today() - dt.timedelta(days=7)).isoformat()
+    res["bloqueos_largos"] = [{k: t[k] for k in ("contenedor", "inicio", "salida", "dias", "texto")} |
+                              {"celda": f"'{F.L.HOJA}'!{t['celda']}"}
+                              for tr in F.calcular.bloqueos.values() for t in tr
+                              if t["corta"] and t["inicio"] >= desde.isoformat() and (not t["salida"] or t["salida"] >= hace7)]
     res["pendientes_de_datos"] = [{"fecha": s.fecha, "contenedor": s.contenedor, "servicio": s.servicio,
                                    "texto": s.texto, "falta": "; ".join(s.falta),
                                    "celda": f"'{F.L.HOJA}'!{s.celda}" if s.celda else None,
