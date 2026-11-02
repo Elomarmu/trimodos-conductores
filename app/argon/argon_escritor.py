@@ -25,7 +25,7 @@ PERMITIDO = {
     ("sale.order", "search_read"), ("sale.order", "create"), ("sale.order", "write"), ("sale.order", "action_confirm"),
     ("sale.order.line", "search_read"), ("tms.equipment", "search_read"), ("tms.equipment", "create"),
     ("product.product", "search_read"), ("res.partner", "search_read"),  # referencias de la Excel (solo lectura)
-    ("account.analytic.account", "search_read"),
+    ("account.analytic.account", "search_read"), ("fleet.vehicle", "search_read"),
 }
 
 

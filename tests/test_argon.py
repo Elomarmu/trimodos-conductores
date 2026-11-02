@@ -21,7 +21,7 @@ class OdooFalso:
     def __call__(self, modelo, metodo, args, **kw):
         assert (modelo, metodo) in E.PERMITIDO, (modelo, metodo)
         self.llamadas += 1
-        if modelo in ("product.product", "res.partner", "account.analytic.account"):
+        if modelo in ("product.product", "res.partner", "account.analytic.account", "fleet.vehicle"):
             return []  # referencias de la Excel: sin datos en el Odoo simulado
         if modelo == "tms.equipment" and metodo == "search_read":
             return [{"id": i, "name": n} for n, i in self.eq.items() if n in args[0][0][2]]
@@ -352,3 +352,33 @@ def test_nombres_ubicaciones_y_cuentas():
     assert u1["ID en Odoo"] == 9420 and tablas["ids_ubic"] == {"LA NEGRILLA": 9420}
     av = [a for a in r["avisos"] if "MORROT" in a["texto"]]
     assert av and av[0]["odoo"][0]["url"] == "https://stinsa18.x/odoo/res.partner/1" and av[0]["celda"].startswith(F.COLS["UBICACIONES"]["Nombre en Odoo"])
+
+
+def test_tractora_por_matricula_rellena_conductor_y_va_en_el_acarreo():
+    import argon_facturacion as F
+    import argon_odoo as AO
+    import argon_referencias as R
+    F.COLS.clear()
+    F.COLS.update({"TARIFAS": {}, "PRODUCTOS": {}, "RESERVAS": {}, "UBICACIONES": {},
+                   "CONDUCTORES": {"Código": "A", "Nombre": "C", "ID conductor en Odoo": "E", "Tractora habitual": "F", "ID tractora": "G", "ID proveedor": "I"},
+                   "CHASIS": {"Nº en la Excel": "A", "Matrícula": "B", "ID remolque en Odoo": "C"}})
+    c = {"_fila": 4, "Código": "AU", "Tipo": "Propio", "Tractora habitual": "9684 KVJ"}
+    ch = {"_fila": 4, "Nº en la Excel": "6704", "Matrícula": "R6704BCH"}
+    tablas = {"tarifas": [], "productos": {}, "conductores": {"AU": c}, "reservas": [], "chasis": {"6704": ch}}
+
+    class O:
+        def __call__(self, modelo, metodo, args, **kw):
+            if modelo == "fleet.vehicle":
+                return [{"id": 6845, "license_plate": "9684KVJ", "display_name": "9684KVJ", "driver_id": [9581, "AURELIO RIDAO RAMÍREZ"], "vehicle_type": "tractor"},
+                        {"id": 8330, "license_plate": "R6704BCH", "display_name": "R6704BCH", "driver_id": False, "vehicle_type": "trailer"}]
+            return []
+
+    R.completar(tablas, O())
+    assert c["ID tractora"] == 6845 and c["ID conductor en Odoo"] == 9581 and c["Nombre"] == "AURELIO RIDAO RAMÍREZ"
+    assert ch["ID remolque en Odoo"] == 8330
+    s = F.Servicio(id_servicio="x", fecha="2026-11-02", fecha_fin=None, contenedor="TONU 1", codigo_corto="1", servicio="TRAYECTO",
+                   origen="NEG", destino="ALG", via=None, expedicion=None, cargado="Cargado", cantidad=120, unidad="km",
+                   conductor_codigo="AU", chasis="6704", texto="6704 NEG-ALG AU", producto_id=2461, precio=1.22,
+                   conductor="AURELIO", conductor_id=9581, tractora_id=6845, remolque_id=8330, estado="LISTO PARA ODOO")
+    l = AO.linea_de(s, {})
+    assert (l["tractor_id"], l["trailer_id"], l["driver_id"], l["vendor_id"]) == (6845, 8330, 9581, 9581)

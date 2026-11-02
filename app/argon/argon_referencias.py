@@ -10,7 +10,10 @@ El proceso busca en Odoo y completa el resto (nombre, referencia e ID); n8n lo e
 Manda la referencia; si no hay, el nombre; si tampoco, el ID que ya hubiera. Si no lo encuentra o hay varios iguales,
 lo avisa en el correo con enlace a la celda y a los candidatos de Odoo.
 
-Solo lee de Odoo (search_read de product.product, res.partner y account.analytic.account).
+Tractora (CONDUCTORES «Tractora habitual») y remolque (CHASIS «Matrícula») por matrícula: con la tractora se sabe en Odoo
+quién la conduce, y ese conductor va en el acarreo (y como proveedor si no hay otro).
+
+Solo lee de Odoo (search_read de product.product, res.partner, account.analytic.account y fleet.vehicle).
 """
 from __future__ import annotations
 
@@ -70,7 +73,7 @@ def _columna(hoja: str, nombre: str, escrituras: list) -> str:
 def _filas(tablas: dict, hoja: str) -> list:
     t = {"TARIFAS": tablas["tarifas"], "PRODUCTOS": list(tablas["productos"].values()),
          "CONDUCTORES": list(tablas["conductores"].values()), "RESERVAS": tablas["reservas"],
-         "UBICACIONES": tablas.get("ubicaciones", [])}[hoja]
+         "UBICACIONES": tablas.get("ubicaciones", []), "CHASIS": list(tablas.get("chasis", {}).values())}[hoja]
     return [f for f in t if f.get("_fila")]
 
 
@@ -284,4 +287,32 @@ def completar(tablas: dict, odoo) -> dict:
             idsf = [int(t) for t in trozos(f.get(CUENTA_ID)) if t.isdigit()]
             if idsf and all(i in por_id for i in idsf):
                 poner(h, f, CUENTA, ", ".join(_txt(por_id[i]["code"]) or _txt(por_id[i]["name"]) for i in idsf))
+    # ================= vehículos: tractora (CONDUCTORES) y remolque (CHASIS) por matrícula
+    # Con la tractora se sabe en Odoo quién la conduce: ese es el conductor (y, si no hay otro, el proveedor) del acarreo.
+    VEH = [("CONDUCTORES", "Tractora habitual", "ID tractora"), ("CHASIS", "Matrícula", "ID remolque en Odoo")]
+    mat = lambda v: re.sub(r"[\s\-.]", "", _txt(v)).upper()  # noqa: E731
+    filas_h = [(h, cm, ci, f) for h, cm, ci in VEH for f in _filas(tablas, h)]
+    placas = sorted({x for h, cm, ci, f in filas_h if mat(f.get(cm)) for x in (mat(f.get(cm)), _txt(f.get(cm)))})
+    ids = sorted({i for h, cm, ci, f in filas_h if not mat(f.get(cm)) and (i := F._int(f.get(ci)))})
+    campos_v = ["license_plate", "display_name", "driver_id", "vehicle_type"]
+    cand = leer("fleet.vehicle", [["license_plate", "in", placas]] if placas else None, campos_v)
+    por_id = {v["id"]: v for v in leer("fleet.vehicle", [["id", "in", ids]] if ids else None, campos_v)}
+    for h, cm, ci, f in filas_h:
+        m = mat(f.get(cm))
+        v = None
+        if m:
+            c = [x for x in cand if mat(x["license_plate"]) == m]
+            if len(c) == 1:
+                v = c[0]
+                poner(h, f, ci, v["id"])
+            else:
+                avisar(h, f, cm, f"matrícula {_txt(f.get(cm))} " + ("no existe en Odoo (Flota)" if not c else f"repetida en Odoo ({len(c)} vehículos)"),
+                       "fleet.vehicle", c)
+        elif (i := F._int(f.get(ci))) and i in por_id:
+            v = por_id[i]
+            poner(h, f, cm, v["license_plate"])
+        if v and h == "CONDUCTORES" and v.get("driver_id"):
+            poner(h, f, "ID conductor en Odoo", v["driver_id"][0])
+            if not _txt(f.get("Nombre")):
+                poner(h, f, "Nombre", v["driver_id"][1])
     return {"escrituras": esc, "avisos": avisos}
