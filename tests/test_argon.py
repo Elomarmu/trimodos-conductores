@@ -290,3 +290,20 @@ def test_bloqueo_largo_cierra_el_pedido_y_el_corto_no():
     assert rot[("BLOQUEO", "2026-11-05")] == "2026-11-02"   # va como línea de seguimiento en el mismo pedido
     assert rot[("BLOQUEO", "2026-11-12")] == "2026-11-02"   # el bloqueo largo cierra este pedido…
     assert rot[("TREN", "2026-11-25")] == "2026-11-25"      # …y lo siguiente va a otro
+
+
+def test_formatear_mantiene_lo_que_lee_el_automatismo(monkeypatch, tmp_path):
+    import base64, json as _json
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import argon_api as A
+    import argon_facturacion as F
+    monkeypatch.setenv("ARGON_CLAVE", "secreto")
+    app = FastAPI(); app.include_router(A.router); c = TestClient(app)
+    cuerpo = _json.dumps({"excel_b64": base64.b64encode(Path(EXCEL).read_bytes()).decode()})
+    assert c.post("/api/argon/formatear", content=cuerpo, headers={"x-clave": "mala"}).status_code == 401
+    j = c.post("/api/argon/formatear", content=cuerpo, headers={"x-clave": "secreto"}).json()
+    nuevo = tmp_path / "n.xlsx"; nuevo.write_bytes(base64.b64decode(j["excel_b64"]))
+    clave = lambda r: [(s.id_servicio, s.precio, s.producto_id, s.proveedor_id, s.estado) for s in F.calcular(r)]  # noqa: E731
+    assert clave(str(nuevo)) == clave(EXCEL)
+    assert next(x for x in j["resumen"] if x["hoja"] == "TARIFAS")["columnas"][:5] == ["Servicio", "Origen", "Destino", "Cargado/Vacío", "¿Se factura?"]

@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request  # noqa: E402
 
 import argon_diario as D  # noqa: E402
 import argon_escritor as E  # noqa: E402
+import argon_formato as FM  # noqa: E402
 import argon_lector as L  # noqa: E402
 
 CFG_DEFECTO = {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41, "fecha_inicio": "2026-10-15"}
@@ -154,3 +155,34 @@ def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) 
     return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
             "escrituras_excel": res.get("excel", {}).get("escrituras", []),
             "correo_html": correo(dia, res, av, url_excel), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
+
+
+@router.post("/formatear")
+async def formatear(request: Request):
+    """Ordena las columnas de las tablas (PRODUCTOS, TARIFAS, CONDUCTORES, RESERVAS) y les da a todas el mismo formato.
+    Cuerpo: JSON {"excel_b64": ...}. Responde la Excel nueva en base64 (n8n la vuelve a subir a SharePoint)."""
+    import openpyxl
+    clave = os.environ.get("ARGON_CLAVE", "")
+    recibida = request.headers.get("x-clave", "").encode("latin-1", "replace")
+    formas = [clave.encode("utf-8")] + ([clave.encode("latin-1")] if all(ord(c) < 256 for c in clave) else [])
+    if not clave or not any(hmac.compare_digest(recibida, f) for f in formas):
+        raise HTTPException(status_code=401, detail="Clave incorrecta")
+    try:
+        cuerpo = base64.b64decode(json.loads(await request.body())["excel_b64"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON sin «excel_b64» válido") from None
+    if not cuerpo.startswith(b"PK"):
+        raise HTTPException(status_code=400, detail="El cuerpo debe ser la Excel (.xlsx)")
+    with tempfile.TemporaryDirectory() as d:
+        ruta = os.path.join(d, "ARGON.xlsx")
+        with open(ruta, "wb") as fh:
+            fh.write(cuerpo)
+        try:
+            wb = openpyxl.load_workbook(ruta)
+            resumen = FM.ordenar(wb)
+            wb.save(ruta)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
+        with open(ruta, "rb") as fh:
+            nuevo = fh.read()
+    return {"ok": True, "resumen": resumen, "excel_b64": base64.b64encode(nuevo).decode()}
