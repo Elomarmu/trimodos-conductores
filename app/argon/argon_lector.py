@@ -79,6 +79,7 @@ class Estado:
     avisos: list = field(default_factory=list)
     cancelada: bool = False   # «ROZ CL CANCELADA»
     forzar: str | None = None  # «FACT» = facturar aunque esté cancelada o en rojo · «NOFACT» = no facturar
+    llegada: str | None = None  # «LLAG/ SL LLAGOSTA»: llega a LA LLAGOSTA y ese mismo día sale en otro tren
     reexpedicion: bool = False  # «MORROT REX» / «(REX)» / «-REX» / «REEXP»: en esa terminal coge otro tren (tramo nuevo)
 
 
@@ -145,6 +146,20 @@ RE_FACT = re.compile(r"\bFACT\b")
 RE_CANCEL = re.compile(r"\b(CANCELAD[OA]|ANULAD[OA])\b")
 # Reexpedición (coge otro tren en esa terminal): REX, (REX), -REX, REEX, REEXP… Al normalizar se escribe «REX».
 RE_REEX = re.compile(r"(?<![A-Z])RE?EXP?(?![A-Z])")
+# «LLAG/ SL LLAGOSTA», «MORROT/SL MORROT 944944», «MORROT/SL 927108»: llega a un sitio y el mismo día sale en tren
+RE_LLEGA_SALE = re.compile(r"^(.+?)\s*/\s*(SL\b.*)$")
+
+
+def llega_y_sale(texto: str, alias: dict) -> tuple[str | None, str]:
+    """(sitio de llegada, texto de la salida «SL …» con su terminal) o (None, texto tal cual)."""
+    m = RE_LLEGA_SALE.match(norm(texto))
+    if not m:
+        return None, texto
+    llegada = ubicacion_de(m.group(1), alias)[0]
+    salida = m.group(2).strip()
+    if llegada and not re.sub(r"^SL\s*", "", RE_REF.sub("", salida)).strip():
+        salida = re.sub(r"^SL", f"SL {m.group(1).strip()}", salida, count=1)  # «MORROT/SL 927108» → sale de MORROT
+    return llegada, salida
 
 
 def marcas(texto: str) -> tuple[bool, str | None]:
@@ -301,7 +316,10 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
             celda = ws[f"{k.columna}{r}"]
             if celda.value is None or not str(celda.value).strip():
                 continue
-            tipo, ubic, hora, ref, chasis, origen, ini, carga, bloq, avisos = interpretar(str(celda.value), celda, tema, alias)
+            llegada, texto_int = llega_y_sale(str(celda.value), alias)
+            tipo, ubic, hora, ref, chasis, origen, ini, carga, bloq, avisos = interpretar(texto_int, celda, tema, alias)
+            if llegada and llegada not in conocidas and ubic and llegada.replace(" ", "") in ubic.replace(" ", ""):
+                llegada = ubic  # «LLAG/ SL LLAGOSTA»: LLAG es la abreviatura de la misma terminal de salida
             if ubic and alias and ubic not in conocidas and not bloq:  # en rojo el texto es el motivo, no un sitio
                 avisos.append("Sitio no está en UBICACIONES")
             estados.append(Estado(
@@ -312,7 +330,7 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
                 carga=carga, bloqueado=bloq, cancelada=marcas(celda.value)[0], forzar=marcas(celda.value)[1],
                 comentario=(celda.comment.text.split(":", 1)[-1].strip() if celda.comment else None),
                 celda=celda.coordinate, avisos=avisos,
-                reexpedicion=bool(RE_REEX.search(norm(celda.value)))))
+                reexpedicion=bool(RE_REEX.search(norm(celda.value))), llegada=llegada))
     return conts, estados
 
 

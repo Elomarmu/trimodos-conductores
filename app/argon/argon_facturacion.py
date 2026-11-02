@@ -303,6 +303,12 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                     if n["tipo"] == "CIRCULANDO":
                         via.append(n["texto"])  # «CR A PORT BOU» = circulando a: va en la línea del tren («por …»)
                         continue
+                    if n.get("llegada") and n["llegada"] != origen:
+                        # «LLAG/ SL LLAGOSTA»: este tren acaba aquí ese día y sale otro (tramo nuevo, otro producto)
+                        if destino and destino != n["llegada"]:
+                            via.append(destino)
+                        destino, fin = n["llegada"], n["fecha"]
+                        break
                     if n.get("reexpedicion") and n["ubicacion"] and n["ubicacion"] != origen:
                         destino, fin = n["ubicacion"], n["fecha"]  # «MORROT REEXP»: aquí acaba este tren y sale otro
                         break
