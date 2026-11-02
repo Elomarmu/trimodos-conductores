@@ -143,19 +143,76 @@ def leer_tablas(ruta) -> dict:
             "conductores": conductores, "chasis": chasis, "reservas": reservas}
 
 
-def rotaciones(servicios: list[Servicio]) -> None:
+DIAS_BLOQUEO_CORTA = 7  # bloqueado más de 7 días (taller, embarcado a destino…): se cierra el pedido
+
+
+def bloqueos(estados, hoy: dt.date | None = None) -> dict:
+    """Tramos en que cada contenedor está bloqueado (letra roja: taller, embarcado a destino…), con su duración hasta
+    que vuelve a aparecer sin rojo (o hasta hoy si sigue). No cuentan las canceladas («SL CANCELADA»: la salida se
+    aplaza, también va en rojo) ni lo marcado FACT."""
+    hoy = hoy or dt.date.today()
+    por_cont = defaultdict(list)
+    for e in estados:
+        por_cont[e.contenedor].append(e)
+    res = {}
+    for cont, lst in por_cont.items():
+        lst.sort(key=lambda x: x.fecha)
+        tramos, actual = [], None
+        for e in lst:
+            rojo = e.bloqueado and not e.cancelada and e.forzar != "FACT"
+            if rojo and actual is None:
+                actual = {"contenedor": cont, "inicio": e.fecha, "fin": e.fecha, "salida": None, "texto": e.texto,
+                          "celda": e.celda, "ubicacion": e.ubicacion}
+            elif rojo:
+                actual["fin"] = e.fecha
+            elif actual is not None:
+                actual["salida"] = e.fecha
+                tramos.append(actual)
+                actual = None
+        if actual is not None:
+            tramos.append(actual)
+        for t in tramos:
+            hasta = dt.date.fromisoformat(t["salida"]) if t["salida"] else max(hoy, dt.date.fromisoformat(t["fin"]))
+            t["dias"] = (hasta - dt.date.fromisoformat(t["inicio"])).days
+            t["corta"] = t["dias"] > DIAS_BLOQUEO_CORTA
+        if tramos:
+            res[cont] = tramos
+    return res
+
+
+def servicios_bloqueo(bloq: dict) -> list[Servicio]:
+    """Una línea de seguimiento (informativa) por cada bloqueo: el viaje por carretera al taller no lo hacemos con
+    medios propios, pero queda informado en el pedido."""
+    res = []
+    for cont, tramos in bloq.items():
+        for t in tramos:
+            res.append(Servicio(
+                id_servicio=f"{cont}|{t['inicio']}|BLOQUEO", fecha=t["inicio"], fecha_fin=t["salida"], contenedor=cont,
+                codigo_corto="", servicio="BLOQUEO", origen=None, destino=t["ubicacion"], via=None, expedicion=None,
+                cargado="", cantidad=1, unidad="servicio", conductor_codigo=None, chasis=None, texto=t["texto"],
+                celda=t["celda"]))
+    return res
+
+
+def rotaciones(servicios: list[Servicio], bloqueados: dict | None = None) -> None:
     """Un pedido por contenedor desde la descarga anterior hasta la siguiente descarga (incluida): entra todo lo
-    que pasa entre medias (vuelta en vacío, carga, tren cargado y acarreo a la planta de descarga)."""
+    que pasa entre medias (vuelta en vacío, carga, tren cargado y acarreo a la planta de descarga).
+    El pedido también se cierra si el contenedor queda bloqueado (letra roja) más de 7 días: lo siguiente va a un
+    pedido nuevo. Un bloqueo corto (taller unos días) no rompe el viaje: solo va como línea de seguimiento."""
+    bloqueados = bloqueados or {}
     por_cont = defaultdict(list)
     for sv in servicios:
         por_cont[sv.contenedor].append(sv)
     for cont, lst in por_cont.items():
         lst.sort(key=lambda x: (x.fecha, 1 if x.servicio == "DESCARGA" else 0))
-        actual, descargado = f"{cont}|{lst[0].fecha}", None
+        actual, descargado, ultima = f"{cont}|{lst[0].fecha}", None, lst[0].fecha
+        rojos = [t["inicio"] for t in bloqueados.get(cont, []) if t["corta"]]
         for sv in lst:
-            if descargado and sv.fecha > descargado:
+            bloqueado_entre = any(ultima <= b < sv.fecha for b in rojos)
+            if (descargado and sv.fecha > descargado) or bloqueado_entre:
                 actual, descargado = f"{cont}|{sv.fecha}", None
             sv.rotacion = actual
+            ultima = sv.fecha
             if sv.servicio == "DESCARGA":
                 descargado = sv.fecha
 
@@ -228,10 +285,10 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 res[-1].notas.append("DEDUCIDO: no hay «SL» en la Excel; llega a otra terminal con hora")
                 fin_tren = m["fecha"]
             if m.get("reexpedicion") and m["ubicacion"] and not m["bloqueado"]:
-                # coge otro tren en esta terminal: tramo nuevo desde aquí (salvo que luego anoten «SL» desde el mismo sitio)
-                sig = next((x for x in lst[i + 1:] if x["tipo"] != "CIRCULANDO" and x["ubicacion"] != m["ubicacion"]
-                            or x["tipo"] == "SALIDA_TREN"), None)
-                if not (sig and sig["tipo"] == "SALIDA_TREN" and sig["ubicacion"] == m["ubicacion"]):
+                # coge otro tren en esta terminal: tramo nuevo desde aquí. Si sigue en la misma terminal al día siguiente
+                # (varios días «MORROT (REX)») sale desde el último; si luego anotan «SL» desde ahí, el tramo es ese «SL».
+                sig = next((x for x in lst[i + 1:] if x["tipo"] != "CIRCULANDO"), None)
+                if not (sig and sig["ubicacion"] == m["ubicacion"]):
                     t = "SALIDA_TREN"
             if t == "SALIDA_TREN" and id(m) in incluidas:
                 continue
@@ -432,7 +489,9 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
         falta = []
         cond = tablas["conductores"].get(L.norm(s.conductor_codigo or "")) or {}
         motivo = None
-        if s.forzar == "NOFACT":
+        if s.servicio == "BLOQUEO":
+            motivo = f"bloqueado ({s.texto})"
+        elif s.forzar == "NOFACT":
             motivo = "marcado NOFACT en la celda"
         elif s.forzar == "FACT":
             s.se_factura = "SÍ"
@@ -500,7 +559,10 @@ def calcular(ruta, desde=None, hasta=None, completar=None):
     tablas = leer_tablas(ruta)
     calcular.excel = completar(tablas) if completar else {"escrituras": [], "avisos": []}
     servs = construir(movs, tablas["tipos"]) + codigos_pactados(movs, tablas)
-    rotaciones(servs)                       # antes de filtrar fechas: la rotación puede empezar antes
+    bloq = bloqueos(estados)
+    servs += servicios_bloqueo(bloq)
+    rotaciones(servs, bloq)                 # antes de filtrar fechas: la rotación puede empezar antes
+    calcular.bloqueos = bloq
     cruce = cruzar_reservas(servs, tablas["reservas"])
     if desde:
         servs = [s for s in servs if s.fecha >= desde.isoformat()]

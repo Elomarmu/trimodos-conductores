@@ -40,7 +40,8 @@ def marca(s: F.Servicio) -> str:
 def linea_de(s: F.Servicio, cfg: dict) -> dict:
     nombre = {"TREN": f"Tramo ferroviario {s.origen} → {s.destino}", "CARRETERA": f"Sale por carretera de {s.origen or ''} a {s.destino} (CVA)",
               "DESCARGA": f"Descarga en {s.destino or ''}", "CARGA": f"Carga en {s.destino or ''}",
-              "TRAYECTO": f"Traslado {s.origen} → {s.destino}", "ESPERA": f"Espera en carga {s.destino}: {s.cantidad:g} h"}.get(
+              "TRAYECTO": f"Traslado {s.origen} → {s.destino}", "ESPERA": f"Espera en carga {s.destino}: {s.cantidad:g} h",
+              "BLOQUEO": f"Bloqueado (taller, reparación…): {s.texto}"}.get(
         s.servicio, f"{s.producto or s.servicio} {s.destino or ''}")
     if s.servicio == "TREN" and s.via:
         pasos = [re.sub(r"^CR A\s+", "", v).strip() for v in s.via.split(" · ")]

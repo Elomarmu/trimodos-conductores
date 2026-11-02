@@ -114,7 +114,9 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             eid = eq[nombre_eq]
             base = f"ARGON|{cont}|ROT {inicio}"
             de_rot = [p for p in previos if p["origin"] == base or p["origin"].startswith(base + "|")]
-            ya = set().union(*(lineas_prev[p["id"]] for p in de_rot)) if de_rot else set()
+            # una línea ya existe si está en cualquier pedido ARGON (mismo producto, fecha y contenedor): así no se
+            # duplica aunque cambie dónde se corta el pedido (descarga o bloqueo)
+            ya = set().union(*lineas_prev.values()) if lineas_prev else set()
             nuevas = []
             for s in servs:
                 if clave_linea(s.producto_id, AO.utc_mediodia(s.fecha), eid) in ya:
@@ -172,6 +174,12 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
     rot = preparar(servicios, desde)
     res = escribir(odoo, rot, cfg, real, limite_s)
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
+    # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
+    hace7 = (dt.date.today() - dt.timedelta(days=7)).isoformat()
+    res["bloqueos_largos"] = [{k: t[k] for k in ("contenedor", "inicio", "salida", "dias", "texto")} |
+                              {"celda": f"'{F.L.HOJA}'!{t['celda']}"}
+                              for tr in F.calcular.bloqueos.values() for t in tr
+                              if t["corta"] and t["inicio"] >= desde.isoformat() and (not t["salida"] or t["salida"] >= hace7)]
     res["pendientes_de_datos"] = [{"fecha": s.fecha, "contenedor": s.contenedor, "servicio": s.servicio,
                                    "texto": s.texto, "falta": "; ".join(s.falta),
                                    "celda": f"'{F.L.HOJA}'!{s.celda}" if s.celda else None,

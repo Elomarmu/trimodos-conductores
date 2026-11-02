@@ -1,4 +1,5 @@
 """Pruebas del escritor ARGON con un Odoo simulado (no se conecta a nada)."""
+import datetime as dt
 import os
 from pathlib import Path
 
@@ -244,3 +245,48 @@ def test_cr_a_es_circulando_y_reexp_es_otro_tren():
     movs2 = movs[:3] + [_mov("2026-11-05", "SALIDA_TREN", "MORROT", "SL MORROT")] + movs[3:]
     trenes2 = [(s.origen, s.destino) for s in F.construir(movs2, tipos) if s.servicio == "TREN"]
     assert trenes2 == [("AMBERES", "MORROT"), ("MORROT", "MADRID")]
+
+
+def test_variantes_de_rex():
+    import argon_lector as L
+    import argon_facturacion as F
+    for t in ("MORROT REX", "MORROT (REX)", "MORROT(REX)", "MORROT-REX", "MORROT REEXP", "LA LLAGOSTA(REX)"):
+        assert L.RE_REEX.search(L.norm(t)), t
+    for t in ("REXACH", "GENT W", "SL MORROT 914616"):
+        assert not L.RE_REEX.search(L.norm(t)), t
+    # varios días «MORROT (REX)» seguidos: un solo tramo nuevo, desde el último
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "MORROT": "TERMINAL FERROVIARIA", "MADRID": "TERMINAL FERROVIARIA"}
+    movs = [_mov("2026-11-02", "SALIDA_TREN", "AMBERES", "SL AMBERES"),
+            _mov("2026-11-04", "SITUACION", "MORROT", "MORROT (REX)", reexpedicion=True),
+            _mov("2026-11-05", "SITUACION", "MORROT", "MORROT (REX)", reexpedicion=True),
+            _mov("2026-11-06", "SITUACION", "MADRID", "MADRID"),
+            _mov("2026-11-07", "DESCARGA", None, "DESCARGA")]
+    trenes = [(s.origen, s.destino, s.fecha) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
+    assert trenes == [("AMBERES", "MORROT", "2026-11-02"), ("MORROT", "MADRID", "2026-11-05")]
+
+
+def test_bloqueo_largo_cierra_el_pedido_y_el_corto_no():
+    from types import SimpleNamespace as N
+    import argon_facturacion as F
+
+    def e(fecha, texto, rojo=False, cancelada=False):
+        return N(contenedor="TONU 1", fecha=fecha, texto=texto, bloqueado=rojo, cancelada=cancelada, forzar=None,
+                 celda="B1", ubicacion=None)
+    estados = [e("2026-11-02", "SL AMBERES"), e("2026-11-04", "MORROT"),
+               e("2026-11-05", "CRYO", True), e("2026-11-06", "MORROT"),              # taller 1 día: no corta
+               e("2026-11-09", "SL MORROT"), e("2026-11-10", "SL CANCELADA", True, True),  # cancelada: no cuenta
+               e("2026-11-12", "TALLER", True), e("2026-11-16", "TALLER", True), e("2026-11-24", "MADRID"),  # 12 días: corta
+               e("2026-11-25", "SL MADRID")]
+    bloq = F.bloqueos(estados, hoy=dt.date(2026, 11, 30))
+    assert [(t["inicio"], t["dias"], t["corta"]) for t in bloq["TONU 1"]] == [("2026-11-05", 1, False), ("2026-11-12", 12, True)]
+    movs = [_mov("2026-11-02", "SALIDA_TREN", "AMBERES", "SL AMBERES"), _mov("2026-11-04", "SITUACION", "MORROT", "MORROT"),
+            _mov("2026-11-09", "SALIDA_TREN", "MORROT", "SL MORROT"), _mov("2026-11-24", "SITUACION", "MADRID", "MADRID"),
+            _mov("2026-11-25", "SALIDA_TREN", "MADRID", "SL MADRID")]
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "MORROT": "TERMINAL FERROVIARIA", "MADRID": "TERMINAL FERROVIARIA"}
+    s = [x for x in F.construir(movs, tipos) if x.servicio == "TREN"] + F.servicios_bloqueo(bloq)
+    F.rotaciones(s, bloq)
+    rot = {(x.servicio, x.fecha): x.rotacion.split("|")[1] for x in s}
+    assert rot[("TREN", "2026-11-09")] == "2026-11-02"      # el taller corto no rompe el viaje
+    assert rot[("BLOQUEO", "2026-11-05")] == "2026-11-02"   # va como línea de seguimiento en el mismo pedido
+    assert rot[("BLOQUEO", "2026-11-12")] == "2026-11-02"   # el bloqueo largo cierra este pedido…
+    assert rot[("TREN", "2026-11-25")] == "2026-11-25"      # …y lo siguiente va a otro
