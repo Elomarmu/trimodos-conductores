@@ -219,3 +219,28 @@ def test_referencias_completan_la_excel():
     assert celdas[("TARIFAS", f"{ref_v}4")] == "CHE123"                  # referencia desde el ID
     assert any("repetido" in a["texto"] for a in r["avisos"])            # producto [1] ambiguo
     assert any("[2250] no existe" in a["texto"] for a in r["avisos"])      # «[2250]» escrito en el nombre se busca
+
+
+def _mov(fecha, tipo, ubic, texto, **kw):
+    return {"contenedor": "TONU 1", "codigo_corto": "1", "fecha": fecha, "tipo": tipo, "ubicacion": ubic, "texto": texto,
+            "carga": "CARGADO", "bloqueado": False, "referencia": None, "iniciales": None, "chasis": None, "origen": None,
+            "celda": "B1", **kw}
+
+
+def test_cr_a_es_circulando_y_reexp_es_otro_tren():
+    import argon_facturacion as F
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "MORROT": "TERMINAL FERROVIARIA", "MADRID": "TERMINAL FERROVIARIA"}
+    movs = [_mov("2026-11-02", "SALIDA_TREN", "AMBERES", "SL AMBERES"),
+            _mov("2026-11-03", "CIRCULANDO", "PORTBOU", "CR A PORT BOU"),
+            _mov("2026-11-04", "SITUACION", "MORROT", "MORROT REEXP", reexpedicion=True),
+            _mov("2026-11-05", "SITUACION", "MADRID", "MADRID"),
+            _mov("2026-11-06", "DESCARGA", None, "DESCARGA")]
+    trenes = [(s.origen, s.destino) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
+    assert trenes == [("AMBERES", "MORROT"), ("MORROT", "MADRID")]
+    assert not [s for s in F.construir(movs, tipos) if s.servicio == "CARRETERA"]
+    # «CR A» sin tren delante tampoco es un servicio
+    assert not F.construir([_mov("2026-11-03", "CIRCULANDO", "PORTBOU", "CR A PORT BOU")], tipos)
+    # REEXP y al día siguiente «SL MORROT»: un solo tramo desde MORROT
+    movs2 = movs[:3] + [_mov("2026-11-05", "SALIDA_TREN", "MORROT", "SL MORROT")] + movs[3:]
+    trenes2 = [(s.origen, s.destino) for s in F.construir(movs2, tipos) if s.servicio == "TREN"]
+    assert trenes2 == [("AMBERES", "MORROT"), ("MORROT", "MADRID")]

@@ -64,7 +64,7 @@ class Estado:
     contenedor: str
     codigo_corto: str
     texto: str
-    tipo: str                 # SITUACION | TRAYECTO | DISPONIBLE | SALIDA_TREN | CARRETERA | CARGA | DESCARGA | FUERA_SERVICIO
+    tipo: str                 # SITUACION | TRAYECTO | DISPONIBLE | SALIDA_TREN | CIRCULANDO | CARGA | DESCARGA | FUERA_SERVICIO
     ubicacion: str | None
     hora: str | None
     referencia: str | None
@@ -79,6 +79,7 @@ class Estado:
     avisos: list = field(default_factory=list)
     cancelada: bool = False   # «ROZ CL CANCELADA»
     forzar: str | None = None  # «FACT» = facturar aunque esté cancelada o en rojo · «NOFACT» = no facturar
+    reexpedicion: bool = False  # «MORROT REEXP»: en esa terminal coge otro tren (tramo nuevo)
 
 
 def color_rgb(color, tema: dict) -> str | None:
@@ -247,7 +248,7 @@ def interpretar(texto: str, celda, tema, alias) -> tuple[str, str | None, str | 
     elif t.startswith("SL ") or t == "SL":
         tipo = "SALIDA_TREN"
     elif t.startswith("CR ") or t.startswith("CR-"):
-        tipo = "CARRETERA"
+        tipo = "CIRCULANDO"  # «CR A PORT BOU» = circulando a: el tren pasa por ahí, no es un servicio
     elif fondo in AMARILLO_CARGA:
         tipo = "CARGA"
     elif fondo in NARANJA_DESCARGA or t.startswith("DESCARGA"):
@@ -307,7 +308,8 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
                 horas_espera=(int(m.group(1)) if tipo == "CARGA" and (m := RE_DURACION.search(norm(celda.value))) else None),
                 carga=carga, bloqueado=bloq, cancelada=marcas(celda.value)[0], forzar=marcas(celda.value)[1],
                 comentario=(celda.comment.text.split(":", 1)[-1].strip() if celda.comment else None),
-                celda=celda.coordinate, avisos=avisos))
+                celda=celda.coordinate, avisos=avisos,
+                reexpedicion=bool(re.search(r"\bREEX", norm(celda.value)))))
     return conts, estados
 
 
@@ -319,9 +321,9 @@ def movimientos(estados: list[Estado]) -> list[dict]:
     for e in sorted(estados, key=lambda x: (x.contenedor, x.fecha)):
         if not e.ubicacion and e.tipo == "DESCARGA":
             e.ubicacion = ubic_previa.get(e.contenedor)  # «DESCARGA» a secas = donde estaba
-        if e.tipo not in ("SALIDA_TREN", "CARRETERA", "TRAYECTO") and e.ubicacion:
+        if e.tipo not in ("SALIDA_TREN", "CIRCULANDO", "TRAYECTO") and e.ubicacion:
             ubic_previa[e.contenedor] = e.ubicacion
-        elif e.tipo in ("CARRETERA", "TRAYECTO") and e.ubicacion:
+        elif e.tipo in ("CIRCULANDO", "TRAYECTO") and e.ubicacion:
             ubic_previa[e.contenedor] = e.ubicacion
         clave = (e.tipo, e.ubicacion, e.origen, e.hora, e.referencia, e.carga, e.bloqueado, e.horas_espera, e.iniciales,
                  e.cancelada, e.forzar)
