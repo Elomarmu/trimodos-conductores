@@ -559,14 +559,18 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
     return servicios
 
 
-def calcular(ruta, desde=None, hasta=None, completar=None):
-    """completar(tablas): opcional, completa productos y proveedores desde su referencia en Odoo antes de tarificar."""
+def calcular(ruta, desde=None, hasta=None, completar=None, hoy: dt.date | None = None):
+    """completar(tablas): opcional, completa productos y proveedores desde su referencia en Odoo antes de tarificar.
+    hoy: solo cuenta lo que ya ha pasado (celdas de antes de hoy). Lo de hoy y lo siguiente es planificación de los
+    operadores de tráfico: no se lleva a Odoo. Un tren que ya salió pero aún no ha llegado espera a la llegada."""
     conts, estados = L.leer(ruta)
+    if hoy:
+        estados = [e for e in estados if e.fecha < hoy.isoformat()]
     movs = L.movimientos(estados)
     tablas = leer_tablas(ruta)
     calcular.excel = completar(tablas) if completar else {"escrituras": [], "avisos": []}
     servs = construir(movs, tablas["tipos"]) + codigos_pactados(movs, tablas)
-    bloq = bloqueos(estados)
+    bloq = bloqueos(estados, hoy)
     servs += servicios_bloqueo(bloq)
     rotaciones(servs, bloq)                 # antes de filtrar fechas: la rotación puede empezar antes
     calcular.bloqueos = bloq
