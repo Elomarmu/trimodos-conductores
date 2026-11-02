@@ -161,8 +161,11 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
     return res
 
 
-def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0):
+def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0,
+             hoy: dt.date | None = None):
+    """Solo lleva a Odoo lo que ya ha pasado (celdas anteriores a hoy); lo demás es planificación."""
     desde = desde or dt.date.fromisoformat(cfg.get("fecha_inicio", "2026-10-15"))
+    hoy = hoy or dt.date.today()
     if odoo is None:
         # Variables propias de ARGON: las ODOO_* de Vercel son las de producción de la app de conductores
         faltan = [v for v in ("ARGON_ODOO_URL", "ARGON_ODOO_DB", "ARGON_ODOO_USER", "ARGON_ODOO_PASSWORD") if not os.environ.get(v)]
@@ -171,12 +174,12 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
         odoo = Odoo(os.environ["ARGON_ODOO_URL"], os.environ["ARGON_ODOO_DB"], os.environ["ARGON_ODOO_USER"],
                     os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
     # 60 días antes: para saber dónde empieza cada rotación. Productos y proveedores desde su referencia en Odoo.
-    servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo))
+    servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo), hoy=hoy)
     rot = preparar(servicios, desde)
     res = escribir(odoo, rot, cfg, real, limite_s)
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
-    hace7 = (dt.date.today() - dt.timedelta(days=7)).isoformat()
+    hace7 = (hoy - dt.timedelta(days=7)).isoformat()
     res["bloqueos_largos"] = [{k: t[k] for k in ("contenedor", "inicio", "salida", "dias", "texto")} |
                               {"celda": f"'{F.L.HOJA}'!{t['celda']}"}
                               for tr in F.calcular.bloqueos.values() for t in tr
@@ -185,5 +188,6 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
                                    "texto": s.texto, "falta": "; ".join(s.falta),
                                    "celda": f"'{F.L.HOJA}'!{s.celda}" if s.celda else None,
                                    "ir": [{"dato": f, "celda": s.ir.get(f)} for f in s.falta]}
-                                  for s in servicios if s.fecha >= desde.isoformat() and s.estado == "FALTAN DATOS"]
+                                  for s in servicios if s.fecha >= desde.isoformat() and s.estado == "FALTAN DATOS"
+                                  and "destino del tren (aún no ha llegado)" not in s.falta]  # en camino: ya llegará
     return res

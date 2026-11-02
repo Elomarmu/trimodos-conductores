@@ -151,7 +151,7 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
 
 def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) -> dict:
     cfg = config()
-    res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0)
+    res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0, hoy=dia)
     conts, estados = L.leer(ruta)
     av = D.avisos(conts, estados, [], dia)
     desde7 = (dia - dt.timedelta(days=7)).isoformat()

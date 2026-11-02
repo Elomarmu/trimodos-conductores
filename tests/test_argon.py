@@ -382,3 +382,30 @@ def test_tractora_por_matricula_rellena_conductor_y_va_en_el_acarreo():
                    conductor="AURELIO", conductor_id=9581, tractora_id=6845, remolque_id=8330, estado="LISTO PARA ODOO")
     l = AO.linea_de(s, {})
     assert (l["tractor_id"], l["trailer_id"], l["driver_id"], l["vendor_id"]) == (6845, 8330, 9581, 9581)
+
+
+def test_llega_y_sale_el_mismo_dia():
+    """«LLAG/ SL LLAGOSTA»: llega a LA LLAGOSTA y el mismo día sale en otro tren → dos tramos."""
+    import argon_lector as L
+    import argon_facturacion as F
+    alias = {"LLAGOSTA": "LA LLAGOSTA", "LA LLAGOSTA": "LA LLAGOSTA", "MORROT": "MORROT", "AMBERES": "AMBERES"}
+    assert L.llega_y_sale("LLAG/ SL LLagosta", alias)[1] == "SL LLAGOSTA"
+    assert L.llega_y_sale("MORROT/SL 927108", alias) == ("MORROT", "SL MORROT 927108")
+    assert L.llega_y_sale("SL AMBERES", alias) == (None, "SL AMBERES")
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "LA LLAGOSTA": "TERMINAL DE PASO", "LA NEGRILLA": "TERMINAL FERROVIARIA"}
+    movs = [_mov("2026-10-16", "SALIDA_TREN", "AMBERES", "SL AMBERES"),
+            _mov("2026-10-19", "CIRCULANDO", "PORTBOU", "CR A PORT BOU"),
+            _mov("2026-10-20", "SALIDA_TREN", "LA LLAGOSTA", "LLAG/ SL LLAGOSTA", llegada="LA LLAGOSTA"),
+            _mov("2026-10-21", "DISPONIBLE", "LA NEGRILLA", "NEGRILLA 18:00"),
+            _mov("2026-10-22", "DESCARGA", "LA NEGRILLA", "DESCARGA")]
+    trenes = [(s.origen, s.destino, s.fecha, s.fecha_fin) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
+    assert trenes == [("AMBERES", "LA LLAGOSTA", "2026-10-16", "2026-10-20"), ("LA LLAGOSTA", "LA NEGRILLA", "2026-10-20", "2026-10-21")]
+
+
+def test_no_lleva_a_odoo_la_planificacion():
+    """Las celdas de hoy en adelante son planificación: no generan servicios; un tren en camino espera a llegar."""
+    import argon_facturacion as F
+    hoy = dt.date(2026, 10, 25)
+    s = F.calcular(EXCEL, dt.date(2026, 10, 1), hoy=hoy)
+    assert s and all(x.fecha < hoy.isoformat() for x in s)
+    assert all((x.fecha_fin or x.fecha) < hoy.isoformat() for x in s if x.servicio == "TREN" and x.destino)
