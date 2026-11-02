@@ -91,13 +91,18 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
                          f(x["salida"]) if x["salida"] else "sigue", x["dias"]) for x in largos]))
     no_encontradas = odoo_res.get("excel", {}).get("avisos", [])
     if no_encontradas:
-        p.append(h3("Referencias de la Excel que no se encuentran en Odoo") +
-                 tabla(["Hoja", "Dato"], [(x["hoja"], ("html", a_excel(x["texto"], f"'{x['hoja']}'!{x['celda']}")))
-                                          for x in no_encontradas]))
+        def en_odoo(x):
+            ls = [f'<a href="{e(o["url"])}">{e(o["nombre"] or "")}</a>' if o.get("url") else e(o["nombre"] or "")
+                  for o in x.get("odoo", [])]
+            return ("html", "<br>".join(ls) or "—")
+        p.append(h3("Datos de las tablas que no se encuentran en Odoo o están repetidos") +
+                 tabla(["Hoja", "Dato (enlace a la celda)", "En Odoo"],
+                       [(x["hoja"], ("html", a_excel(x["texto"], f"'{x['hoja']}'!{x['celda']}")), en_odoo(x))
+                        for x in no_encontradas]))
     escritas = odoo_res.get("excel", {}).get("escrituras", [])
     if escritas:
         p.append(f"<p style='font:10pt Calibri,Arial;color:#555'>Se completan {len(escritas)} celdas de la Excel "
-                 "(nombres, ID y referencias de productos y proveedores).</p>")
+                 "(nombres, referencias e ID de productos, proveedores, ubicaciones y cuentas analíticas).</p>")
     p.append(h3("Bloqueados hoy") + tabla(["Contenedor", "Motivo"], [(k.matricula, u.texto) for k, u in av["bloqueados"]]))
     p.append(h3(f"Sin anotar desde hace {D.DIAS_SIN_ANOTAR} días o más") +
              tabla(["Contenedor", "Última anotación", "Fecha", "Días"],

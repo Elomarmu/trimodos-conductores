@@ -59,6 +59,10 @@ def linea_de(s: F.Servicio, cfg: dict) -> dict:
              "shipping_origin_id": s.origen_id, "shipping_destination_id": s.destino_id,
              "pickup_date": utc_mediodia(s.fecha), "forecast_unload_date": utc_mediodia(s.fecha_fin or s.fecha),
              "analytic_distribution": s.analitica}
+    if s.servicio == "TRAYECTO" and s.estado != "INFORMATIVO" and (s.tractora_id or s.conductor_id):
+        # acarreo que contratamos nosotros: tractora, remolque y conductor (el de la tractora en Odoo)
+        linea.update({"tractor_id": s.tractora_id, "trailer_id": s.remolque_id, "driver_id": s.conductor_id,
+                      "vendor_id": s.proveedor_id or s.conductor_id})
     return {k: v for k, v in linea.items() if v not in (None, "")}
 
 
