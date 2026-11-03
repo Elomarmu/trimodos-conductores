@@ -15,6 +15,7 @@ import datetime as dt
 import html
 import hmac
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -28,9 +29,11 @@ from fastapi import APIRouter, HTTPException, Request  # noqa: E402
 import argon_diario as D  # noqa: E402
 import argon_escritor as E  # noqa: E402
 import argon_formato as FM  # noqa: E402
+import argon_historico as H  # noqa: E402
 import argon_lector as L  # noqa: E402
 
 CFG_DEFECTO = {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41, "fecha_inicio": "2026-10-15"}
+log = logging.getLogger("argon")
 router = APIRouter(prefix="/api/argon", tags=["argon"])
 
 
@@ -128,11 +131,12 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
     formas = [clave.encode("utf-8")] + ([clave.encode("latin-1")] if all(ord(c) < 256 for c in clave) else [])
     if not clave or not any(hmac.compare_digest(recibida, f) for f in formas):
         raise HTTPException(status_code=401, detail="Clave incorrecta")
-    cuerpo, url_excel = await request.body(), None
+    cuerpo, url_excel, historico = await request.body(), None, False
     if cuerpo[:1] == b"{":  # n8n: {"excel_b64": "...", "url_excel": "..."} (su ejecutor de código no envía bien los binarios)
         try:
             datos = json.loads(cuerpo)
             cuerpo, url_excel = base64.b64decode(datos["excel_b64"]), datos.get("url_excel")
+            historico = bool(datos.get("historico"))  # n8n sabe escribir rangos enteros (hoja HISTORICO)
         except Exception:
             raise HTTPException(status_code=400, detail="JSON sin «excel_b64» válido") from None
     if not cuerpo.startswith(b"PK"):
@@ -142,14 +146,14 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
         t.write(cuerpo)
         ruta = t.name
     try:
-        return _procesar(ruta, modo, dia, url_excel)
+        return _procesar(ruta, modo, dia, url_excel, historico)
     except Exception as e:  # el detalle vuelve a n8n y sale en el error del nodo (no contiene claves)
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
     finally:
         os.unlink(ruta)
 
 
-def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) -> dict:
+def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None, historico: bool = False) -> dict:
     cfg = config()
     res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0, hoy=dia)
     conts, estados = L.leer(ruta)
@@ -157,8 +161,15 @@ def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) 
     desde7 = (dia - dt.timedelta(days=7)).isoformat()
     av["sl_sin_numero"] = [x for x in estados if x.tipo == "SALIDA_TREN" and not x.referencia and desde7 <= x.fecha <= dia.isoformat()]
     av["vencimientos"] = D.vencimientos(ruta, dia)
+    escr = list(res.get("excel", {}).get("escrituras", []))
+    if historico and not res["restantes"]:  # solo en la última vuelta: el histórico del año para el cuadro de mandos
+        try:
+            escr += H.escrituras(ruta, dia)
+        except Exception as ex:  # el histórico nunca debe parar los pedidos ni el correo
+            log.exception("histórico ARGON")
+            res.setdefault("errores", []).append(f"No se ha podido calcular el histórico: {ex}")
     return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
-            "escrituras_excel": res.get("excel", {}).get("escrituras", []),
+            "escrituras_excel": escr,
             "correo_html": correo(dia, res, av, url_excel), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
 
 
