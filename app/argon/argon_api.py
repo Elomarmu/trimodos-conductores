@@ -15,6 +15,7 @@ import datetime as dt
 import html
 import hmac
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -28,9 +29,11 @@ from fastapi import APIRouter, HTTPException, Request  # noqa: E402
 import argon_diario as D  # noqa: E402
 import argon_escritor as E  # noqa: E402
 import argon_formato as FM  # noqa: E402
+import argon_historico as H  # noqa: E402
 import argon_lector as L  # noqa: E402
 
 CFG_DEFECTO = {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41, "fecha_inicio": "2026-10-15"}
+log = logging.getLogger("argon")
 router = APIRouter(prefix="/api/argon", tags=["argon"])
 
 
@@ -39,6 +42,24 @@ def config() -> dict:
     if os.environ.get("ARGON_CONFIG"):
         cfg.update(json.loads(os.environ["ARGON_CONFIG"]))
     return cfg
+
+
+DASHBOARD_URL = "https://claude.ai/artifact/9Ah8EWNdwMsUS7oRYALREp"  # cuadro de mandos «Tráfico ARGON»
+
+
+def enlaces(url_excel: str | None = None) -> str:
+    """Cabecera del correo: el cuadro de mandos (para dejarlo como app en el móvil) y la Excel."""
+    e = html.escape
+    dash = os.environ.get("ARGON_DASHBOARD_URL", DASHBOARD_URL)
+    boton = ("display:inline-block;padding:6px 12px;margin:0 6px 6px 0;border-radius:4px;background:#1F4E79;color:#fff;"
+             "text-decoration:none;font:bold 10pt Calibri,Arial")
+    partes = [f'<a href="{e(dash)}" style="{boton}">Abrir el cuadro de mandos</a>']
+    if url_excel:
+        partes.append(f'<a href="{e(url_excel)}" style="{boton};background:#217346">Abrir la Excel ARGON</a>')
+    return ("<div style='margin:0 0 10px'>" + "".join(partes) +
+            "<p style='font:9pt Calibri,Arial;color:#555;margin:2px 0 0'>Para tenerlo como app en el móvil: abre el cuadro "
+            "de mandos y en el menú del navegador elige «Añadir a pantalla de inicio» (Android) o «Compartir → Añadir a "
+            "pantalla de inicio» (iPhone).</p></div>")
 
 
 def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None) -> str:
@@ -66,7 +87,7 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
 
     h3 = lambda t: f"<h3 style='font:bold 11pt Calibri,Arial;margin:14px 0 4px'>{e(t)}</h3>"  # noqa: E731
     modo = "" if odoo_res.get("modo") == "real" else " (MODO PRUEBA: no se ha escrito nada)"
-    p = ["<!--ODOO-->", f"<p style='font:11pt Calibri,Arial'><b>ARGON · lectura del {hoy:%d/%m/%Y}{modo}</b><br>"
+    p = [enlaces(url_excel), "<!--ODOO-->", f"<p style='font:11pt Calibri,Arial'><b>ARGON · lectura del {hoy:%d/%m/%Y}{modo}</b><br>"
          f"Odoo: {len(odoo_res['pedidos_creados'])} pedidos nuevos, {len(odoo_res['pedidos_ampliados'])} ampliados, "
          f"{odoo_res['lineas_nuevas']} líneas nuevas.</p>"]
     if odoo_res["errores"]:
@@ -128,11 +149,12 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
     formas = [clave.encode("utf-8")] + ([clave.encode("latin-1")] if all(ord(c) < 256 for c in clave) else [])
     if not clave or not any(hmac.compare_digest(recibida, f) for f in formas):
         raise HTTPException(status_code=401, detail="Clave incorrecta")
-    cuerpo, url_excel = await request.body(), None
+    cuerpo, url_excel, historico = await request.body(), None, False
     if cuerpo[:1] == b"{":  # n8n: {"excel_b64": "...", "url_excel": "..."} (su ejecutor de código no envía bien los binarios)
         try:
             datos = json.loads(cuerpo)
             cuerpo, url_excel = base64.b64decode(datos["excel_b64"]), datos.get("url_excel")
+            historico = bool(datos.get("historico"))  # n8n sabe escribir rangos enteros (hoja HISTORICO)
         except Exception:
             raise HTTPException(status_code=400, detail="JSON sin «excel_b64» válido") from None
     if not cuerpo.startswith(b"PK"):
@@ -142,14 +164,14 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
         t.write(cuerpo)
         ruta = t.name
     try:
-        return _procesar(ruta, modo, dia, url_excel)
+        return _procesar(ruta, modo, dia, url_excel, historico)
     except Exception as e:  # el detalle vuelve a n8n y sale en el error del nodo (no contiene claves)
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
     finally:
         os.unlink(ruta)
 
 
-def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) -> dict:
+def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None, historico: bool = False) -> dict:
     cfg = config()
     res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0, hoy=dia)
     conts, estados = L.leer(ruta)
@@ -157,8 +179,15 @@ def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None) 
     desde7 = (dia - dt.timedelta(days=7)).isoformat()
     av["sl_sin_numero"] = [x for x in estados if x.tipo == "SALIDA_TREN" and not x.referencia and desde7 <= x.fecha <= dia.isoformat()]
     av["vencimientos"] = D.vencimientos(ruta, dia)
+    escr = list(res.get("excel", {}).get("escrituras", []))
+    if historico and not res["restantes"]:  # solo en la última vuelta: el histórico del año para el cuadro de mandos
+        try:
+            escr += H.escrituras(ruta, dia)
+        except Exception as ex:  # el histórico nunca debe parar los pedidos ni el correo
+            log.exception("histórico ARGON")
+            res.setdefault("errores", []).append(f"No se ha podido calcular el histórico: {ex}")
     return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
-            "escrituras_excel": res.get("excel", {}).get("escrituras", []),
+            "escrituras_excel": escr,
             "correo_html": correo(dia, res, av, url_excel), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
 
 

@@ -409,3 +409,76 @@ def test_no_lleva_a_odoo_la_planificacion():
     s = F.calcular(EXCEL, dt.date(2026, 10, 1), hoy=hoy)
     assert s and all(x.fecha < hoy.isoformat() for x in s)
     assert all((x.fecha_fin or x.fecha) < hoy.isoformat() for x in s if x.servicio == "TREN" and x.destino)
+
+
+# ------------------------------------------------------------------ histórico para el cuadro de mandos
+def _copia_con_hoja(tmp_path, nombre=None, a1=None):
+    import openpyxl
+    wb = openpyxl.load_workbook(EXCEL)
+    if nombre:
+        ws = wb.create_sheet(nombre)
+        if a1:
+            ws["A1"] = a1
+    ruta = tmp_path / "argon.xlsx"
+    wb.save(ruta)
+    return str(ruta)
+
+
+def test_historico_tablas_y_solo_pasado():
+    import argon_historico as H
+    hoy = dt.date(2026, 10, 31)
+    d = H.datos(EXCEL, hoy)
+    for t in ("ROTACIONES", "EQUIPOS", "RUTAS", "LUGARES", "MESES", "DIAS"):
+        assert d[t], t
+    assert all(r["inicio"] < hoy.isoformat() for r in d["ROTACIONES"])
+    assert all(r["fecha_descarga"] == "" or r["fecha_descarga"] >= "2026-01-01" for r in d["ROTACIONES"])
+    cerradas = [r for r in d["ROTACIONES"] if r["estado"] == "Cerrada" and r["fecha_descarga"] >= "2026-01-01"]
+    assert sum(r["rotaciones"] for r in d["EQUIPOS"]) == len(cerradas)
+    assert all(0 <= (r["pct_cargado"] or 0) <= 100 for r in d["EQUIPOS"])
+    assert sum(m["descargas"] for m in d["MESES"]) == sum(x["descargas"] for x in d["LUGARES"])
+
+
+def test_historico_matriz_borra_lo_anterior():
+    import argon_historico as H
+    hoy = dt.date(2026, 10, 31)
+    m = H.matriz(H.datos(EXCEL, hoy), hoy)
+    assert len(m) >= H.FILAS and all(len(f) == H.COLS for f in m)
+    assert str(m[0][0]).startswith(H.TITULO)
+    assert ["#TABLA", "EQUIPOS"] == m[2][:2]
+
+
+def test_historico_usa_hoja1_y_la_renombra_la_noche_siguiente(tmp_path):
+    import argon_historico as H
+    hoy = dt.date(2026, 10, 31)
+    assert H.escrituras(_copia_con_hoja(tmp_path), hoy) == []  # ni DASHBOARD ni Hoja1: no hace nada
+    w = H.escrituras(_copia_con_hoja(tmp_path, "Hoja1"), hoy)
+    assert w[0]["hoja"] == "Hoja1" and w[0]["celda"].startswith("A1:N") and len(w[0]["valores"]) >= H.FILAS
+    w = H.escrituras(_copia_con_hoja(tmp_path, "Hoja1", H.TITULO + " — ..."), hoy)
+    assert w == [{"hoja": "Hoja1", "ruta": "worksheets('Hoja1')", "cuerpo": {"name": "DASHBOARD"}}]
+    assert H.escrituras(_copia_con_hoja(tmp_path, "Hoja1", "otra cosa"), hoy) == []
+    w = H.escrituras(_copia_con_hoja(tmp_path, "DASHBOARD", H.TITULO), hoy)
+    assert w[0]["hoja"] == "DASHBOARD" and "valores" in w[0]
+
+
+def test_api_historico_solo_si_n8n_lo_pide(monkeypatch):
+    import argon_api as A
+    import argon_historico as H
+    llamadas = []
+    monkeypatch.setattr(H, "escrituras", lambda ruta, dia: llamadas.append(dia) or [{"hoja": "DASHBOARD", "celda": "A1:N2", "valores": [[1], [2]]}])
+    monkeypatch.setattr(A.E, "procesar", lambda *a, **k: {"restantes": 0, "excel": {"escrituras": []}, "errores": [],
+                                                           "pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0})
+    monkeypatch.setattr(A, "correo", lambda *a, **k: "")
+    r = A._procesar(EXCEL, "prueba", dt.date(2026, 10, 31))
+    assert r["escrituras_excel"] == [] and not llamadas
+    r = A._procesar(EXCEL, "prueba", dt.date(2026, 10, 31), historico=True)
+    assert r["escrituras_excel"][0]["hoja"] == "DASHBOARD"
+
+
+def test_correo_empieza_con_enlaces_al_dashboard_y_a_la_excel():
+    import argon_api as A
+    res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "errores": [], "modo": "real",
+           "pendientes_de_datos": [], "bloqueos_largos": [], "excel": {"avisos": [], "escrituras": []}}
+    av = {k: [] for k in ("bloqueados", "sin_anotar", "sl_sin_numero", "revisar", "vencimientos")}
+    h = A.correo(dt.date(2026, 11, 3), res, av, "https://sp/ARGON.xlsx")
+    assert h.index("Abrir el cuadro de mandos") < h.index("<!--ODOO-->")
+    assert "https://sp/ARGON.xlsx" in h[: h.index("<!--ODOO-->")] and A.DASHBOARD_URL in h
