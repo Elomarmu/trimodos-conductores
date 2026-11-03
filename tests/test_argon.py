@@ -450,25 +450,35 @@ def test_historico_matriz_borra_lo_anterior():
 def test_historico_usa_hoja1_y_la_renombra_la_noche_siguiente(tmp_path):
     import argon_historico as H
     hoy = dt.date(2026, 10, 31)
-    assert H.escrituras(_copia_con_hoja(tmp_path), hoy) == []  # ni HISTORICO ni Hoja1: no hace nada
+    assert H.escrituras(_copia_con_hoja(tmp_path), hoy) == []  # ni DASHBOARD ni Hoja1: no hace nada
     w = H.escrituras(_copia_con_hoja(tmp_path, "Hoja1"), hoy)
     assert w[0]["hoja"] == "Hoja1" and w[0]["celda"].startswith("A1:N") and len(w[0]["valores"]) >= H.FILAS
     w = H.escrituras(_copia_con_hoja(tmp_path, "Hoja1", H.TITULO + " — ..."), hoy)
-    assert w == [{"hoja": "Hoja1", "ruta": "worksheets('Hoja1')", "cuerpo": {"name": "HISTORICO"}}]
+    assert w == [{"hoja": "Hoja1", "ruta": "worksheets('Hoja1')", "cuerpo": {"name": "DASHBOARD"}}]
     assert H.escrituras(_copia_con_hoja(tmp_path, "Hoja1", "otra cosa"), hoy) == []
-    w = H.escrituras(_copia_con_hoja(tmp_path, "HISTORICO", H.TITULO), hoy)
-    assert w[0]["hoja"] == "HISTORICO" and "valores" in w[0]
+    w = H.escrituras(_copia_con_hoja(tmp_path, "DASHBOARD", H.TITULO), hoy)
+    assert w[0]["hoja"] == "DASHBOARD" and "valores" in w[0]
 
 
 def test_api_historico_solo_si_n8n_lo_pide(monkeypatch):
     import argon_api as A
     import argon_historico as H
     llamadas = []
-    monkeypatch.setattr(H, "escrituras", lambda ruta, dia: llamadas.append(dia) or [{"hoja": "HISTORICO", "celda": "A1:N2", "valores": [[1], [2]]}])
+    monkeypatch.setattr(H, "escrituras", lambda ruta, dia: llamadas.append(dia) or [{"hoja": "DASHBOARD", "celda": "A1:N2", "valores": [[1], [2]]}])
     monkeypatch.setattr(A.E, "procesar", lambda *a, **k: {"restantes": 0, "excel": {"escrituras": []}, "errores": [],
                                                            "pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0})
     monkeypatch.setattr(A, "correo", lambda *a, **k: "")
     r = A._procesar(EXCEL, "prueba", dt.date(2026, 10, 31))
     assert r["escrituras_excel"] == [] and not llamadas
     r = A._procesar(EXCEL, "prueba", dt.date(2026, 10, 31), historico=True)
-    assert r["escrituras_excel"][0]["hoja"] == "HISTORICO"
+    assert r["escrituras_excel"][0]["hoja"] == "DASHBOARD"
+
+
+def test_correo_empieza_con_enlaces_al_dashboard_y_a_la_excel():
+    import argon_api as A
+    res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "errores": [], "modo": "real",
+           "pendientes_de_datos": [], "bloqueos_largos": [], "excel": {"avisos": [], "escrituras": []}}
+    av = {k: [] for k in ("bloqueados", "sin_anotar", "sl_sin_numero", "revisar", "vencimientos")}
+    h = A.correo(dt.date(2026, 11, 3), res, av, "https://sp/ARGON.xlsx")
+    assert h.index("Abrir el cuadro de mandos") < h.index("<!--ODOO-->")
+    assert "https://sp/ARGON.xlsx" in h[: h.index("<!--ODOO-->")] and A.DASHBOARD_URL in h

@@ -44,6 +44,24 @@ def config() -> dict:
     return cfg
 
 
+DASHBOARD_URL = "https://claude.ai/artifact/9Ah8EWNdwMsUS7oRYALREp"  # cuadro de mandos «Tráfico ARGON»
+
+
+def enlaces(url_excel: str | None = None) -> str:
+    """Cabecera del correo: el cuadro de mandos (para dejarlo como app en el móvil) y la Excel."""
+    e = html.escape
+    dash = os.environ.get("ARGON_DASHBOARD_URL", DASHBOARD_URL)
+    boton = ("display:inline-block;padding:6px 12px;margin:0 6px 6px 0;border-radius:4px;background:#1F4E79;color:#fff;"
+             "text-decoration:none;font:bold 10pt Calibri,Arial")
+    partes = [f'<a href="{e(dash)}" style="{boton}">Abrir el cuadro de mandos</a>']
+    if url_excel:
+        partes.append(f'<a href="{e(url_excel)}" style="{boton};background:#217346">Abrir la Excel ARGON</a>')
+    return ("<div style='margin:0 0 10px'>" + "".join(partes) +
+            "<p style='font:9pt Calibri,Arial;color:#555;margin:2px 0 0'>Para tenerlo como app en el móvil: abre el cuadro "
+            "de mandos y en el menú del navegador elige «Añadir a pantalla de inicio» (Android) o «Compartir → Añadir a "
+            "pantalla de inicio» (iPhone).</p></div>")
+
+
 def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None) -> str:
     e = html.escape
     td = 'style="padding:3px 8px;border-bottom:1px solid #ddd"'
@@ -69,7 +87,7 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
 
     h3 = lambda t: f"<h3 style='font:bold 11pt Calibri,Arial;margin:14px 0 4px'>{e(t)}</h3>"  # noqa: E731
     modo = "" if odoo_res.get("modo") == "real" else " (MODO PRUEBA: no se ha escrito nada)"
-    p = ["<!--ODOO-->", f"<p style='font:11pt Calibri,Arial'><b>ARGON · lectura del {hoy:%d/%m/%Y}{modo}</b><br>"
+    p = [enlaces(url_excel), "<!--ODOO-->", f"<p style='font:11pt Calibri,Arial'><b>ARGON · lectura del {hoy:%d/%m/%Y}{modo}</b><br>"
          f"Odoo: {len(odoo_res['pedidos_creados'])} pedidos nuevos, {len(odoo_res['pedidos_ampliados'])} ampliados, "
          f"{odoo_res['lineas_nuevas']} líneas nuevas.</p>"]
     if odoo_res["errores"]:

@@ -1,7 +1,7 @@
 """Histórico ARGON: rotaciones por equipo y otros datos del año, para el cuadro de mandos.
 
 Se calcula con la misma lógica que los pedidos de Odoo (argon_facturacion) y se escribe cada noche en la hoja
-«HISTORICO» de la Excel, en bloques «#TABLA <nombre>» + cabecera + filas, que el cuadro de mandos lee con el
+«DASHBOARD» de la Excel, en bloques «#TABLA <nombre>» + cabecera + filas, que el cuadro de mandos lee con el
 conector de Microsoft 365. Solo cuenta lo que ya ha pasado (celdas de antes de hoy).
 
 Tablas:
@@ -22,8 +22,8 @@ import argon_facturacion as F
 import argon_lector as L
 
 TITULO = "HISTÓRICO ARGON"
-HOJA = "HISTORICO"
-HOJA_VACIA = "Hoja1"   # hoja vacía de la Excel que se aprovecha (y se renombra) si aún no existe HISTORICO
+HOJA = "DASHBOARD"
+HOJA_VACIA = "Hoja1"   # hoja vacía de la Excel que se aprovecha (y se renombra) si aún no existe DASHBOARD
 FILAS = 1500            # se escribe siempre este bloque para borrar lo que quedara de la noche anterior
 COLS = 14
 
@@ -206,7 +206,7 @@ def _celda(v):
 
 
 def matriz(dat: dict, hoy: dt.date) -> list[list]:
-    """La hoja HISTORICO como matriz de valores (siempre FILAS × COLS, con vacíos para borrar lo anterior)."""
+    """La hoja DASHBOARD como matriz de valores (siempre FILAS × COLS, con vacíos para borrar lo anterior)."""
     f = lambda s: dt.date.fromisoformat(s).strftime("%d/%m/%Y") if s else ""  # noqa: E731
     filas = [[f"{TITULO} — del {f(dat['_desde'])} al {f(dat['_hasta'])}, calculado el {hoy.strftime('%d/%m/%Y')}. "
               "No escribáis en esta hoja: la rellena el proceso de las 5:00."], []]
@@ -233,7 +233,7 @@ def _col(n: int) -> str:
 
 def escrituras(ruta, hoy: dt.date) -> list[dict]:
     """Lo que hay que escribir en la Excel para el histórico (n8n: nodo «Escribir en la Excel»).
-    Si aún no hay hoja HISTORICO se usa la hoja vacía «Hoja1»; la noche siguiente se renombra (en otra vuelta,
+    Si aún no hay hoja DASHBOARD se usa la hoja vacía «Hoja1»; la noche siguiente se renombra (en otra vuelta,
     para que el cambio de nombre y la escritura no se pisen)."""
     import openpyxl
     wb = openpyxl.load_workbook(ruta, read_only=True)
