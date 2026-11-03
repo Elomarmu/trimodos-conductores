@@ -128,7 +128,9 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
                 sit = "Sin anotar"
             dias[c][sit] += 1
     # contenedores que llevan todo el periodo fuera de servicio no aportan nada
-    activos = [k.matricula for k in conts if sum(dias[k.matricula].values()) > dias[k.matricula]["Fuera de servicio"]]
+    # solo los contenedores con algo anotado en el periodo (no los que llevan todo el año fuera de tráfico)
+    con_dato = {e.contenedor for e in estados if e.fecha >= d0 and e.tipo != "FUERA_SERVICIO"}
+    activos = [k.matricula for k in conts if k.matricula in con_dato]
     dias_filas = [{"equipo": c, "codigo": codigo.get(c, ""), "situacion": s, "dias": dias[c][s]}
                   for c in activos for s in SITUACIONES if dias[c][s]]
 
@@ -140,10 +142,13 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
         tot = sum(dias[c].values()) or 1
         # días cargado: de la carga a la descarga de cada rotación (o hasta ayer si sigue en curso), dentro del periodo
         cargado = set()
-        for r in rs:
+        for j, r in enumerate(rs):
             if r["fecha_carga"]:
                 a = max(_d(r["fecha_carga"]), desde)
-                b = _d(r["fecha_descarga"]) if r["fecha_descarga"] else hoy - dt.timedelta(days=1)
+                # sin descarga: cargado hasta la rotación siguiente (si la hay) o hasta ayer
+                sig = rs[j + 1]["inicio"] if j + 1 < len(rs) else None
+                b = (_d(r["fecha_descarga"]) if r["fecha_descarga"] else
+                     (_d(sig) - dt.timedelta(days=1) if sig else hoy - dt.timedelta(days=1)))
                 while a <= b:
                     cargado.add(a)
                     a += dt.timedelta(days=1)
