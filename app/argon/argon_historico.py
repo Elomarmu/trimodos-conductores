@@ -28,7 +28,7 @@ FILAS = 1500            # se escribe siempre este bloque para borrar lo que qued
 COLS = 14
 
 SITUACIONES = ["Tren cargado", "Tren vacío", "Carga", "Descarga", "En terminal o planta", "Taller / bloqueo",
-               "Sin anotar", "Fuera de servicio"]
+               "Fuera de servicio"]
 
 
 def _d(s: str | None) -> dt.date | None:
@@ -41,6 +41,15 @@ def _r1(x):
 
 def _media(v: list):
     return _r1(sum(v) / len(v)) if v else None
+
+
+def _sigue(e) -> str:
+    """Situación en la que se queda el contenedor los días siguientes sin anotar."""
+    if e.tipo == "FUERA_SERVICIO":
+        return "Fuera de servicio"
+    if e.bloqueado:
+        return "Taller / bloqueo"
+    return "En terminal o planta"
 
 
 def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
@@ -106,11 +115,16 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
         f += dt.timedelta(days=1)
     for k in conts:
         c = k.matricula
-        primero = min((e.fecha for e in estados if e.contenedor == c), default=None)
+        suyos = sorted((e for e in estados if e.contenedor == c), key=lambda x: x.fecha)
+        if not suyos:
+            continue
+        # un día sin anotar sigue en la última situación informada (no se cuenta como «sin anotar»)
+        previo = [e for e in suyos if e.fecha < d0]
+        sigue = _sigue(previo[-1]) if previo else None
         for fe in fechas:
-            if not primero or fe < primero:
-                continue
             e = est_dia.get((c, fe))
+            if not e and not sigue:
+                continue  # aún no tiene ninguna anotación
             tren = next((t for t in tramos_tren[c] if t[0] <= fe < t[1]), None)
             if e and e.tipo == "FUERA_SERVICIO":
                 sit = "Fuera de servicio"
@@ -125,7 +139,9 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
             elif e:
                 sit = "En terminal o planta"
             else:
-                sit = "Sin anotar"
+                sit = sigue
+            if e:
+                sigue = _sigue(e)
             dias[c][sit] += 1
     # contenedores que llevan todo el periodo fuera de servicio no aportan nada
     # solo los contenedores con algo anotado en el periodo (no los que llevan todo el año fuera de tráfico)
@@ -158,7 +174,7 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
             "dias_carga_descarga_medio": _media([r["dias_carga_descarga"] for r in cerr if r["dias_carga_descarga"] is not None]),
             "trenes": sum(r["trenes"] for r in rs if r["inicio"] >= d0 or r["estado"] == "Cerrada"),
             "dias_tren": dias[c]["Tren cargado"] + dias[c]["Tren vacío"],
-            "dias_taller": dias[c]["Taller / bloqueo"], "dias_sin_anotar": dias[c]["Sin anotar"],
+            "dias_taller": dias[c]["Taller / bloqueo"], "dias_terminal": dias[c]["En terminal o planta"],
             "dias_cargado": len(cargado), "pct_cargado": _r1(min(100.0, 100 * len(cargado) / tot)),
             "ultima_descarga": max((r["fecha_descarga"] for r in cerr), default=""),
             "en_curso": "Sí" if any(r["estado"] == "En curso" for r in rs) else "No",
