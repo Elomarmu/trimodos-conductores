@@ -69,6 +69,7 @@ class Servicio:
     notas: list = field(default_factory=list)
     celda: str | None = None          # celda de la hoja diaria donde está anotado
     ir: dict = field(default_factory=dict)  # dato que falta → celda de la Excel donde rellenarlo («'HOJA'!B5»)
+    paradas: list = field(default_factory=list)  # tren: terminales por las que pasa sin «SL» [(sitio, fecha), …]
 
 
 # ------------------------------------------------------------------ tablas de la Excel
@@ -295,7 +296,7 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 continue
             if t == "SALIDA_TREN":
                 origen = m["ubicacion"]
-                destino, fin, via = None, None, []
+                destino, fin, via, paradas = None, None, [], []
                 f0 = dt.date.fromisoformat(m["fecha"])
                 for n in lst[i + 1:]:
                     if destino and (dt.date.fromisoformat(n["fecha"]) - f0).days > 12:
@@ -325,6 +326,7 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                         if n["ubicacion"] and n["ubicacion"] != origen or destino:
                             if destino and n["ubicacion"] != destino:
                                 via.append(destino)
+                                paradas.append((destino, fin))
                             destino, fin = n["ubicacion"] or destino, n["fecha"]
                             if not es_terminal(destino) and destino != origen:
                                 break
@@ -335,6 +337,7 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                         destino, fin = n["ubicacion"] if n["tipo"] != "TRAYECTO" else n["origen"], n["fecha"]
                         break
                 nuevo(m, "TREN", origen, destino, fin=fin, via=" · ".join(via) or None)
+                res[-1].paradas = [p for p in paradas if p[0] not in (origen, destino)]
                 if not res[-1].cargado:
                     # «SL» sin color de letra: va cargado si lo último que hizo fue cargar (y aún no ha descargado)
                     ult = next((x["tipo"] for x in reversed(lst[:i]) if x["tipo"] in ("CARGA", "DESCARGA")), None)
@@ -437,6 +440,33 @@ def donde_rellenar(s: Servicio, falta: list, p_fila, t, cond: dict, tablas: dict
         elif hoja_dia:  # destino del tren, confirmar la salida, código de conductor…: en la propia celda del día
             ir[f] = hoja_dia
     return ir
+
+
+def partir_trenes(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
+    """Un tren que sigue de una terminal a otra sin «SL» (AMBERES → LLAGOSTA → BOELLA) es un solo tramo. Si ese
+    tramo no tiene tarifa pero sí la tienen las dos partes (AMBERES → LA LLAGOSTA y LA LLAGOSTA → LA BOELLA), se
+    factura en dos líneas, cada una con su producto, como se ha hecho siempre en Odoo."""
+    from dataclasses import replace
+    nuevos = []
+    for s in servicios:
+        if s.servicio != "TREN" or not s.paradas or not s.destino or _tarifa(s, tablas["tarifas"], s.fecha):
+            continue
+        for sitio, fecha in s.paradas:
+            a = replace(s, destino=sitio, fecha_fin=fecha)
+            b = replace(s, origen=sitio, fecha=fecha or s.fecha, notas=list(s.notas), falta=[], ir={}, paradas=[],
+                        expedicion=None, reserva=None,
+                        id_servicio=f"{s.contenedor}|{fecha or s.fecha}|TREN|{sitio}|{s.destino}|")
+            if _tarifa(a, tablas["tarifas"], a.fecha) and _tarifa(b, tablas["tarifas"], b.fecha):
+                fin = s.fecha_fin
+                s.destino, s.fecha_fin, s.paradas = sitio, fecha, []
+                s.via = None
+                s.notas.append(f"tren partido en {sitio}: sigue en otro tramo hasta {b.destino}")
+                b.fecha_fin = fin
+                b.notas.append(f"sigue desde {sitio} sin «SL» (tramo partido del tren de {s.origen})")
+                nuevos.append(b)
+                break
+    servicios.extend(nuevos)
+    return servicios
 
 
 def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
@@ -584,6 +614,8 @@ def calcular(ruta, desde=None, hasta=None, completar=None, hoy: dt.date | None =
         servs = [s for s in servs if s.fecha >= desde.isoformat()]
     if hasta:
         servs = [s for s in servs if s.fecha <= hasta.isoformat()]
+    servs.sort(key=lambda s: (s.fecha, s.contenedor, s.servicio))
+    partir_trenes(servs, tablas)
     servs.sort(key=lambda s: (s.fecha, s.contenedor, s.servicio))
     tarificar(servs, tablas)
     calcular.cruce = cruce
