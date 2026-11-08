@@ -108,6 +108,17 @@ def es_marron(rgb: str | None) -> bool:
     return r > g > b and r < 0xC0 and r - b > 0x30
 
 
+def es_verde(rgb: str | None) -> bool:
+    """Letra verde = cargado. Cualquier tono de verde (oscuro, claro, el del tema de Excel…), no solo los tres
+    habituales: en los días sombreados (sábados, domingos y festivos) a veces se escribe con otro verde."""
+    if not rgb:
+        return False
+    if rgb in VERDE_CARGADO:
+        return True
+    r, g, b = (int(rgb[i:i + 2], 16) for i in (2, 4, 6))
+    return g >= 0x60 and g - r >= 0x28 and g - b >= 0x20
+
+
 def _rojizo(rgb: str | None) -> bool:
     if not rgb:
         return False
@@ -285,7 +296,7 @@ def interpretar(texto: str, celda, tema, alias) -> tuple[str, str | None, str | 
     ref = (m.group(1) if (m := RE_REF.search(t)) else None)
     chasis = (m.group(1) if (m := RE_CHASIS_PREF.match(t)) else None)
 
-    if letra in VERDE_CARGADO:
+    if es_verde(letra):
         carga = "CARGADO"
     elif es_marron(letra):
         carga = "VACIO"

@@ -482,3 +482,26 @@ def test_correo_empieza_con_enlaces_al_dashboard_y_a_la_excel():
     h = A.correo(dt.date(2026, 11, 3), res, av, "https://sp/ARGON.xlsx")
     assert h.index("Abrir el cuadro de mandos") < h.index("<!--ODOO-->")
     assert "https://sp/ARGON.xlsx" in h[: h.index("<!--ODOO-->")] and A.DASHBOARD_URL in h
+
+
+def test_verde_de_cargado_en_cualquier_tono():
+    import argon_lector as L
+    for v in ("FF006600", "FF00B050", "FF008000", "FF92D050", "FF70AD47", "FF548235"):
+        assert L.es_verde(v), v
+    for v in ("FF000000", "FFFF0000", "FF773F19", "FFBFBFBF", "FFD9D9D9", None):
+        assert not L.es_verde(v), v
+
+
+def test_sl_sin_color_deduce_cargado_por_la_rotacion():
+    import argon_facturacion as F
+    base = dict(contenedor="CARU 1", codigo_corto="1", referencia=None, chasis=None, iniciales=None, bloqueado=False,
+                cancelada=False, forzar=None, horas_espera=None, origen=None, llegada=None, reexpedicion=False)
+    movs = [dict(base, fecha="2026-10-30", tipo="CARGA", ubicacion="MORELL", carga="SIN_COLOR", texto="MORELL", celda="X1"),
+            dict(base, fecha="2026-10-31", tipo="SALIDA_TREN", ubicacion="MORELL", carga="SIN_COLOR", texto="SL MORELL", celda="X2"),
+            dict(base, fecha="2026-11-03", tipo="DISPONIBLE", ubicacion="LEIXOES", carga="SIN_COLOR", texto="LEIXOES 20:00", celda="X3"),
+            dict(base, fecha="2026-11-04", tipo="DESCARGA", ubicacion="LEIXOES", carga="SIN_COLOR", texto="DESCARGA", celda="X4"),
+            dict(base, fecha="2026-11-06", tipo="SALIDA_TREN", ubicacion="LEIXOES", carga="SIN_COLOR", texto="SL LEIXOES", celda="X5"),
+            dict(base, fecha="2026-11-09", tipo="SITUACION", ubicacion="CONSTANTI", carga="SIN_COLOR", texto="CONSTANTI", celda="X6")]
+    trenes = [s for s in F.construir(movs) if s.servicio == "TREN"]
+    assert [(s.origen, s.destino, s.cargado) for s in trenes] == [("MORELL", "LEIXOES", "Cargado"), ("LEIXOES", "CONSTANTI", "Vacío")]
+    assert all(any("DEDUCIDO" in n for n in s.notas) for s in trenes)

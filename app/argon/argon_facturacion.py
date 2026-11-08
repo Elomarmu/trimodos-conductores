@@ -335,6 +335,11 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                         destino, fin = n["ubicacion"] if n["tipo"] != "TRAYECTO" else n["origen"], n["fecha"]
                         break
                 nuevo(m, "TREN", origen, destino, fin=fin, via=" · ".join(via) or None)
+                if not res[-1].cargado:
+                    # «SL» sin color de letra: va cargado si lo último que hizo fue cargar (y aún no ha descargado)
+                    ult = next((x["tipo"] for x in reversed(lst[:i]) if x["tipo"] in ("CARGA", "DESCARGA")), None)
+                    res[-1].cargado = "Cargado" if ult == "CARGA" else "Vacío"
+                    res[-1].notas.append(f"DEDUCIDO: «SL» sin color; va {res[-1].cargado.lower()} según la rotación")
                 if m.get("reexpedicion"):
                     res[-1].notas.append(f"reexpedición en {origen}: sale en otro tren")
                 fin_tren = fin or m["fecha"]
