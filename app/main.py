@@ -160,6 +160,11 @@ from .argon import argon_api  # noqa: E402
 
 app.include_router(argon_api.router)
 
+# Viajes de PR de SAICA PAPER (albarán → pedido mensual; tren → cajas móviles). Mismo código de acceso que la app.
+from .pr import pr_api  # noqa: E402
+
+app.include_router(pr_api.router, dependencies=access)
+
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")
 _public = Path(__file__).resolve().parent.parent / "public"
