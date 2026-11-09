@@ -297,10 +297,19 @@ def tara_caja(caja: str) -> int | None:
     return next((t for pref, t in TARAS_CAJA if caja.startswith(pref)), None)
 
 
-def vagon_corto(vagon: str) -> str:
-    """«437143786658-4» → «437143786658» (en la Excel CARTON PAJA TREN el vagón va sin dígito de control)."""
-    cifras = re.sub(r"\D", "", vagon.split("-")[0])
-    return cifras[:12]
+def digito_uic(once: str) -> int:
+    """Dígito de control de un vagón (UIC): pesos 2,1,2,1… sobre las 11 cifras, sumando las cifras de cada producto."""
+    total = sum(sum(divmod(int(c) * (2 if i % 2 == 0 else 1), 10)) for i, c in enumerate(once))
+    return (10 - total % 10) % 10
+
+
+def vagon_excel(vagon: str) -> tuple[str, bool]:
+    """«43714378668-3» → («437143786683», True). En la Excel CARTON PAJA TREN el vagón va con sus 12 cifras, sin guion.
+    El segundo valor dice si el dígito de control cuadra (si no, seguramente se ha leído mal alguna cifra)."""
+    cifras = re.sub(r"\D", "", vagon or "")
+    if len(cifras) != 12:
+        return cifras, False
+    return cifras, digito_uic(cifras[:11]) == int(cifras[11])
 
 
 def limpiar_tren(leido: dict) -> dict:
@@ -310,8 +319,11 @@ def limpiar_tren(leido: dict) -> dict:
         cajas = [matricula(c) for c in v.get("cajas") or [] if matricula(c)]
         if v.get("num_utis") is not None and v["num_utis"] != len(cajas):
             avisos.append(f"Vagón {v.get('orden')}: la hoja dice {v['num_utis']} cajas y se han leído {len(cajas)}.")
+        vagon, vagon_ok = vagon_excel(v.get("vagon", ""))
+        if not vagon_ok:
+            avisos.append(f"Vagón {v.get('orden')} ({v.get('vagon')}): revisa el número, no cuadra el dígito de control.")
         for i, c in enumerate(cajas):
-            filas.append({"orden": v.get("orden"), "vagon": vagon_corto(v.get("vagon", "")), "segunda": i > 0,
+            filas.append({"orden": v.get("orden"), "vagon": vagon, "segunda": i > 0,
                           "caja_movil": c, "tara_kg": tara_caja(c)})
             if tara_caja(c) is None:
                 avisos.append(f"Caja {c}: tara desconocida, complétala en la Excel.")

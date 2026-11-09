@@ -104,13 +104,21 @@ def test_observaciones_se_actualizan_sin_perder_lo_escrito():
 
 def test_tren():
     leido = {"numero_tren": "90107", "fecha": "2026-11-09", "dudas": [], "vagones": [
-        {"orden": 1, "vagon": "388049630055-0", "num_utis": 2, "cajas": ["ICR111163", "ICR 111114"]},
-        {"orden": 2, "vagon": "287144330944-4", "num_utis": 2, "cajas": ["CTEA25000166"]},
-        {"orden": 3, "vagon": "437143786584", "cajas": ["ZZZZ1234567"]}]}
+        {"orden": 1, "vagon": "38804963055-0", "num_utis": 2, "cajas": ["ICR111163", "ICR 111114"]},
+        {"orden": 2, "vagon": "28714433094-4", "num_utis": 2, "cajas": ["CTEA25000166"]},
+        {"orden": 3, "vagon": "43714378658-5", "cajas": ["ZZZZ1234567"]}]}   # 5 mal leído: es 4
     t = R.limpiar_tren(leido)
     assert [c["caja_movil"] for c in t["cajas"]] == ["ICR111163", "ICR111114", "CTEA25000166", "ZZZZ1234567"]
-    assert t["cajas"][1] == {"orden": 1, "vagon": "388049630055", "segunda": True, "caja_movil": "ICR111114", "tara_kg": 5100}
-    assert any("Vagón 2" in a for a in t["avisos"]) and any("ZZZZ1234567" in a for a in t["avisos"])
+    assert t["cajas"][1] == {"orden": 1, "vagon": "388049630550", "segunda": True, "caja_movil": "ICR111114", "tara_kg": 5100}
+    assert any("Vagón 2:" in a for a in t["avisos"]) and any("ZZZZ1234567" in a for a in t["avisos"])
+    assert any("Vagón 3 (" in a for a in t["avisos"]) and not any("Vagón 1 (" in a for a in t["avisos"])
+
+
+def test_digito_uic_con_los_12_vagones_del_tren_90107():
+    for v in ("38804963005-5", "38804963055-0", "28714433094-4", "43714378658-4", "38804963052-7", "38804963028-7",
+              "43714378664-2", "38804963029-5", "43714378667-5", "28714433083-7", "28714433102-5", "34874961022-9",
+              "43714378668-3"):   # el último, de la Excel CARTON PAJA TREN (437143786683)
+        assert R.vagon_excel(v) == (v.replace("-", ""), True), v
 
 
 def _cliente(respuesta: dict, status=200, guardar=None):
