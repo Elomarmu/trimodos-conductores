@@ -274,14 +274,29 @@ def actualizar(odoo, bulto: dict, cambios: dict) -> list[str]:
     return hechos
 
 
-def viajes_del_mes(odoo, fecha: str) -> list[dict]:
-    """Viajes del pedido del mes, para el almacén y para la Excel de registro."""
-    pedido = buscar_pedido_mes(odoo, fecha)
-    if not pedido:
+def desde_defecto() -> str:
+    """Primer día que cuenta para el registro de viajes y el stock (los viajes anteriores no pasaron por la app)."""
+    return os.environ.get("PR_DESDE", "2026-11-01")
+
+
+def pedidos_pr(odoo, desde: str) -> list[dict]:
+    refs = [f"PR {m}" for m in R.MESES]
+    return odoo("sale.order", "search_read", [[["partner_id", "=", R.CLIENTE_ID], ["company_id", "=", R.EMPRESA_ID],
+                                               ["client_order_ref", "in", refs], ["date_order", ">=", f"{desde[:7]}-01 00:00:00"],
+                                               ["state", "!=", "cancel"]]], fields=["name"], order="id")
+
+
+def viajes(odoo, desde: str | None = None) -> list[dict]:
+    """Todos los viajes de PR (líneas con bulto de los pedidos «PR <MES>») desde esa fecha, del más antiguo al más nuevo.
+    estado: «En stock» si aún no tiene caja móvil; «Tren N» si ya va en un tren."""
+    desde = desde or desde_defecto()
+    pedidos = {p["id"]: p["name"] for p in pedidos_pr(odoo, desde)}
+    if not pedidos:
         return []
-    ls = odoo("sale.order.line", "search_read", [[["order_id", "=", pedido["id"]], ["tms_package_ids", "!=", False]]],
-              fields=["name", "pickup_date", "tractor_id", "trailer_id", "vendor_id", "product_uom_qty", "equipment_id",
-                      "task_id", "tms_package_ids", "shipping_origin_id"], order="pickup_date, id")
+    ls = odoo("sale.order.line", "search_read", [[["order_id", "in", list(pedidos)], ["tms_package_ids", "!=", False],
+                                                  ["pickup_date", ">=", f"{desde} 00:00:00"]]],
+              fields=["name", "order_id", "pickup_date", "tractor_id", "trailer_id", "vendor_id", "product_uom_qty",
+                      "equipment_id", "task_id", "tms_package_ids", "shipping_origin_id"], order="pickup_date, id")
     ps = odoo("tms.package", "search_read", [[["id", "in", [i for l in ls for i in l["tms_package_ids"]]]]],
               fields=["name", "carrier_tracking_ref", "shipping_weight", "number_of_packages", "unload_note"])
     por_id = {p["id"]: p for p in ps}
@@ -291,21 +306,49 @@ def viajes_del_mes(odoo, fecha: str) -> list[dict]:
         o = R.leer_observaciones(p.get("unload_note"))
         origen = (l.get("shipping_origin_id") or [None])[0]
         punto = next((x for x in R.PUNTOS_CARGA if x.origen_id == origen), None)
-        res.append({"linea_id": l["id"], "tarea_id": (l.get("task_id") or [None])[0], "bulto": p.get("name"),
-                    "bulto_id": p.get("id"), "fecha": (l.get("pickup_date") or "")[:10],
+        res.append({"linea_id": l["id"], "pedido": l["order_id"][1], "tarea_id": (l.get("task_id") or [None])[0],
+                    "bulto": p.get("name"), "bulto_id": p.get("id"), "fecha": (l.get("pickup_date") or "")[:10],
                     "tractora": _placa(l.get("tractor_id")), "remolque": _placa(l.get("trailer_id")),
                     "colaborador": (l.get("vendor_id") or [None, ""])[1], "lugar": punto.nombre if punto else "",
                     "linea": l["name"], "toneladas": l.get("product_uom_qty"), "peso_kg": p.get("shipping_weight") or None,
                     "bultos": p.get("number_of_packages") or None, "codigo_paper": p.get("carrier_tracking_ref") or "",
-                    "contenedor": (l.get("equipment_id") or [None, ""])[1], **{k: o.get(k, "") for k in
-                    ("albaran", "codigo_natur", "ler", "calidad", "tren", "vagon", "caja_movil", "comprobaciones")},
-                    "tipo": R.tipo_calidad(o.get("calidad"))})
+                    "contenedor": (l.get("equipment_id") or [None, ""])[1],
+                    **{k: o.get(k, "") for k in ("albaran", "codigo_natur", "ler", "calidad", "tren", "convoy", "fecha_tren",
+                                                 "vagon", "caja_movil", "comprobaciones")},
+                    "tipo": R.tipo_calidad(o.get("calidad")),
+                    "estado": f"Tren {o['tren']}" if o.get("caja_movil") and o.get("tren") else "En stock"})
     return res
+
+
+def siguiente_tren(lista: list[dict]) -> int:
+    """Número de tren propio (correlativo). El último que se hizo a mano fue el 85 (PR_ULTIMO_TREN)."""
+    nums = [int(v["tren"]) for v in lista if str(v.get("tren") or "").isdigit()]
+    return max(nums + [int(os.environ.get("PR_ULTIMO_TREN", "85"))]) + 1
+
+
+def guardar_tren(odoo, tren: int, convoy: str, fecha: str, asignaciones: list[dict]) -> list[str]:
+    """Apunta en cada viaje (observaciones de su bulto) el tren, vagón, caja móvil y comprobaciones.
+    asignaciones: [{"bulto_id", "vagon", "caja_movil", "comprobaciones": {...}}]. Devuelve los bultos actualizados."""
+    ids = [a["bulto_id"] for a in asignaciones if a.get("bulto_id")]
+    if len(ids) != len(set(ids)):
+        raise ErrorPR("Hay un viaje asignado a dos cajas. Revísalo.")
+    if not ids:
+        raise ErrorPR("No has asignado ningún viaje a ninguna caja.")
+    ps = {p["id"]: p for p in odoo("tms.package", "search_read", [[["id", "in", ids], ["partner_id", "=", R.CLIENTE_ID]]],
+                                   fields=["name", "unload_note"])}
+    hechos = []
+    for a in asignaciones:
+        p = ps.get(a.get("bulto_id"))
+        if not p:
+            continue
+        datos = {"tren": str(tren), "convoy": convoy, "fecha_tren": fecha, "vagon": a.get("vagon"),
+                 "caja_movil": a.get("caja_movil"), "comprobaciones": R.texto_comprobaciones(a.get("comprobaciones") or {})}
+        odoo("tms.package", "write", [[p["id"]], {"unload_note": R.observaciones(datos, p.get("unload_note"))}])
+        hechos.append(p["name"])
+    return hechos
 
 
 def _placa(valor) -> str:
     return valor[1].rsplit("/", 1)[-1] if valor else ""
 
 
-def mes_de(fecha: str | None) -> str:
-    return fecha or dt.date.today().isoformat()

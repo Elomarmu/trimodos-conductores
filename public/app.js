@@ -430,7 +430,10 @@ function mostrarResumen() {
   go("review");
 }
 $("btn-back-edit").addEventListener("click", () => go("edit"));
-$("btn-save").addEventListener("click", () => { $("confirm").hidden = false; $("btn-no").focus(); });
+$("btn-save").addEventListener("click", () => {
+  $("confirm-txt").textContent = "Se generará una nueva orden de transporte.";
+  $("confirm").hidden = false; $("btn-no").focus();
+});
 $("btn-no").addEventListener("click", () => { $("confirm").hidden = true; });
 // En el ordenador, «Esc» responde «No» en los avisos (nunca guarda nada).
 document.addEventListener("keydown", (e) => {

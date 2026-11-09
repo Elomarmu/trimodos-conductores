@@ -272,3 +272,9 @@ select:focus-visible, input[type=date]:focus-visible, input[type=time]:focus-vis
 #s-menu #btn-pr { min-height: 64px; font-size: 1.1rem; }
 .row2 > * { min-width: 0; }                 /* los campos de fecha y hora no empujan la tarjeta */
 select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; display: block; }
+.caja { gap: 10px; padding: 14px; margin-bottom: 10px; }
+.caja.llena { border-color: var(--brand); }
+.checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.btn.chk { min-height: 48px; padding: 6px 4px; font-size: .86rem; }
+.btn.chk.si { background: #04220f; border-color: var(--ok); color: var(--ok); }
+.btn.chk.no { background: #250808; border-color: var(--bad); color: var(--bad); }

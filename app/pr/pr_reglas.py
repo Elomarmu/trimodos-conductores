@@ -176,8 +176,23 @@ def referencia_pedido(fecha: str) -> str:
 CAMPOS_OBS = (  # orden de las líneas en las observaciones de descarga del bulto
     ("albaran", "Albarán salida"), ("codigo_paper", "Código carga Paper"), ("codigo_natur", "Código carga Natur"),
     ("ler", "LER"), ("calidad", "Calidad"), ("bruto_kg", "Peso bruto kg"), ("tara_kg", "Tara kg"),
-    ("tren", "Tren"), ("vagon", "Vagón"), ("caja_movil", "Caja móvil"), ("comprobaciones", "Comprobaciones"),
+    ("tren", "Tren"), ("convoy", "Nº convoy"), ("fecha_tren", "Fecha tren"), ("vagon", "Vagón"), ("caja_movil", "Caja móvil"),
+    ("comprobaciones", "Comprobaciones"),
 )
+COMPROBACIONES = (("dist_balas", "Dist. balas"), ("lonas", "Lonas"), ("puertas", "Puertas"), ("precinto", "Precinto"))
+
+
+def texto_comprobaciones(c: dict) -> str:
+    """{"dist_balas": True, …, "precinto": False} → «Dist. balas OK, Lonas OK, Puertas OK, Precinto NO»."""
+    return ", ".join(f"{t} {'OK' if c.get(k) else 'NO'}" for k, t in COMPROBACIONES)
+
+
+def leer_comprobaciones(texto: str | None) -> dict:
+    res = {}
+    for k, t in COMPROBACIONES:
+        m = re.search(re.escape(t) + r"\s+(OK|NO)", texto or "")
+        res[k] = m.group(1) if m else ""
+    return res
 MARCA_OBS = "[PR SAICA]"
 
 

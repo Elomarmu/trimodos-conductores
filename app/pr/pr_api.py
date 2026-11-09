@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import datetime as dt
+import html
 import logging
 import os
 
@@ -23,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
 from ..errors import AppError
+from . import pr_excel as X
 from . import pr_lector as L
 from . import pr_odoo as O
 from . import pr_reglas as R
@@ -68,16 +71,36 @@ def odoo_pr():
     return OdooPR(get_settings())
 
 
-def avisar(evento: str, datos: dict) -> None:
-    """Aviso a la oficina (sevilla@stinsa.com) a través de n8n: pedido nuevo, punto de carga nuevo… Nunca para el viaje."""
+def destinatarios() -> str:
+    """A quién van los correos de PR. En pruebas, Carmelo; en producción, sevilla@stinsa.com (variable PR_CORREO_PARA)."""
+    return os.environ.get("PR_CORREO_PARA", "carmelomartinez@grupotrimodos.com")
+
+
+ASUNTOS = {"pedido_nuevo": "PR SAICA · pedido nuevo del mes {pedido} ({referencia})",
+           "punto_nuevo": "PR SAICA · punto de carga nuevo: {punto}"}
+TEXTOS = {"pedido_nuevo": "Se ha creado el pedido <b>{pedido}</b> «{referencia}» de SAICA PAPER con el primer viaje del mes.",
+          "punto_nuevo": "Un conductor ha leído un albarán con un punto de carga que no está en la tabla: <b>{punto}</b> "
+                         "(albarán {albaran}, {fecha}). El viaje no se ha guardado: hay que darlo de alta con su producto y precio."}
+
+
+def enviar_n8n(datos: dict) -> bool:
+    """n8n (PR_AVISOS_WEBHOOK) manda el correo y, si trae archivos, los sube a SharePoint. Nunca para el trabajo."""
     url = os.environ.get("PR_AVISOS_WEBHOOK", "")
     if not url:
-        log.info("aviso PR sin webhook configurado: %s", evento)
-        return
+        log.info("PR sin webhook de n8n configurado: %s", datos.get("evento"))
+        return False
     try:
-        httpx.post(url, json={"evento": evento, **datos}, timeout=8)
+        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=15)
+        return r.status_code < 300
     except httpx.HTTPError:
-        log.warning("No se ha podido enviar el aviso PR %s", evento)
+        log.warning("No se ha podido enviar a n8n: %s", datos.get("evento"))
+        return False
+
+
+def avisar(evento: str, datos: dict) -> None:
+    e = {k: html.escape(str(v or "")) for k, v in datos.items()}
+    enviar_n8n({"evento": evento, "asunto": ASUNTOS[evento].format(**{k: v or "" for k, v in datos.items()}),
+                "html": f"<p style='font:11pt Calibri,Arial'>{TEXTOS[evento].format(**e)}</p>", "archivos": []})
 
 
 # ---- modelos de entrada -----------------------------------------------------------------------------------------
@@ -207,8 +230,88 @@ def actualizar(body: Actualizar):
 
 
 @router.get("/viajes")
-def viajes(fecha: str = Query("", max_length=10)):
-    return {"viajes": O.viajes_del_mes(odoo_pr(), O.mes_de(fecha))}
+def viajes(desde: str = Query("", max_length=10)):
+    lista = O.viajes(odoo_pr(), desde or None)
+    return {"viajes": lista, "siguiente_tren": O.siguiente_tren(lista)}
+
+
+class CajaTren(BaseModel):
+    orden: int | None = None
+    vagon: str = ""
+    segunda: bool = False
+    caja_movil: str
+    tara_kg: int | None = None
+    bulto_id: int | None = None
+    comprobaciones: dict = {}
+
+
+class TrenIn(BaseModel):
+    tren: int
+    convoy: str = Field("", max_length=20)
+    fecha: str = Field(max_length=10)
+    cajas: list[CajaTren] = Field(max_length=60)
+
+
+def tabla_html(cab: list[str], filas: list[list]) -> str:
+    th = "".join(f"<th style='padding:4px 8px;background:#1F4E79;color:#fff;text-align:left'>{html.escape(c)}</th>" for c in cab)
+    tr = "".join("<tr>" + "".join(f"<td style='padding:3px 8px;border-bottom:1px solid #ddd'>{html.escape(str(v if v is not None else ''))}</td>"
+                                  for v in f) + "</tr>" for f in filas)
+    return f"<table style='border-collapse:collapse;font:10pt Calibri,Arial'><tr>{th}</tr>{tr}</table>" if filas else "<p>Ninguno.</p>"
+
+
+@router.post("/tren/guardar")
+def guardar_tren(body: TrenIn):
+    s = get_settings()
+    odoo = odoo_pr()
+    cajas = [c.model_dump() for c in body.cajas]
+    if s.dry_run:
+        hechos = [str(c["bulto_id"]) for c in cajas if c.get("bulto_id")]
+    else:
+        hechos = _pr(O.guardar_tren, odoo, body.tren, body.convoy, body.fecha, cajas)
+    lista = O.viajes(odoo)
+    por_bulto = {v["bulto_id"]: v for v in lista}
+    nombre_tren = f"CARTON PAJA TREN {body.tren}.xlsx"
+    archivos = [{"nombre": nombre_tren, "b64": base64.b64encode(X.carton_paja_tren(body.tren, body.convoy, body.fecha, cajas, por_bulto)).decode()},
+                {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
+    stock = [v for v in lista if v["estado"] == "En stock"]
+    cargados = [por_bulto.get(c["bulto_id"]) for c in cajas if c.get("bulto_id")]
+    cuerpo = (f"<p style='font:11pt Calibri,Arial'><b>Tren {body.tren}</b> (convoy {html.escape(body.convoy)}, "
+              f"{html.escape(body.fecha)}): {len(hechos)} viajes cargados en {len(cajas)} cajas.</p>"
+              + tabla_html(["Vagón", "Caja", "Albarán", "Lugar", "Balas", "Peso kg"],
+                           [[c["vagon"], c["caja_movil"], (por_bulto.get(c["bulto_id"]) or {}).get("albaran"),
+                             (por_bulto.get(c["bulto_id"]) or {}).get("lugar"), (por_bulto.get(c["bulto_id"]) or {}).get("bultos"),
+                             (por_bulto.get(c["bulto_id"]) or {}).get("peso_kg")] for c in cajas if c.get("bulto_id")])
+              + f"<p style='font:11pt Calibri,Arial'><b>Quedan en stock para el siguiente tren: {len(stock)}</b></p>"
+              + tabla_html(["Fecha", "Albarán", "Lugar", "Tractora"], [[v["fecha"], v["albaran"], v["lugar"], v["tractora"]] for v in stock]))
+    enviado = False if s.dry_run else enviar_n8n({"evento": "tren", "asunto": f"PR SAICA · Tren {body.tren} ({len(cargados)} viajes)",
+                                                  "html": cuerpo, "archivos": archivos})
+    log.info("tren %s guardado: %s viajes, %s en stock", body.tren, len(hechos), len(stock))
+    return {"simulado": s.dry_run, "bultos": hechos, "en_stock": len(stock), "enviado": enviado, "archivos": archivos}
+
+
+@router.get("/resumen")
+def resumen(enviar: bool = False):
+    """Para n8n por la mañana: novedades de las últimas 24 h, viajes con datos pendientes, stock y la Excel de registro."""
+    lista = O.viajes(odoo_pr())
+    ayer = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    nuevos = [v for v in lista if v["fecha"] >= ayer]
+    faltan = [v for v in lista if not (v["codigo_paper"] and v["peso_kg"] and v["bultos"])]
+    stock = [v for v in lista if v["estado"] == "En stock"]
+    cuerpo = ("<p style='font:11pt Calibri,Arial'><b>Viajes de PR de SAICA · resumen</b></p>"
+              + "<h3 style='font:bold 11pt Calibri,Arial'>Viajes cargados desde ayer</h3>"
+              + tabla_html(["Fecha", "Pedido", "Albarán", "Lugar", "Tractora", "Transportista", "Peso kg"],
+                           [[v["fecha"], v["pedido"], v["albaran"], v["lugar"], v["tractora"], v["colaborador"], v["peso_kg"]] for v in nuevos])
+              + "<h3 style='font:bold 11pt Calibri,Arial'>Viajes con datos pendientes</h3>"
+              + tabla_html(["Fecha", "Albarán", "Lugar", "Falta"],
+                           [[v["fecha"], v["albaran"], v["lugar"], ", ".join(t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"),
+                                                                                         ("bultos", "balas")) if not v[k])] for v in faltan])
+              + f"<h3 style='font:bold 11pt Calibri,Arial'>En stock esperando tren: {len(stock)}</h3>"
+              + tabla_html(["Fecha", "Albarán", "Lugar"], [[v["fecha"], v["albaran"], v["lugar"]] for v in stock]))
+    archivos = [{"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
+    datos = {"evento": "resumen", "asunto": f"PR SAICA · resumen {dt.date.today():%d/%m/%Y}", "html": cuerpo, "archivos": archivos}
+    if enviar:
+        datos["enviado"] = enviar_n8n(datos)
+    return {"para": destinatarios(), **datos}
 
 
 @router.post("/leer-tren")

@@ -148,6 +148,7 @@ $("pr-guardar").addEventListener("click", () => {
   let datos;
   try { datos = recoger(); } catch (e) { return showError(e.message); }
   state.onConfirm = () => guardar(datos);
+  $("confirm-txt").textContent = "Se guardará el viaje en el pedido del mes y se generará la orden de transporte.";
   $("confirm").hidden = false;
   $("btn-no").focus();
 });
@@ -234,3 +235,100 @@ $("pr-completar").addEventListener("submit", async (ev) => {
       number_of_packages: cambios.bultos ?? b.number_of_packages, shipping_weight: cambios.peso_kg ?? b.shipping_weight });
   } catch (e) { showError(e.message); } finally { busy(null); }
 });
+
+// ---------- almacén: tren de PR ----------
+const tren = { cajas: [], viajes: [], asignado: {}, comp: {} };
+const COMPROBACIONES = [["dist_balas", "Balas"], ["lonas", "Lonas"], ["puertas", "Puertas"], ["precinto", "Precinto"]];
+const COMP_DEFECTO = { dist_balas: true, lonas: true, puertas: true, precinto: false };   // como en la Excel de siempre
+
+$("btn-pr-tren").addEventListener("click", () => {
+  $("tren-paso1").hidden = false; $("tren-paso2").hidden = true; $("tren-hecho").hidden = true;
+  go("pr-tren");
+});
+
+$("tren-archivo").addEventListener("change", async (ev) => {
+  const files = [...(ev.target.files || [])].slice(0, 4);
+  ev.target.value = "";
+  if (!files.length) return;
+  clearError();
+  busy("Leyendo el listado del tren…");
+  try {
+    const archivos = [];
+    for (const f of files) archivos.push(await reducir(f));
+    const [t, v] = await Promise.all([post("/api/pr/leer-tren", { archivos }), api("/api/pr/viajes")]);
+    tren.cajas = t.cajas; tren.viajes = v.viajes.filter((x) => x.estado === "En stock");
+    tren.asignado = {}; tren.comp = {};
+    $("tren-num").value = v.siguiente_tren;
+    $("tren-convoy").value = t.numero_tren || "";
+    $("tren-fecha").value = t.fecha || new Date().toISOString().slice(0, 10);
+    $("tren-avisos").replaceChildren(...(t.avisos || []).map((a) => h("div", { class: "banner warn" }, a)));
+    if (!tren.cajas.length) throw new Error("No se han leído cajas en el listado. Prueba con el PDF o con otra foto.");
+    pintarCajas();
+    $("tren-paso1").hidden = true; $("tren-paso2").hidden = false;
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
+
+const etiquetaViaje = (v) => [v.fecha.slice(8, 10) + "/" + v.fecha.slice(5, 7), v.lugar, v.albaran, v.tractora,
+  v.peso_kg ? fmtNum(v.peso_kg) + " kg" : "sin peso"].filter(Boolean).join(" · ");
+
+function pintarCajas() {
+  const usados = new Set(Object.values(tren.asignado).filter(Boolean).map(String));
+  $("tren-cajas").replaceChildren(...tren.cajas.map((c, i) => {
+    const elegido = tren.asignado[i] ? String(tren.asignado[i]) : "";
+    const sel = h("select", { "aria-label": `Viaje para la caja ${c.caja_movil}`, onchange: (e) => {
+      tren.asignado[i] = e.target.value ? Number(e.target.value) : null;
+      if (tren.asignado[i] && !tren.comp[i]) tren.comp[i] = { ...COMP_DEFECTO };
+      pintarCajas();
+    } },
+      h("option", { value: "" }, "— Caja vacía —"),
+      ...tren.viajes.map((v) => h("option", { value: v.bulto_id, selected: elegido === String(v.bulto_id),
+        disabled: usados.has(String(v.bulto_id)) && elegido !== String(v.bulto_id) }, etiquetaViaje(v))));
+    const comp = tren.comp[i];
+    return h("div", { class: "pkg caja" + (elegido ? " llena" : "") },
+      h("h2", {}, h("span", {}, c.caja_movil), h("span", { class: "code" }, `Vagón ${c.orden} · ${c.vagon}` + (c.tara_kg ? ` · tara ${fmtNum(c.tara_kg)}` : ""))),
+      sel,
+      comp ? h("div", { class: "checks" }, COMPROBACIONES.map(([k, t]) => h("button", { type: "button",
+        class: "btn chk " + (comp[k] ? "si" : "no"), "aria-pressed": comp[k] ? "true" : "false",
+        onclick: () => { comp[k] = !comp[k]; pintarCajas(); } }, `${t} ${comp[k] ? "OK" : "NO"}`))) : null);
+  }));
+  const n = Object.values(tren.asignado).filter(Boolean).length;
+  const quedan = tren.viajes.length - n;
+  $("tren-cuenta").textContent = `${n} de ${tren.cajas.length} cajas cargadas · ` + (quedan === 1 ? "1 viaje queda" : `${quedan} viajes quedan`) +
+    " en stock para el siguiente tren.";
+}
+
+$("tren-guardar").addEventListener("click", () => {
+  clearError();
+  const num = parseNum(val("tren-num"));
+  if (!Number.isInteger(num) || num <= 0) return showError("Pon el número de tren.");
+  if (!val("tren-fecha")) return showError("Pon la fecha del tren.");
+  if (!Object.values(tren.asignado).some(Boolean)) return showError("No has asignado ningún viaje a ninguna caja.");
+  state.onConfirm = () => guardarTren(num);
+  $("confirm-txt").textContent = `Se guardará el tren ${num} en Odoo y se generarán y enviarán las dos Excel.`;
+  $("confirm").hidden = false;
+  $("btn-no").focus();
+});
+
+async function guardarTren(num) {
+  $("confirm").hidden = true;
+  busy("Guardando el tren y preparando las Excel…");
+  try {
+    const cajas = tren.cajas.map((c, i) => ({ ...c, bulto_id: tren.asignado[i] || null, comprobaciones: tren.comp[i] || {} }));
+    const r = await post("/api/pr/tren/guardar", { tren: num, convoy: val("tren-convoy"), fecha: val("tren-fecha"), cajas });
+    $("tren-paso2").hidden = true; $("tren-hecho").hidden = false;
+    const mark = h("div", { class: "done-mark" });
+    mark.innerHTML = CHECK_SVG;
+    $("tren-hecho-cuerpo").replaceChildren(
+      r.simulado ? h("div", { class: "banner info" }, "Modo de prueba: no se ha guardado nada en Odoo.") : mark,
+      h("p", {}, `Tren ${num}: ${r.bultos.length} viajes cargados. Quedan ${r.en_stock} en stock.`),
+      h("p", { class: "hint" }, r.enviado ? "Las Excel se han guardado en SharePoint y se han enviado por correo." :
+        "Descarga las Excel aquí (el envío automático por correo no está configurado o ha fallado)."));
+    $("tren-descargas").replaceChildren(...r.archivos.map((a) => h("button", { class: "btn secondary", onclick: () => {
+      const bytes = Uint8Array.from(atob(a.b64), (ch) => ch.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const link = h("a", { href: url, download: a.nombre });
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } }, "Descargar " + a.nombre)));
+  } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
+}
