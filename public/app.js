@@ -82,6 +82,7 @@ $("access-form").addEventListener("submit", async (ev) => {
     saveCode(code);
     $("access").hidden = true;
     $("btn-scan").disabled = false; $("btn-pr").disabled = false;
+    window.dispatchEvent(new Event("codigo-ok"));   // p. ej. el almacén entró por su enlace antes de poner el código
   } catch (e) {
     $("access-err").textContent = e instanceof TypeError ? "No hay conexión. Inténtalo de nuevo." : e.message;
     $("access-err").hidden = false;

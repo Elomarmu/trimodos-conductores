@@ -15,7 +15,6 @@ Desde la v18 no se rellena el campo División.
 from __future__ import annotations
 
 import base64
-import datetime as dt
 import json
 import logging
 import os
@@ -128,16 +127,28 @@ def crear_pedido_mes(odoo, fecha: str) -> dict:
 
 # ---- bulto, línea y tarea -----------------------------------------------------------------------------------------
 
-def ya_registrado(odoo, albaran: str) -> dict | None:
+def ya_registrado(odoo, albaran: str, incluir_sueltos: bool = False) -> dict | None:
+    """Bulto de SAICA con ese albarán. Por defecto solo cuenta si ya tiene línea de pedido; con incluir_sueltos también
+    devuelve uno que se quedó sin línea (registro anterior cortado a medias), para reutilizarlo."""
     if not albaran:
         return None
     texto = f"Albarán salida: {albaran}"
     ps = odoo("tms.package", "search_read", [[["partner_id", "=", R.CLIENTE_ID], ["unload_note", "ilike", texto]]],
-              fields=["name", "task_ids", "sale_line_ids", "unload_note"], limit=5)
-    for p in ps:  # comprobación exacta (ilike también encontraría un número más largo que empiece igual)
-        if R.leer_observaciones(p.get("unload_note")).get("albaran") == albaran:
-            return p
-    return None
+              fields=["name", "task_ids", "sale_line_ids", "unload_note"], order="id desc", limit=5)
+    exactos = [p for p in ps if R.leer_observaciones(p.get("unload_note")).get("albaran") == albaran]  # ilike no es exacto
+    con_linea = next((p for p in exactos if p.get("sale_line_ids")), None)
+    if con_linea or not incluir_sueltos:
+        return con_linea
+    return next(iter(exactos), None)
+
+
+def asegurar_puntos(odoo, tarea_id: int | None) -> None:
+    """Si la orden no tiene sus lugares de carga y descarga (registro cortado a medias), se rellenan."""
+    if not tarea_id:
+        return
+    t = odoo("project.task", "search_read", [[["id", "=", tarea_id]]], fields=["checkpoint_ids"], limit=1)
+    if t and not t[0].get("checkpoint_ids"):
+        odoo("project.task", "fill_checkpoints", [[tarea_id]])
 
 
 def nombre_bulto(odoo) -> str:
@@ -168,12 +179,15 @@ def registrar(odoo, v: dict) -> dict:
         raise ErrorPR("Punto de carga nuevo: la oficina tiene que darlo de alta. Ya se ha avisado.")
     if not v.get("fecha"):
         raise ErrorPR("Falta la fecha de carga.")
+    if not v.get("albaran"):
+        raise ErrorPR("Falta el número de albarán.")
     if v.get("contenedor") and not R.contenedor(v["contenedor"])[1]:
         raise ErrorPR("El contenedor no es correcto (no cuadra el último dígito). Corrígelo o déjalo en blanco.")
-    previo = ya_registrado(odoo, v.get("albaran"))
-    if previo:
-        return {"duplicado": True, "bulto": previo["name"], "tarea_id": (previo.get("task_ids") or [None])[0],
-                "linea_id": (previo.get("sale_line_ids") or [None])[0]}
+    previo = ya_registrado(odoo, v.get("albaran"), incluir_sueltos=True)
+    if previo and previo.get("sale_line_ids"):
+        tarea = (previo.get("task_ids") or [None])[0]
+        asegurar_puntos(odoo, tarea)
+        return {"duplicado": True, "bulto": previo["name"], "tarea_id": tarea, "linea_id": previo["sale_line_ids"][0]}
 
     tr, re_ = vehiculo(odoo, v.get("tractora")), vehiculo(odoo, v.get("remolque"))
     if not tr:
@@ -188,14 +202,21 @@ def registrar(odoo, v: dict) -> dict:
         pedido = crear_pedido_mes(odoo, v["fecha"])
     else:
         preparar_pedido(odoo, pedido)
+        if pedido.get("state") in ("draft", "sent"):   # alguien lo creó a mano sin confirmar: sin confirmar no hay orden
+            pedido["confirmar"] = True
 
     cuando = R.fecha_hora_utc(v["fecha"], v.get("hora"))
-    bulto = {"name": nombre_bulto(odoo), "partner_id": R.CLIENTE_ID, "company_id": R.EMPRESA_ID,
+    bulto = {"name": previo["name"] if previo else nombre_bulto(odoo), "partner_id": R.CLIENTE_ID, "company_id": R.EMPRESA_ID,
              "shipping_origin_id": punto.origen_id, "shipping_destination_id": R.DESTINO_ID, "pickup_date": cuando,
              "goods_id": GOODS_PAPEL_RECUPERADO, "carrier_tracking_ref": v.get("codigo_paper") or False,
              "shipping_weight": v.get("peso_kg") or 0, "number_of_packages": v.get("bultos") or 0,
              "unload_note": R.observaciones(datos_observaciones(v))}
-    bulto_id = odoo("tms.package", "create", [bulto])
+    if previo:   # bulto suelto de un intento anterior cortado a medias: se reutiliza (con los datos de ahora)
+        bulto_id = previo["id"]
+        bulto["name"] = previo["name"]
+        odoo("tms.package", "write", [[bulto_id], {k: v_ for k, v_ in bulto.items() if k != "name"}])
+    else:
+        bulto_id = odoo("tms.package", "create", [bulto])
 
     linea = {"product_id": punto.producto_id, "name": punto.linea, "price_unit": punto.precio_t,
              "product_uom_qty": R.toneladas(punto, v.get("peso_kg")) or 0, "pickup_date": cuando,
@@ -258,7 +279,13 @@ def actualizar(odoo, bulto: dict, cambios: dict) -> list[str]:
         if punto and not punto.toneladas_fijas:
             vals_linea["product_uom_qty"] = R.toneladas(punto, kg)
     if cambios.get("bultos") not in (None, ""):
-        vals_bulto["number_of_packages"] = int(cambios["bultos"])
+        try:
+            balas = int(cambios["bultos"])
+        except (TypeError, ValueError):
+            balas = -1
+        if balas < 0 or balas > 500:
+            raise ErrorPR("Revisa las balas.")
+        vals_bulto["number_of_packages"] = balas
         hechos.append("balas")
     if obs:
         vals_bulto["unload_note"] = R.observaciones(obs, bulto.get("unload_note"))
@@ -399,12 +426,13 @@ def composiciones_repetidas(odoo, tren: int, convoy: str, cajas: list[dict], ult
     for a in adj:
         try:
             t = json.loads(base64.b64decode(a["datas"]).decode())
+            num_viejo = int(t.get("tren", 0))
         except (ValueError, TypeError):
             continue
         fecha = "-".join(reversed((t.get("fecha") or "").split("-")))
         viejas = {c["caja_movil"] for c in t.get("cajas", []) if c.get("caja_movil")}
         comunes = len(nuevas & viejas)
-        if int(t.get("tren", 0)) == int(tren):
+        if num_viejo == int(tren):
             avisos.append(f"El tren {tren} ya está cargado (del {fecha}, {len(viejas)} cajas): si sigues, se sustituye su composición.")
         elif convoy and str(t.get("convoy") or "").strip() == convoy.strip():
             avisos.append(f"El convoy {convoy} ya se cargó como tren {t['tren']} el {fecha}.")
@@ -416,7 +444,7 @@ def composiciones_repetidas(odoo, tren: int, convoy: str, cajas: list[dict], ult
 def tren_actual(odoo) -> dict | None:
     """El último tren cargado por la oficina."""
     adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=like", "PR_TREN_%"]]],
-               fields=["name", "datas"], order="id desc", limit=1)
+               fields=["name", "datas"], order="write_date desc, id desc", limit=1)
     if not adj:
         return None
     return json.loads(base64.b64decode(adj[0]["datas"]).decode())
@@ -454,6 +482,14 @@ def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str)
     datos = {"tren": str(tren["tren"]), "convoy": tren.get("convoy"), "fecha_tren": tren.get("fecha"), "vagon": caja.get("vagon"),
              "caja_movil": caja_movil, "comprobaciones": TODO_OK}
     odoo("tms.package", "write", [[bulto_id], {"unload_note": R.observaciones(datos, p[0].get("unload_note"))}])
+    # Dos personas a la vez con la misma caja: si ya hay otra carga en esa caja de este tren, se deshace esta.
+    en_caja = odoo("tms.package", "search_read", [[["partner_id", "=", R.CLIENTE_ID], ["unload_note", "ilike", f"Caja móvil: {caja_movil}"]]],
+                   fields=["unload_note"], order="id")
+    mismas = [x["id"] for x in en_caja if (o := R.leer_observaciones(x.get("unload_note"))).get("caja_movil") == caja_movil
+              and o.get("tren") == str(tren["tren"])]
+    if len(mismas) > 1 and mismas[0] != bulto_id:
+        quitar(odoo, bulto_id)
+        raise ErrorPR(f"Otra persona acaba de cargar la caja {caja_movil}. Elige otra caja.")
     return p[0]["name"]
 
 

@@ -1,7 +1,5 @@
 """Tren de PR: composición (oficina), asignación de cargas a cajas (oficina/almacén) y las dos Excel."""
-import base64
 import io
-import json
 
 import openpyxl
 import pytest
@@ -44,7 +42,10 @@ class OdooTren:
             next(a for a in self.adjuntos if a["id"] == args[0][0]).update(args[1])
             return True
         if modelo == "tms.package" and metodo == "search_read":
-            return [self.bultos[args[0][0][2]]] if args[0][0][2] in self.bultos else []
+            campo, op, valor = args[0][0] if args[0][0][0] != "partner_id" else args[0][1]
+            if campo == "unload_note":   # ¿quién está en esa caja?
+                return [b for b in sorted(self.bultos.values(), key=lambda b: b["id"]) if valor in b["unload_note"]]
+            return [self.bultos[valor]] if valor in self.bultos else []
         if modelo == "tms.package" and metodo == "write":
             self.bultos[args[0][0]].update(args[1])
             return True
@@ -159,3 +160,34 @@ def test_api_composicion_repetida_pide_confirmar(monkeypatch):
     assert r.status_code == 409 and r.json()["codigo"] == "tren_repetido" and "¿Quieres guardarla igualmente?" in r.json()["error"]
     r = TestClient(app).post("/api/pr/tren/composicion", json=dict(cuerpo, confirmado=True))
     assert r.status_code == 200
+
+
+def test_dos_personas_cargan_la_misma_caja_a_la_vez():
+    odoo = OdooTren()
+    t = O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    lista_vieja = odoo.viajes()                       # los dos ven la caja libre
+    O.asignar(odoo, t, lista_vieja, 11, "CRPU0910069")
+    with pytest.raises(O.ErrorPR, match="Otra persona acaba de cargar la caja"):
+        O.asignar(odoo, t, lista_vieja, 12, "CRPU0910069")
+    assert "Caja móvil" not in odoo.bultos[12]["unload_note"]          # la segunda se ha deshecho
+    assert R.leer_observaciones(odoo.bultos[11]["unload_note"])["caja_movil"] == "CRPU0910069"
+
+
+def test_tren_actual_es_el_ultimo_modificado():
+    odoo = OdooTren()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    O.guardar_composicion(odoo, 87, "90200", "2026-11-10", CAJAS[:1])
+    assert O.tren_actual(odoo)["tren"] == 87
+
+
+def test_pdf_que_falla_no_pierde_lo_guardado(monkeypatch):
+    from app import main
+    from app.errors import AppError
+    from app.pr import pr_api as A
+
+    class Falla:
+        def print_order(self, *a):
+            raise AppError("No se ha podido generar la orden de transporte.", 502, "pdf_fallo")
+    monkeypatch.setattr(main, "get_odoo", lambda: Falla())
+    res = {}
+    assert A.imprimir(204234, res) is None and "Los datos están guardados" in res["aviso_pdf"] and "pdf" not in res

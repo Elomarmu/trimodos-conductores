@@ -3,7 +3,6 @@ import pytest
 
 from app.pr import pr_api as A
 from app.pr import pr_odoo as O
-from app.pr import pr_reglas as R
 
 BASE = {"bulto_id": 11, "bulto": "PK1", "tarea_id": 204234, "codigo_paper": "S261104001499", "albaran": "592611000006",
         "tren": "86", "caja_movil": "CRPU0910069", "foto": ""}

@@ -60,6 +60,10 @@ class OdooV18:
                 pkg = l["tms_package_ids"][0][2]
                 self.lineas[self.sig] = {"order_id": [p["id"], p["name"]], "pkg": pkg, "vals": l,
                                          "task_id": [self.sig + 5000, "t"] if p["state"] == "sale" else False}
+                for b in pkg:   # como en Odoo: el bulto queda enlazado a su línea (y a su tarea)
+                    self.bultos[b]["sale_line_ids"] = [self.sig]
+                    if self.lineas[self.sig]["task_id"]:
+                        self.bultos[b]["task_ids"] = [self.lineas[self.sig]["task_id"][0]]
             return True
         if metodo == "action_confirm":
             p = self.pedidos[args[0][0]]
@@ -67,6 +71,8 @@ class OdooV18:
             for l in self.lineas.values():
                 if l["order_id"][0] == p["id"]:
                     l["task_id"] = [id(l) % 100000, "t"]
+                    for b in l["pkg"]:
+                        self.bultos[b]["task_ids"] = [l["task_id"][0]]
             return True
         if metodo == "action_unlock":
             self.pedidos[args[0][0]]["locked"] = False
@@ -84,6 +90,7 @@ class OdooV18:
             self.bultos[self.sig] = dict(args[0], id=self.sig)
             return self.sig
         if modelo == "tms.package" and metodo == "write":
+            assert "name" not in args[1]
             self.bultos[args[0][0]].update(args[1])
             return True
         if modelo == "tms.equipment" and metodo == "search_read":
@@ -93,6 +100,8 @@ class OdooV18:
             self.sig += 1
             self.equipos[args[0]["name"]] = self.sig
             return self.sig
+        if modelo == "project.task" and metodo == "search_read":
+            return [{"id": args[0][0][2], "checkpoint_ids": [1, 2] if args[0][0][2] in self.checkpoints else []}]
         if metodo == "fill_checkpoints":
             self.checkpoints.add(args[0][0])
             return True
@@ -166,3 +175,46 @@ def test_coste_configurable(monkeypatch):
     assert O.coste_viaje() == 92.5
     monkeypatch.setenv("PR_COSTE_VIAJE", "")
     assert O.coste_viaje() == 85.0
+
+
+def test_albaran_obligatorio():
+    with pytest.raises(O.ErrorPR, match="número de albarán"):
+        O.registrar(OdooV18(), dict(JEREZ, albaran=""))
+
+
+def test_bulto_suelto_de_un_intento_cortado_se_reutiliza():
+    odoo = OdooV18()
+    obs = R.observaciones(O.datos_observaciones(JEREZ))
+    odoo.bultos[77] = {"id": 77, "name": "PK2627700", "partner_id": 9228, "unload_note": obs}   # sin línea
+    r = O.registrar(odoo, JEREZ)
+    assert not r["duplicado"] and r["bulto_id"] == 77 and r["bulto"] == "PK2627700"
+    assert odoo.bultos[77]["sale_line_ids"] and len(odoo.lineas) == 1
+    assert ("tms.package", "create") not in odoo.llamadas
+
+
+def test_duplicado_completa_los_puntos_de_paso_si_faltan():
+    odoo = OdooV18()
+    r = O.registrar(odoo, JEREZ)
+    odoo.checkpoints.discard(r["tarea_id"])       # simulamos que se cortó antes de rellenarlos
+    r2 = O.registrar(odoo, JEREZ)
+    assert r2["duplicado"] and r2["tarea_id"] == r["tarea_id"] and r["tarea_id"] in odoo.checkpoints
+
+
+def test_pedido_en_presupuesto_se_confirma():
+    odoo = OdooV18({"id": 7, "name": "S26099990", "ref": "PR NOVIEMBRE", "state": "draft", "locked": False})
+    r = O.registrar(odoo, JEREZ)
+    assert odoo.pedidos[7]["state"] == "sale" and odoo.pedidos[7]["locked"] is False and r["tarea_id"]
+
+
+def test_balas_mal_escritas():
+    odoo = OdooV18()
+    r = O.registrar(odoo, JEREZ)
+    b = dict(odoo.bultos[r["bulto_id"]], shipping_origin_id=[7274, "J"])
+    for malo in ("abc", -3, 9999):
+        with pytest.raises(O.ErrorPR, match="balas"):
+            O.actualizar(odoo, b, {"bultos": malo})
+
+
+def test_hora_rara_no_rompe():
+    assert R.fecha_hora_utc("2026-11-09", "25:99") == "2026-11-09 09:00:00"
+    assert R.fecha_hora_utc("2026-11-09", "13:35:00") == "2026-11-09 12:35:00"

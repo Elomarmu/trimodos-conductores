@@ -1,13 +1,20 @@
 """API de los viajes de PR. Se monta en main.py con el mismo código de acceso que el resto de la app.
 
-Conductor:
-  POST /api/pr/leer-albaran   {"archivo_b64", "tipo"}   → datos leídos + comprobación de matrículas en Flota
-  POST /api/pr/registrar      {"viaje": {...}}          → línea en el pedido del mes + orden de transporte (PDF)
-Oficina / almacén:
-  GET  /api/pr/buscar?q=      nº de albarán, código Paper o bulto
-  POST /api/pr/actualizar     {"bulto_id", "cambios": {...}}   (código Paper, peso, balas, contenedor, datos del tren)
-  GET  /api/pr/viajes?fecha=  viajes del pedido del mes
-  POST /api/pr/leer-tren      {"archivos": [...]}       → cajas del tren
+Conductor y oficina:
+  POST /api/pr/leer-albaran         foto del albarán → datos leídos + comprobación de matrículas en Flota
+  POST /api/pr/comprobar-vehiculos  ?tractora=&remolque=
+  POST /api/pr/registrar            {"viaje", "foto"} → línea en el pedido del mes + orden de transporte (PDF)
+Oficina:
+  GET  /api/pr/buscar?q=            nº de albarán, código Paper o bulto
+  POST /api/pr/actualizar           {"bulto_id", "cambios", "foto"} (código Paper, peso, balas, contenedor)
+  POST /api/pr/leer-tren            listado del tren → cajas
+  POST /api/pr/tren/composicion     guarda la composición (avisa si es repetida; «confirmado» para seguir)
+  POST /api/pr/tren/enviar          las dos Excel + correo con fotos (n8n)
+Oficina y almacén:
+  GET  /api/pr/tren/actual · POST /api/pr/tren/asignar · POST /api/pr/tren/quitar
+n8n:
+  GET  /api/pr/resumen              resumen de la mañana con la Excel de registro
+Las fotos y las Excel van a SharePoint y los correos salen por n8n (PR_AVISOS_WEBHOOK).
 Con DRY_RUN=true se lee de Odoo pero no se escribe nada.
 """
 from __future__ import annotations
@@ -160,7 +167,10 @@ def leer_albaran(body: Archivo):
     viaje.avisos += [f"Duda al leer: {d}" for d in leido.get("dudas") or []]
     res = {"viaje": viaje.a_dict(), "puntos": [{"clave": p.clave, "nombre": p.nombre} for p in R.PUNTOS_CARGA]}
     if get_settings().mode == "real":
-        res["vehiculos"] = O.comprobar_vehiculos(odoo_pr(), viaje.tractora, viaje.remolque)
+        try:
+            res["vehiculos"] = O.comprobar_vehiculos(odoo_pr(), viaje.tractora, viaje.remolque)
+        except AppError:   # sin conexión con Odoo: los datos leídos se enseñan igual; se comprueba al guardar
+            res["vehiculos"] = None
     if not viaje.punto:
         avisar("punto_nuevo", {"punto": viaje.punto_texto, "albaran": viaje.albaran, "fecha": viaje.fecha})
     log.info("albarán leído tipo=%s punto=%s pendientes=%s", viaje.tipo_albaran,
@@ -196,16 +206,14 @@ def registrar(body: ViajeIn):
             log.warning("no se pudo guardar la foto del albarán en la tarea %s", res["tarea_id"])
     if res.get("pedido_nuevo"):
         avisar("pedido_nuevo", {"pedido": res["pedido"], "referencia": R.referencia_pedido(v["fecha"])})
-    from ..main import get_odoo  # imprimir la orden con el cliente general (sesión web)
+    from ..main import get_odoo  # nota en la tarea con el cliente general
     cli = get_odoo()
     if not res["duplicado"]:
         try:
             cli.post_note(res["tarea_id"], "<p>Viaje de PR registrado desde la app de conductores (foto del albarán).</p>")
         except Exception:  # la nota es informativa: nunca debe parar el viaje
             log.warning("no se pudo dejar la nota en la tarea %s", res["tarea_id"])
-    adj = cli.print_order(res["tarea_id"], R.EMPRESA_ID) if res.get("tarea_id") else None
-    if adj:
-        res["pdf"] = {"id": adj["id"], "token": adj.get("access_token"), "nombre": adj.get("name")}
+    imprimir(res.get("tarea_id"), res)
     log.info("PR registrado tarea=%s bulto=%s duplicado=%s", res.get("tarea_id"), res.get("bulto"), res["duplicado"])
     return res
 
@@ -243,10 +251,22 @@ def actualizar(body: Actualizar):
         sincronizar_foto(odoo, viaje, foto_nueva=bool(body.foto))
     res = {"bulto": ps[0]["name"], "cambiado": hechos}
     if tarea and set(hechos) & {"código Paper", "peso", "balas", "contenedor"}:
-        from ..main import get_odoo
-        adj = get_odoo().print_order(tarea, R.EMPRESA_ID)
-        res["pdf"] = {"id": adj["id"], "token": adj.get("access_token"), "nombre": adj.get("name")}
+        imprimir(tarea, res)
     return res
+
+
+def imprimir(tarea_id: int | None, res: dict) -> dict | None:
+    """Genera la orden de transporte en PDF. Si falla, lo guardado ya está guardado: se avisa y se sigue."""
+    if not tarea_id:
+        return None
+    from ..main import get_odoo  # imprimir con el cliente general (sesión web)
+    try:
+        adj = get_odoo().print_order(tarea_id, R.EMPRESA_ID)
+    except AppError:
+        res["aviso_pdf"] = "Los datos están guardados, pero no se ha podido generar la orden en PDF. Inténtalo más tarde."
+        return None
+    res["pdf"] = {"id": adj["id"], "token": adj.get("access_token"), "nombre": adj.get("name")}
+    return adj
 
 
 # ---- foto del albarán en SharePoint › Automatizacion › CARTON PAJA TREN <n> (lo hace n8n) --------------------------
@@ -304,7 +324,7 @@ class CajaTren(BaseModel):
     orden: int | None = None
     vagon: str = ""
     segunda: bool = False
-    caja_movil: str
+    caja_movil: str = Field(min_length=1, max_length=20)
     tara_kg: int | None = None
 
 
@@ -312,7 +332,7 @@ class TrenIn(BaseModel):
     confirmado: bool = False         # ya ha visto el aviso de composición repetida y sigue
     tren: int
     convoy: str = Field("", max_length=20)
-    fecha: str = Field(max_length=10)
+    fecha: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     cajas: list[CajaTren] = Field(min_length=1, max_length=60)
 
 
@@ -404,8 +424,8 @@ def tren_enviar():
                  "b64": base64.b64encode(X.carton_paja_tren(t["tren"], t.get("convoy", ""), t["fecha"], t["cajas"], por_caja)).decode()},
                 {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     stock = [v for v in lista if v["estado"] == "En stock"]
-    fecha_es = "-".join(reversed(t["fecha"].split("-")))
-    cuerpo = (f"<p style='font:11pt Calibri,Arial'><b>Tren {t['tren']}</b> (convoy {html.escape(str(t.get('convoy') or ''))}, "
+    fecha_es = html.escape("-".join(reversed(str(t["fecha"]).split("-"))))
+    cuerpo = (f"<p style='font:11pt Calibri,Arial'><b>Tren {int(t['tren'])}</b> (convoy {html.escape(str(t.get('convoy') or ''))}, "
               f"{fecha_es}): {len(por_caja)} cargas en {len(t['cajas'])} cajas.</p>"
               + tabla_html(["Vagón", "Caja", "Código Paper", "Albarán", "Lugar", "Balas", "Peso kg"],
                            [[c["vagon"], c["caja_movil"], v.get("codigo_paper"), v.get("albaran"), v.get("lugar"), v.get("bultos"),

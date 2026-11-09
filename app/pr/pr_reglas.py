@@ -150,8 +150,10 @@ def fecha_hora_utc(fecha: str | None, hora: str | None) -> str | None:
     except ValueError:
         return None
     h, m = 10, 0
-    if hora and re.fullmatch(r"\d{1,2}:\d{2}", hora.strip()):
-        h, m = (int(x) for x in hora.strip().split(":"))
+    if hora and re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", hora.strip()):
+        h, m = (int(x) for x in hora.strip().split(":")[:2])
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            h, m = 10, 0
     local = dt.datetime(d.year, d.month, d.day, h, m, tzinfo=MADRID)
     return local.astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 

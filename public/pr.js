@@ -141,6 +141,7 @@ function recoger() {
   const punto = val("pr-punto");
   if (!punto) throw new Error("Elige el punto de carga.");
   if (!val("pr-fecha")) throw new Error("Pon la fecha de carga.");
+  if (!val("pr-albaran")) throw new Error("Pon el número de albarán.");
   if (!limpiaPlaca(val("pr-tractora"))) throw new Error("Pon la matrícula de la tractora.");
   const peso = val("pr-peso") ? parseNum(val("pr-peso")) : null;
   if (peso !== null && (Number.isNaN(peso) || peso <= 0)) throw new Error("Revisa el peso.");
@@ -190,6 +191,7 @@ function pintarHecho(r) {
     $("pr-hecho-titulo").textContent = "Orden generada";
     cuerpo.push(mark, h("p", {}, `Viaje guardado en el pedido ${r.pedido} (bulto ${r.bulto}).`));
   }
+  if (r.aviso_pdf) cuerpo.push(h("div", { class: "banner warn" }, r.aviso_pdf));
   $("pr-hecho-cuerpo").replaceChildren(...cuerpo);
   const hayPdf = !!(r.pdf && r.pdf.id);
   state.pdfUrl = hayPdf ? `/api/pdf/${r.pdf.id}?token=${encodeURIComponent(r.pdf.token || "")}` : null;
@@ -286,9 +288,12 @@ $("pr-completar").addEventListener("submit", async (ev) => {
   const paper = limpiaPlaca(val("pr-c-paper"));
   if (paper && paper !== (b.carrier_tracking_ref || "")) cambios.codigo_paper = paper;
   const balas = val("pr-c-bultos") ? parseNum(val("pr-c-bultos")) : null;
+  if (balas !== null && (Number.isNaN(balas) || !Number.isInteger(balas))) return showError("Revisa las balas.");
   if (balas !== null && balas !== b.number_of_packages) cambios.bultos = balas;
   const peso = val("pr-c-peso") ? parseNum(val("pr-c-peso")) : null;
+  if (peso !== null && (Number.isNaN(peso) || peso <= 0)) return showError("Revisa el peso.");
   if (peso !== null && peso !== b.shipping_weight) cambios.peso_kg = peso;
+  if (paper && !/^S\d{12}$/.test(paper)) return showError("El código de carga Paper es una S y 12 cifras.");
   if (val("pr-c-contenedor")) cambios.contenedor = limpiaPlaca(val("pr-c-contenedor"));
   if (!Object.keys(cambios).length && !pr.fotoMod) return showError("No has cambiado nada.");
   busy("Guardando…");
@@ -296,7 +301,8 @@ $("pr-completar").addEventListener("submit", async (ev) => {
     const r = await post("/api/pr/actualizar", { bulto_id: b.id, cambios, foto: pr.fotoMod || null });
     pr.fotoMod = null;
     $("pr-completar-ok").textContent = r.simulado ? "Modo de prueba: no se ha guardado nada." :
-      `Guardado en ${r.bulto}: ${r.cambiado.join(", ")}.` + (r.pdf ? " La orden de transporte se ha regenerado." : "");
+      `Guardado en ${r.bulto}: ${r.cambiado.join(", ")}.` + (r.pdf ? " La orden de transporte se ha regenerado." : "") +
+      (r.aviso_pdf ? " " + r.aviso_pdf : "");
     $("pr-completar-ok").hidden = false;
     Object.assign(b, { carrier_tracking_ref: cambios.codigo_paper ?? b.carrier_tracking_ref,
       number_of_packages: cambios.bultos ?? b.number_of_packages, shipping_weight: cambios.peso_kg ?? b.shipping_weight });
@@ -464,4 +470,5 @@ function accesoDirecto() {
   else if (location.hash === "#oficina") go("pr-oficina");
 }
 window.addEventListener("load", accesoDirecto);
+window.addEventListener("codigo-ok", () => { if (currentScreen === "pr-almacen") cargarAlmacen(); });
 window.addEventListener("hashchange", accesoDirecto);
