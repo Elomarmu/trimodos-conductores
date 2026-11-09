@@ -434,7 +434,8 @@ $("btn-save").addEventListener("click", () => {
   $("confirm-txt").textContent = "Se generará una nueva orden de transporte.";
   $("confirm").hidden = false; $("btn-no").focus();
 });
-$("btn-no").addEventListener("click", () => { $("confirm").hidden = true; });
+$("btn-no").addEventListener("click", () => { $("confirm").hidden = true; $("confirm-q").textContent = "¿Seguro?"; });
+$("btn-yes").addEventListener("click", () => { $("confirm-q").textContent = "¿Seguro?"; });
 // En el ordenador, «Esc» responde «No» en los avisos (nunca guarda nada).
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;

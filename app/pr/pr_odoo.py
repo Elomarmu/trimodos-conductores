@@ -390,6 +390,29 @@ def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[di
     return datos
 
 
+def composiciones_repetidas(odoo, tren: int, convoy: str, cajas: list[dict], ultimas: int = 40) -> list[str]:
+    """Avisos si esta composición ya se cargó: mismo nº de tren, mismo nº de convoy o casi las mismas cajas (≥ 80 %)."""
+    adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=like", "PR_TREN_%"]]],
+               fields=["name", "datas"], order="id desc", limit=ultimas)
+    nuevas = {c["caja_movil"] for c in cajas if c.get("caja_movil")}
+    avisos = []
+    for a in adj:
+        try:
+            t = json.loads(base64.b64decode(a["datas"]).decode())
+        except (ValueError, TypeError):
+            continue
+        fecha = "-".join(reversed((t.get("fecha") or "").split("-")))
+        viejas = {c["caja_movil"] for c in t.get("cajas", []) if c.get("caja_movil")}
+        comunes = len(nuevas & viejas)
+        if int(t.get("tren", 0)) == int(tren):
+            avisos.append(f"El tren {tren} ya está cargado (del {fecha}, {len(viejas)} cajas): si sigues, se sustituye su composición.")
+        elif convoy and str(t.get("convoy") or "").strip() == convoy.strip():
+            avisos.append(f"El convoy {convoy} ya se cargó como tren {t['tren']} el {fecha}.")
+        elif nuevas and comunes >= 0.8 * max(len(nuevas), len(viejas)):
+            avisos.append(f"Estas cajas coinciden ({comunes} de {len(nuevas)}) con el tren {t['tren']} del {fecha}.")
+    return avisos
+
+
 def tren_actual(odoo) -> dict | None:
     """El último tren cargado por la oficina."""
     adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=like", "PR_TREN_%"]]],

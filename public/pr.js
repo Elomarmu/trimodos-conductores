@@ -338,19 +338,31 @@ $("tren-guardar").addEventListener("click", () => {
   $("confirm").hidden = false;
   $("btn-no").focus();
 });
-async function guardarComposicion(num) {
+async function guardarComposicion(num, confirmado = false) {
   $("confirm").hidden = true;
   busy("Guardando el tren…");
   try {
-    const r = await post("/api/pr/tren/composicion", { tren: num, convoy: val("tren-convoy"), fecha: val("tren-fecha"), cajas: composicion.cajas });
+    let r;
+    try {
+      r = await post("/api/pr/tren/composicion", { tren: num, convoy: val("tren-convoy"), fecha: val("tren-fecha"), cajas: composicion.cajas, confirmado });
+    } catch (e) {
+      if (e.code !== "tren_repetido") throw e;
+      busy(null);   // composición repetida: se enseña el aviso y hay que confirmar otra vez
+      state.onConfirm = () => guardarComposicion(num, true);
+      $("confirm-q").textContent = "Composición repetida";
+      $("confirm-txt").textContent = e.message;
+      $("confirm").hidden = false;
+      $("btn-no").focus();
+      return;
+    }
     const mark = h("div", { class: "done-mark" });
     mark.innerHTML = CHECK_SVG;
     $("tren-hecho-cuerpo").replaceChildren(r.simulado ? h("div", { class: "banner info" }, "Modo de prueba: no se ha guardado nada.") : mark,
-      h("p", {}, `Tren ${num} guardado (${composicion.cajas.length} cajas). El almacén ya puede asignar las cargas.`),
+      h("p", {}, `Tren ${num} guardado (${composicion.cajas.length === 1 ? "1 caja" : composicion.cajas.length + " cajas"}). El almacén ya puede asignar las cargas.`),
       r.simulado ? null : h("p", { class: "hint" }, r.enviado ? `Guardada en SharePoint en ${r.excel} (hoja COMPOSICION).` :
         "No se ha podido guardar la Excel en SharePoint (el envío automático no está configurado o ha fallado)."));
     $("tren-paso2").hidden = true; $("tren-hecho").hidden = false;
-  } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
+  } catch (e) { showError(e.message); } finally { busy(null); if ($("confirm").hidden) state.onConfirm = null; }
 }
 $("tren-ir-asignar").addEventListener("click", () => abrirAlmacen(true));
 

@@ -132,3 +132,30 @@ def test_libro_del_tren_con_hoja_composicion():
     assert [c.value for c in ws[5]] == [1, "388049630055", "CRPU0910069", 5600]
     assert [c.value for c in ws[6]] == ["“", "“", "CTEA25000377", 4400]
     assert all(libro["TREN 86"].cell(f, 3).value is None for f in (6, 7))   # recién cargado: cajas vacías
+
+
+def test_composicion_repetida():
+    odoo = OdooTren()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    assert "El tren 86 ya está cargado" in O.composiciones_repetidas(odoo, 86, "", CAJAS)[0]
+    assert "El convoy 90107 ya se cargó como tren 86" in O.composiciones_repetidas(odoo, 87, "90107", CAJAS[:1])[0]
+    assert "coinciden (2 de 2) con el tren 86" in O.composiciones_repetidas(odoo, 87, "90200", CAJAS)[0]
+    otras = [dict(c, caja_movil=c["caja_movil"] + "X") for c in CAJAS]
+    assert O.composiciones_repetidas(odoo, 87, "90200", otras) == []          # tren nuevo de verdad: sin aviso
+
+
+def test_api_composicion_repetida_pide_confirmar(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.pr import pr_api as A
+    odoo = OdooTren()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    monkeypatch.setenv("ODOO_MODE", "mock")
+    monkeypatch.setenv("APP_ACCESS_CODE", "")
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    cuerpo = {"tren": 87, "convoy": "90107", "fecha": "2026-11-10", "cajas": CAJAS}
+    r = TestClient(app).post("/api/pr/tren/composicion", json=cuerpo)
+    assert r.status_code == 409 and r.json()["codigo"] == "tren_repetido" and "¿Quieres guardarla igualmente?" in r.json()["error"]
+    r = TestClient(app).post("/api/pr/tren/composicion", json=dict(cuerpo, confirmado=True))
+    assert r.status_code == 200

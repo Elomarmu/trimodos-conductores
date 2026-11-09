@@ -309,6 +309,7 @@ class CajaTren(BaseModel):
 
 
 class TrenIn(BaseModel):
+    confirmado: bool = False         # ya ha visto el aviso de composición repetida y sigue
     tren: int
     convoy: str = Field("", max_length=20)
     fecha: str = Field(max_length=10)
@@ -330,9 +331,15 @@ def tabla_html(cab: list[str], filas: list[list]) -> str:
 @router.post("/tren/composicion")
 def tren_composicion(body: TrenIn):
     """Oficina: guarda la composición del tren (vagones, cajas, taras) para que el almacén asigne las cargas."""
+    odoo = odoo_pr()
+    cajas = [c.model_dump() for c in body.cajas]
+    if not body.confirmado:
+        repetida = O.composiciones_repetidas(odoo, body.tren, body.convoy, cajas)
+        if repetida:   # la app lo enseña y pide volver a confirmar
+            raise AppError(" ".join(repetida) + " ¿Quieres guardarla igualmente?", 409, "tren_repetido")
     if get_settings().dry_run:
         return {"simulado": True, "tren": body.tren}
-    datos = _pr(O.guardar_composicion, odoo_pr(), body.tren, body.convoy, body.fecha, [c.model_dump() for c in body.cajas])
+    datos = _pr(O.guardar_composicion, odoo, body.tren, body.convoy, body.fecha, cajas)
     # El libro CARTON PAJA TREN <n> (cajas aún vacías + hoja COMPOSICION) a SharePoint › Automatizacion (n8n), sin correo.
     # Al terminar el tren se vuelve a subir con las cargas.
     nombre = f"CARTON PAJA TREN {datos['tren']}.xlsx"
