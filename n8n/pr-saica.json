@@ -1,0 +1,330 @@
+{
+ "name": "PR SAICA · avisos, Excel en SharePoint y resumen diario (pruebas)",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "pr-saica",
+    "options": {}
+   },
+   "id": "90b60057-bbb8-4041-a4da-b007e16c9335",
+   "name": "Desde la app",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "webhookId": "668075aa-8403-4fbf-9885-2699b93a1449"
+  },
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "10 7 * * 1-6"
+      }
+     ]
+    }
+   },
+   "id": "67d1492e-5636-47a5-972b-4133192d12e7",
+   "name": "Cada mañana 7:10 (lunes a sábado)",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    200
+   ]
+  },
+  {
+   "parameters": {},
+   "id": "83a0c076-52ed-4373-96d7-742b7f257784",
+   "name": "Lanzar resumen a mano",
+   "type": "n8n-nodes-base.manualTrigger",
+   "typeVersion": 1,
+   "position": [
+    0,
+    380
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Ajustes del flujo PR SAICA (app de conductores → SharePoint y correo)\nconst carpeta = 'https://grupotrimodos.sharepoint.com/:f:/s/GestionStinsa2/IgDhXF70TVa6RIjVPMcCoeveAb5bZPmGM4Ticd0VzvhCrRo?e=YFyck7';  // «Automatizacion»\nreturn [{ json: {\n  app: 'https://trimodos-conductores-pcsur-elo.vercel.app',   // dirección de la app (Vercel)\n  codigoAcceso: '<<PONER EN N8N: el mismo que APP_ACCESS_CODE en Vercel>>',\n  claveWebhook: '<<PONER EN N8N: la misma que PR_AVISOS_CLAVE en Vercel>>',\n  buzonEnvio: 'agente.trafico@transargi.com',            // buzón de la credencial «Outlook Agente Trafico»\n  paraPorDefecto: 'carmelomartinez@grupotrimodos.com',   // pruebas; luego sevilla@stinsa.com\n  // el enlace de la carpeta en el formato de Graph («u!» + base64url)\n  carpetaGraph: 'u!' + Buffer.from(carpeta).toString('base64').replace(/=+$/, '').replace(/\\//g, '_').replace(/\\+/g, '-'),\n}}];\n"
+   },
+   "id": "cf3cc971-f1b1-4e19-87be-4cf65f0bb625",
+   "name": "Configuración",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "url": "=https://graph.microsoft.com/v1.0/shares/{{ $json.carpetaGraph }}/driveItem?$select=id,name,parentReference",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "options": {}
+   },
+   "id": "479e5788-37ac-4c5d-9863-6675b1ccc1d9",
+   "name": "Buscar la carpeta",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    460,
+    200
+   ],
+   "credentials": {
+    "microsoftExcelOAuth2Api": {
+     "id": "",
+     "name": "Microsoft Excel (SharePoint RRHH)"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000
+  },
+  {
+   "parameters": {
+    "jsCode": "// Si viene de la app: se comprueba la clave y se usa lo que manda { evento, para, asunto, html, archivos }.\n// Si es el resumen de la mañana: se pide a la app (novedades, datos pendientes, stock y Excel de registro).\nconst cfg = $('Configuración').first().json;\nif ($('Desde la app').isExecuted) {\n  const w = $('Desde la app').first().json;\n  const clave = (w.headers || {})['x-clave'] || '';\n  if (!cfg.claveWebhook || clave !== cfg.claveWebhook) throw new Error('Aviso PR con clave incorrecta: revisa PR_AVISOS_CLAVE en Vercel y «claveWebhook» en Configuración');\n  return [{ json: w.body }];\n}\nlet r;\ntry {\n  r = await this.helpers.httpRequest({ method: 'GET', url: `${cfg.app}/api/pr/resumen`, json: true,\n    headers: { 'X-Codigo-Acceso': cfg.codigoAcceso }, timeout: 60000 });\n} catch (e) { throw new Error(`No se ha podido pedir el resumen a la app (${cfg.app}): ${e.message}`); }\nreturn [{ json: r }];\n"
+   },
+   "id": "73758ef8-1864-4ad7-ac7d-23c07b8afb87",
+   "name": "Datos (app o resumen)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    680,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Un elemento por Excel que subir a SharePoint (con su dirección) y uno para el correo con las Excel adjuntas.\nconst cfg = $('Configuración').first().json;\nconst carpeta = $('Buscar la carpeta').first().json;\nconst d = $input.first().json;\nconst archivos = d.archivos || [];\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = archivos.map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre,\n    url: `https://graph.microsoft.com/v1.0/drives/${carpeta.parentReference.driveId}/items/${carpeta.id}:/${encodeURIComponent(a.nombre)}:/content` },\n  binary: { archivo: { data: a.b64, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName: a.nombre } } }));\nsalida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio, graph: { message: { subject: d.asunto || 'PR SAICA',\n  body: { contentType: 'HTML', content: d.html || '' }, toRecipients: para.map(a => ({ emailAddress: { address: a } })),\n  attachments: archivos.map(a => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.nombre, contentBytes: a.b64 })) },\n  saveToSentItems: true } } });\nreturn salida;\n"
+   },
+   "id": "c4cb2a2a-639a-4423-bbf4-b156a583e4ca",
+   "name": "Preparar SharePoint y correo",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    900,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "0091b995-7843-4904-a829-201870f89e05",
+       "leftValue": "={{ $json.tipo }}",
+       "rightValue": "sharepoint",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "46a8e5b1-6423-4c61-8565-6346e60e7d8f",
+   "name": "¿SharePoint o correo?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1120,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $json.url }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "sendBody": true,
+    "contentType": "binaryData",
+    "inputDataFieldName": "archivo",
+    "options": {}
+   },
+   "id": "3d4134d5-8b85-461c-a0b7-9a446f2d7c44",
+   "name": "Subir Excel a SharePoint",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1360,
+    80
+   ],
+   "credentials": {
+    "microsoftExcelOAuth2Api": {
+     "id": "",
+     "name": "Microsoft Excel (SharePoint RRHH)"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "=https://graph.microsoft.com/v1.0/users/{{ $json.buzon }}/sendMail",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftOutlookOAuth2Api",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.graph) }}",
+    "options": {}
+   },
+   "id": "f11de049-cffa-4307-af89-b42a5e703ef0",
+   "name": "Enviar correo",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1360,
+    320
+   ],
+   "credentials": {
+    "microsoftOutlookOAuth2Api": {
+     "id": "RKtfxCpWlTpVxiJw",
+     "name": "Outlook Agente Trafico"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000
+  },
+  {
+   "parameters": {
+    "content": "## PR SAICA · app de conductores → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave): avisos de pedido nuevo o punto de carga nuevo, y el tren terminado con las dos Excel.\n**Cada mañana 7:10** (lunes a sábado): pide a la app el resumen (viajes de ayer, datos pendientes, stock) con la Excel de registro.\n\nSiempre: sube las Excel a SharePoint › GestionStinsa2 › Automatizacion (las sobrescribe) y manda el correo con las Excel adjuntas desde agente.trafico@.\n\nEn «Configuración»: código de acceso de la app y clave del webhook. Los destinatarios los decide la app (PR_CORREO_PARA en Vercel).",
+    "height": 300,
+    "width": 600
+   },
+   "id": "e08f32d4-f6b8-48a1-b7b0-ec51f9dd6fbc",
+   "name": "Instrucciones",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    0,
+    -380
+   ]
+  }
+ ],
+ "connections": {
+  "Desde la app": {
+   "main": [
+    [
+     {
+      "node": "Configuración",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Cada mañana 7:10 (lunes a sábado)": {
+   "main": [
+    [
+     {
+      "node": "Configuración",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Lanzar resumen a mano": {
+   "main": [
+    [
+     {
+      "node": "Configuración",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Configuración": {
+   "main": [
+    [
+     {
+      "node": "Buscar la carpeta",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Buscar la carpeta": {
+   "main": [
+    [
+     {
+      "node": "Datos (app o resumen)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Datos (app o resumen)": {
+   "main": [
+    [
+     {
+      "node": "Preparar SharePoint y correo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Preparar SharePoint y correo": {
+   "main": [
+    [
+     {
+      "node": "¿SharePoint o correo?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "¿SharePoint o correo?": {
+   "main": [
+    [
+     {
+      "node": "Subir Excel a SharePoint",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Enviar correo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "pinData": {},
+ "active": false,
+ "settings": {
+  "executionOrder": "v1",
+  "timezone": "Europe/Madrid"
+ },
+ "meta": {
+  "templateCredsSetupCompleted": false
+ },
+ "tags": []
+}

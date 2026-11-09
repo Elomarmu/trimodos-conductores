@@ -90,7 +90,8 @@ def enviar_n8n(datos: dict) -> bool:
         log.info("PR sin webhook de n8n configurado: %s", datos.get("evento"))
         return False
     try:
-        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=15)
+        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=15,
+                       headers={"X-Clave": os.environ.get("PR_AVISOS_CLAVE", "")})
         return r.status_code < 300
     except httpx.HTTPError:
         log.warning("No se ha podido enviar a n8n: %s", datos.get("evento"))
