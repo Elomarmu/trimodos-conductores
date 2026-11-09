@@ -1,4 +1,4 @@
-"""Prueba completa de un viaje de PR contra el Odoo 18 DE PRUEBAS: foto → lectura → (confirmación) → línea en el
+r"""Prueba completa de un viaje de PR contra el Odoo 18 DE PRUEBAS: foto → lectura → (confirmación) → línea en el
 pedido del mes → orden de transporte en PDF (se guarda junto a la foto).
 
 Solo funciona contra stinsa18 (pruebas). Pide confirmación antes de grabar cada viaje.
