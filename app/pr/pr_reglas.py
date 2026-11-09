@@ -177,7 +177,7 @@ CAMPOS_OBS = (  # orden de las líneas en las observaciones de descarga del bult
     ("albaran", "Albarán salida"), ("codigo_paper", "Código carga Paper"), ("codigo_natur", "Código carga Natur"),
     ("ler", "LER"), ("calidad", "Calidad"), ("bruto_kg", "Peso bruto kg"), ("tara_kg", "Tara kg"),
     ("tren", "Tren"), ("convoy", "Nº convoy"), ("fecha_tren", "Fecha tren"), ("vagon", "Vagón"), ("caja_movil", "Caja móvil"),
-    ("comprobaciones", "Comprobaciones"),
+    ("comprobaciones", "Comprobaciones"), ("foto", "Foto en SharePoint"),
 )
 COMPROBACIONES = (("dist_balas", "Dist. balas"), ("lonas", "Lonas"), ("puertas", "Puertas"), ("precinto", "Precinto"))
 
@@ -346,3 +346,26 @@ def limpiar_tren(leido: dict) -> dict:
             if tara_caja(c) is None:
                 avisos.append(f"Caja {c}: tara desconocida, complétala en la Excel.")
     return {"numero_tren": leido.get("numero_tren") or "", "fecha": leido.get("fecha") or "", "cajas": filas, "avisos": avisos}
+
+
+
+# ---- foto del albarán en SharePoint ---------------------------------------------------------------------------------
+
+def carpeta_tren(tren) -> str:
+    """Carpeta de las fotos = nombre de la Excel del tren sin «.xlsx» (dentro de SharePoint › Automatizacion)."""
+    return f"CARTON PAJA TREN {tren}"
+
+
+def extension(tipo: str | None) -> str:
+    return ".pdf" if tipo == "application/pdf" else ".png" if tipo == "image/png" else ".jpg"
+
+
+def nombre_foto(codigo_paper: str, albaran: str, caja_movil: str, ext: str, ocupados: set[str]) -> str:
+    """«S261104001499 - CRPU0910069.jpg». Sin código Paper: «ALBARAN 26371 - caja». Si el nombre ya está cogido en la
+    carpeta se añade « (2)», « (3)»… para no pisar otra foto. Sin caracteres que SharePoint no admite."""
+    base = f"{codigo_paper or 'ALBARAN ' + (albaran or 'SIN NUMERO')} - {caja_movil}"
+    base = re.sub(r'[\\/:*?"<>|#%]+', "-", base).strip(" .")
+    nombre, n = base + ext, 2
+    while nombre.lower() in {o.lower() for o in ocupados}:
+        nombre, n = f"{base} ({n}){ext}", n + 1
+    return nombre

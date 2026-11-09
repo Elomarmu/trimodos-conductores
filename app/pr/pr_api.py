@@ -90,7 +90,7 @@ def enviar_n8n(datos: dict) -> bool:
         log.info("PR sin webhook de n8n configurado: %s", datos.get("evento"))
         return False
     try:
-        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=15,
+        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=25,
                        headers={"X-Clave": os.environ.get("PR_AVISOS_CLAVE", "")})
         return r.status_code < 300
     except httpx.HTTPError:
@@ -117,11 +117,13 @@ class Archivos(BaseModel):
 
 class ViajeIn(BaseModel):
     viaje: dict
+    foto: Archivo | None = None      # la foto del albarán (se guarda en Odoo y luego en SharePoint)
 
 
 class Actualizar(BaseModel):
     bulto_id: int
     cambios: dict
+    foto: Archivo | None = None      # foto nueva del albarán (la oficina al modificar la carga)
 
 
 def _bytes(a: Archivo) -> tuple[bytes, str]:
@@ -184,7 +186,14 @@ def registrar(body: ViajeIn):
         return {"simulado": True, "pedido": pedido and pedido["name"], "pedido_nuevo": pedido is None,
                 "duplicado": bool(O.ya_registrado(odoo, v.get("albaran"))),
                 "vehiculos": O.comprobar_vehiculos(odoo, v["tractora"], v["remolque"])}
-    res = _pr(O.registrar, odoo_pr(), v)
+    odoo = odoo_pr()
+    res = _pr(O.registrar, odoo, v)
+    if body.foto and not res["duplicado"]:
+        try:
+            datos, tipo = _bytes(body.foto)
+            O.guardar_foto(odoo, res["tarea_id"], v.get("albaran"), base64.b64encode(datos).decode(), tipo)
+        except Exception:  # la foto nunca debe impedir el viaje
+            log.warning("no se pudo guardar la foto del albarán en la tarea %s", res["tarea_id"])
     if res.get("pedido_nuevo"):
         avisar("pedido_nuevo", {"pedido": res["pedido"], "referencia": R.referencia_pedido(v["fecha"])})
     from ..main import get_odoo  # imprimir la orden con el cliente general (sesión web)
@@ -221,13 +230,68 @@ def actualizar(body: Actualizar):
         raise AppError("No encuentro ese viaje.", 404, "no_encontrado")
     if s.dry_run:
         return {"simulado": True, "bulto": ps[0]["name"]}
-    hechos = _pr(O.actualizar, odoo, ps[0], body.cambios)
+    hechos = _pr(O.actualizar, odoo, ps[0], body.cambios) if body.cambios else []
+    tarea = (ps[0].get("task_ids") or [None])[0]
+    if body.foto and tarea:
+        datos, tipo = _bytes(body.foto)
+        O.guardar_foto(odoo, tarea, R.leer_observaciones(ps[0].get("unload_note")).get("albaran"), base64.b64encode(datos).decode(), tipo)
+        hechos.append("foto del albarán")
+    if not hechos:
+        raise AppError("No has cambiado nada.", 400, "sin_cambios")
+    viaje = next((v for v in O.viajes(odoo) if v["bulto_id"] == body.bulto_id), None)
+    if viaje and viaje.get("caja_movil") and viaje.get("tren"):   # ya va en un tren: su foto en SharePoint se pone al día
+        sincronizar_foto(odoo, viaje, foto_nueva=bool(body.foto))
     res = {"bulto": ps[0]["name"], "cambiado": hechos}
-    if ps[0].get("task_ids") and set(hechos) & {"código Paper", "peso", "balas", "contenedor"}:
+    if tarea and set(hechos) & {"código Paper", "peso", "balas", "contenedor"}:
         from ..main import get_odoo
-        adj = get_odoo().print_order(ps[0]["task_ids"][0], R.EMPRESA_ID)
+        adj = get_odoo().print_order(tarea, R.EMPRESA_ID)
         res["pdf"] = {"id": adj["id"], "token": adj.get("access_token"), "nombre": adj.get("name")}
     return res
+
+
+# ---- foto del albarán en SharePoint › Automatizacion › CARTON PAJA TREN <n> (lo hace n8n) --------------------------
+
+def sincronizar_foto(odoo, viaje: dict, foto_nueva: bool = False, lista: list[dict] | None = None) -> None:
+    """Deja la foto del viaje en la carpeta de su tren con el nombre «código Paper - caja móvil»: la sube si no estaba,
+    la renombra si ha cambiado el código, o la sustituye si la oficina ha hecho una foto nueva. Nunca para el trabajo."""
+    try:
+        carpeta = R.carpeta_tren(viaje["tren"])
+        lista = lista if lista is not None else O.viajes(odoo)
+        actual = viaje.get("foto") or ""                      # «carpeta/nombre» si ya está en SharePoint
+        ocupados = {v["foto"].split("/", 1)[-1] for v in lista
+                    if v.get("foto", "").startswith(carpeta + "/") and v["bulto_id"] != viaje["bulto_id"]}
+        foto = leer_foto_o_nada(odoo, viaje)
+        ext = R.extension(foto["tipo"]) if foto else (("." + actual.rsplit(".", 1)[-1]) if "." in actual else ".jpg")
+        nombre = R.nombre_foto(viaje.get("codigo_paper"), viaje.get("albaran"), viaje["caja_movil"], ext, ocupados)
+        destino = f"{carpeta}/{nombre}"
+        if actual and actual.startswith(carpeta + "/") and not foto_nueva:
+            if actual != destino:
+                enviar_n8n({"evento": "foto_renombrar", "correo": False, "carpeta": carpeta,
+                            "viejo": actual.split("/", 1)[1], "nuevo": nombre})
+                O.apuntar_foto(odoo, viaje["bulto_id"], destino)
+            return
+        if not foto:
+            return                                              # viaje sin foto guardada (anterior a este cambio)
+        if actual and actual != destino:
+            borrar_foto(actual)
+        enviar_n8n({"evento": "foto_subir", "correo": False, "carpeta": carpeta, "nombre": nombre, "tipo": foto["tipo"],
+                    "b64": foto["b64"]})
+        O.apuntar_foto(odoo, viaje["bulto_id"], destino)
+    except Exception:
+        log.exception("no se pudo poner al día la foto del bulto %s en SharePoint", viaje.get("bulto"))
+
+
+def leer_foto_o_nada(odoo, viaje: dict) -> dict | None:
+    try:
+        return O.leer_foto(odoo, viaje.get("tarea_id"))
+    except Exception:
+        return None
+
+
+def borrar_foto(ruta: str) -> None:
+    if ruta and "/" in ruta:
+        carpeta, nombre = ruta.split("/", 1)
+        enviar_n8n({"evento": "foto_borrar", "correo": False, "carpeta": carpeta, "nombre": nombre})
 
 
 @router.get("/viajes")
@@ -301,7 +365,12 @@ def tren_asignar(body: Asignar):
         return {"simulado": True}
     bulto = _pr(O.asignar, odoo, t, lista, body.bulto_id, body.caja_movil)
     log.info("tren %s: %s → caja %s", t["tren"], bulto, body.caja_movil)
-    return O.estado_tren(odoo, t, O.viajes(odoo))
+    lista = O.viajes(odoo)
+    viaje = next((v for v in lista if v["bulto_id"] == body.bulto_id), None)
+    if viaje:
+        sincronizar_foto(odoo, viaje, lista=lista)
+        lista = O.viajes(odoo)
+    return O.estado_tren(odoo, t, lista)
 
 
 @router.post("/tren/quitar")
@@ -310,7 +379,10 @@ def tren_quitar(body: Asignar):
     t = _tren(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
+    previo = next((v for v in O.viajes(odoo) if v["bulto_id"] == body.bulto_id), None)
     _pr(O.quitar, odoo, body.bulto_id)
+    if previo and previo.get("foto"):
+        borrar_foto(previo["foto"])
     return O.estado_tren(odoo, t, O.viajes(odoo))
 
 
@@ -333,8 +405,19 @@ def tren_enviar():
                              v.get("peso_kg")] for c in t["cajas"] if (v := por_caja.get(c["caja_movil"]))])
               + f"<p style='font:11pt Calibri,Arial'><b>Quedan en stock para el siguiente tren: {len(stock)}</b></p>"
               + tabla_html(["Fecha", "Código Paper", "Albarán", "Lugar"], [[v["fecha"], v["codigo_paper"], v["albaran"], v["lugar"]] for v in stock]))
+    fotos = []
+    for c in t["cajas"]:
+        v = por_caja.get(c["caja_movil"])
+        f = leer_foto_o_nada(odoo, v) if v else None
+        if f:
+            nombre = (v.get("foto") or "").split("/", 1)[-1] or R.nombre_foto(v.get("codigo_paper"), v.get("albaran"),
+                                                                              c["caja_movil"], R.extension(f["tipo"]), set())
+            fotos.append({"nombre": nombre, "b64": f["b64"], "tipo": f["tipo"]})
+    cuerpo += (f"<p style='font:11pt Calibri,Arial'>Van adjuntas las {len(fotos)} fotos de los albaranes "
+               f"(también en SharePoint › Automatizacion › {R.carpeta_tren(t['tren'])}).</p>")
     enviado = False if s.dry_run else enviar_n8n({"evento": "tren", "asunto": f"PR SAICA · Tren {t['tren']} del {fecha_es} ({len(por_caja)} cargas)",
-                                                  "html": cuerpo, "archivos": archivos})
+                                                  "html": cuerpo, "archivos": archivos, "fotos": fotos,
+                                                  "carpeta": R.carpeta_tren(t["tren"])})
     log.info("tren %s enviado: %s cargas, %s en stock", t["tren"], len(por_caja), len(stock))
     return {"simulado": s.dry_run, "tren": t["tren"], "cargas": len(por_caja), "en_stock": len(stock), "enviado": enviado, "archivos": archivos}
 

@@ -3,7 +3,7 @@
 // Usa las utilidades de app.js ($, h, post, api, busy, showError, go, state, loadPdf, abrirPdf…).
 
 const pr = { viaje: null, vehiculos: null, puntos: [], oficina: false };   // oficina: entra desde «Oficina · PR»
-const MAX_LADO = 2000;   // la foto se reduce en el móvil: se lee igual de bien y sube en un momento
+const MAX_LADO = 1600;   // la foto se reduce en el móvil: se lee bien, sube en un momento y caben todas en el correo del tren
 
 $("btn-pr").addEventListener("click", () => { pr.oficina = false; go("pr-foto"); });
 $("of-registrar").addEventListener("click", () => { pr.oficina = true; go("pr-foto"); });
@@ -40,7 +40,7 @@ async function reducir(file) {
     const c = document.createElement("canvas");
     c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
     c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.8));
     return { archivo_b64: await leerArchivo(blob), tipo: "image/jpeg" };
   } catch {   // formato que el navegador no sabe redibujar: se manda tal cual
     if (file.size > 4_000_000) throw new Error("La foto es demasiado grande. Hazla de nuevo con la cámara de la app.");
@@ -54,8 +54,9 @@ async function alElegir(ev) {
   clearError();
   busy("Leyendo el albarán…");
   try {
-    const r = await post("/api/pr/leer-albaran", await reducir(file));
-    pr.viaje = r.viaje; pr.vehiculos = r.vehiculos || null; pr.puntos = r.puntos || [];
+    const foto = await reducir(file);
+    const r = await post("/api/pr/leer-albaran", foto);
+    pr.viaje = r.viaje; pr.vehiculos = r.vehiculos || null; pr.puntos = r.puntos || []; pr.foto = foto;
     pintarRevision();
     go("pr-revisar");
   } catch (e) { showError(e.message); } finally { busy(null); }
@@ -168,7 +169,7 @@ async function guardar(datos) {
   $("confirm").hidden = true;
   busy("Guardando el viaje y generando la orden…");
   try {
-    const r = await post("/api/pr/registrar", { viaje: datos });
+    const r = await post("/api/pr/registrar", { viaje: datos, foto: pr.foto || null });
     pintarHecho(r);
     go("pr-hecho");
   } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
@@ -212,6 +213,7 @@ $("pr-buscar-form").addEventListener("submit", async (ev) => {
   const q = val("pr-buscar");
   if (!q) return;
   busy("Buscando…");
+  pr.fotoMod = null;   // buscada a mano: sin foto nueva
   try { mostrarCarga(await api("/api/pr/buscar?q=" + encodeURIComponent(q))); }
   catch (e) { $("pr-completar").hidden = true; showError(e.message); } finally { busy(null); }
 });
@@ -226,8 +228,10 @@ async function modificarConFoto(ev) {
   $("pr-m-avisos").replaceChildren();
   busy("Leyendo el albarán…");
   try {
-    const leido = await post("/api/pr/leer-albaran", await reducir(file));
+    const foto = await reducir(file);
+    const leido = await post("/api/pr/leer-albaran", foto);
     const v = leido.viaje;
+    pr.fotoMod = foto;
     let r = null;
     for (const q of [v.albaran, v.codigo_paper].filter(Boolean)) {
       try { r = await api("/api/pr/buscar?q=" + encodeURIComponent(q)); break; } catch (e) { if (e.code !== "no_encontrado") throw e; }
@@ -237,7 +241,7 @@ async function modificarConFoto(ev) {
       $("pr-m-avisos").replaceChildren(h("div", { class: "banner warn" },
         `El albarán ${v.albaran || "(sin número)"} no está registrado todavía.`,
         h("div", { class: "sugg" }, h("button", { type: "button", class: "btn", onclick: () => {
-          pr.viaje = v; pr.vehiculos = leido.vehiculos || null; pr.puntos = leido.puntos || []; pr.oficina = true;
+          pr.viaje = v; pr.vehiculos = leido.vehiculos || null; pr.puntos = leido.puntos || []; pr.oficina = true; pr.foto = foto;
           pintarRevision(); go("pr-revisar");
         } }, "Registrarlo ahora"))));
       return;
@@ -254,8 +258,8 @@ async function modificarConFoto(ev) {
       cambios.push(`${$(id).labels[0].textContent}: ${actual ? (id === "pr-c-peso" ? fmtNum(actual) : actual) : "vacío"} → ${$(id).value}`);
     }
     $("pr-m-avisos").replaceChildren(
-      h("div", { class: "banner info" }, cambios.length ? "Leído en el albarán (revisa y pulsa Guardar): " + cambios.join(" · ") :
-        "Lo leído en el albarán coincide con lo que hay en Odoo."),
+      h("div", { class: "banner info" }, (cambios.length ? "Leído en el albarán (revisa y pulsa Guardar): " + cambios.join(" · ") :
+        "Lo leído en el albarán coincide con lo que hay en Odoo.") + " Al guardar se guarda también esta foto del albarán."),
       ...(v.avisos || []).map((a) => h("div", { class: "banner warn" }, a)));
   } catch (e) { showError(e.message); } finally { busy(null); }
 }
@@ -286,10 +290,11 @@ $("pr-completar").addEventListener("submit", async (ev) => {
   const peso = val("pr-c-peso") ? parseNum(val("pr-c-peso")) : null;
   if (peso !== null && peso !== b.shipping_weight) cambios.peso_kg = peso;
   if (val("pr-c-contenedor")) cambios.contenedor = limpiaPlaca(val("pr-c-contenedor"));
-  if (!Object.keys(cambios).length) return showError("No has cambiado nada.");
+  if (!Object.keys(cambios).length && !pr.fotoMod) return showError("No has cambiado nada.");
   busy("Guardando…");
   try {
-    const r = await post("/api/pr/actualizar", { bulto_id: b.id, cambios });
+    const r = await post("/api/pr/actualizar", { bulto_id: b.id, cambios, foto: pr.fotoMod || null });
+    pr.fotoMod = null;
     $("pr-completar-ok").textContent = r.simulado ? "Modo de prueba: no se ha guardado nada." :
       `Guardado en ${r.bulto}: ${r.cambiado.join(", ")}.` + (r.pdf ? " La orden de transporte se ha regenerado." : "");
     $("pr-completar-ok").hidden = false;

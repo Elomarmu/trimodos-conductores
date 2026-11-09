@@ -1,5 +1,5 @@
 {
- "name": "PR SAICA · avisos, Excel en SharePoint y resumen diario (pruebas)",
+ "name": "PR SAICA · fotos, Excel en SharePoint, correos y resumen diario (pruebas)",
  "nodes": [
   {
    "parameters": {
@@ -7,7 +7,7 @@
     "path": "pr-saica",
     "options": {}
    },
-   "id": "90b60057-bbb8-4041-a4da-b007e16c9335",
+   "id": "add03af2-7db5-4149-bae3-52965ffbaceb",
    "name": "Desde la app",
    "type": "n8n-nodes-base.webhook",
    "typeVersion": 2,
@@ -15,7 +15,7 @@
     0,
     0
    ],
-   "webhookId": "668075aa-8403-4fbf-9885-2699b93a1449"
+   "webhookId": "86341f88-4381-44a2-b38a-8c68b9ba78cf"
   },
   {
    "parameters": {
@@ -28,7 +28,7 @@
      ]
     }
    },
-   "id": "67d1492e-5636-47a5-972b-4133192d12e7",
+   "id": "7efb2464-d81f-466d-b5de-1f4bbb9bf4ca",
    "name": "Cada mañana 7:10 (lunes a sábado)",
    "type": "n8n-nodes-base.scheduleTrigger",
    "typeVersion": 1.2,
@@ -39,7 +39,7 @@
   },
   {
    "parameters": {},
-   "id": "83a0c076-52ed-4373-96d7-742b7f257784",
+   "id": "07648f28-73b7-4dfe-96c4-a7569342cc67",
    "name": "Lanzar resumen a mano",
    "type": "n8n-nodes-base.manualTrigger",
    "typeVersion": 1,
@@ -50,30 +50,31 @@
   },
   {
    "parameters": {
-    "jsCode": "// Ajustes del flujo PR SAICA (app de conductores → SharePoint y correo)\nconst carpeta = 'https://grupotrimodos.sharepoint.com/:f:/s/GestionStinsa2/IgDhXF70TVa6RIjVPMcCoeveAb5bZPmGM4Ticd0VzvhCrRo?e=YFyck7';  // «Automatizacion»\nreturn [{ json: {\n  app: 'https://trimodos-conductores-pcsur-elo.vercel.app',   // dirección de la app (Vercel)\n  codigoAcceso: '<<PONER EN N8N: el mismo que APP_ACCESS_CODE en Vercel>>',\n  claveWebhook: '<<PONER EN N8N: la misma que PR_AVISOS_CLAVE en Vercel>>',\n  buzonEnvio: 'agente.trafico@transargi.com',            // buzón de la credencial «Outlook Agente Trafico»\n  paraPorDefecto: 'carmelomartinez@grupotrimodos.com',   // pruebas; luego sevilla@stinsa.com\n  // el enlace de la carpeta en el formato de Graph («u!» + base64url)\n  carpetaGraph: 'u!' + Buffer.from(carpeta).toString('base64').replace(/=+$/, '').replace(/\\//g, '_').replace(/\\+/g, '-'),\n}}];\n"
+    "jsCode": "// Ajustes del flujo PR SAICA (app de conductores → SharePoint y correo)\nconst carpeta = 'https://grupotrimodos.sharepoint.com/:f:/s/GestionStinsa2/IgDhXF70TVa6RIjVPMcCoeveAb5bZPmGM4Ticd0VzvhCrRo?e=YFyck7';  // «Automatizacion»\nreturn [{ json: {\n  app: 'https://trimodos-conductores-pcsur-elo.vercel.app',   // dirección de la app (Vercel)\n  codigoAcceso: '<<PONER EN N8N: el mismo que APP_ACCESS_CODE en Vercel>>',\n  claveWebhook: '<<PONER EN N8N: la misma que PR_AVISOS_CLAVE en Vercel>>',\n  buzonEnvio: 'agente.trafico@transargi.com',            // buzón de la credencial «Outlook Agente Trafico»\n  paraPorDefecto: 'carmelomartinez@grupotrimodos.com',   // pruebas; luego sevilla@stinsa.com\n  carpetaGraph: 'u!' + Buffer.from(carpeta).toString('base64').replace(/=+$/, '').replace(/\\//g, '_').replace(/\\+/g, '-'),\n}}];\n"
    },
-   "id": "cf3cc971-f1b1-4e19-87be-4cf65f0bb625",
+   "id": "d0aadc9f-84a9-448d-aae6-17b30caac9e1",
    "name": "Configuración",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    240,
+    220,
     200
    ]
   },
   {
    "parameters": {
+    "method": "GET",
     "url": "=https://graph.microsoft.com/v1.0/shares/{{ $json.carpetaGraph }}/driveItem?$select=id,name,parentReference",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftExcelOAuth2Api",
     "options": {}
    },
-   "id": "479e5788-37ac-4c5d-9863-6675b1ccc1d9",
+   "id": "0e2b724c-b2b1-4739-a45c-f518b7b25037",
    "name": "Buscar la carpeta",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    460,
+    440,
     200
    ],
    "credentials": {
@@ -84,32 +85,252 @@
    },
    "retryOnFail": true,
    "maxTries": 3,
-   "waitBetweenTries": 5000
+   "waitBetweenTries": 3000
   },
   {
    "parameters": {
-    "jsCode": "// Si viene de la app: se comprueba la clave y se usa lo que manda { evento, para, asunto, html, archivos }.\n// Si es el resumen de la mañana: se pide a la app (novedades, datos pendientes, stock y Excel de registro).\nconst cfg = $('Configuración').first().json;\nif ($('Desde la app').isExecuted) {\n  const w = $('Desde la app').first().json;\n  const clave = (w.headers || {})['x-clave'] || '';\n  if (!cfg.claveWebhook || clave !== cfg.claveWebhook) throw new Error('Aviso PR con clave incorrecta: revisa PR_AVISOS_CLAVE en Vercel y «claveWebhook» en Configuración');\n  return [{ json: w.body }];\n}\nlet r;\ntry {\n  r = await this.helpers.httpRequest({ method: 'GET', url: `${cfg.app}/api/pr/resumen`, json: true,\n    headers: { 'X-Codigo-Acceso': cfg.codigoAcceso }, timeout: 60000 });\n} catch (e) { throw new Error(`No se ha podido pedir el resumen a la app (${cfg.app}): ${e.message}`); }\nreturn [{ json: r }];\n"
+    "jsCode": "// Si viene de la app: se comprueba la clave y se usa lo que manda. Si es el resumen de la mañana: se pide a la app.\nconst cfg = $('Configuración').first().json;\nconst c = $('Buscar la carpeta').first().json;   // carpeta «Automatizacion»: unidad (drive) e id\nconst base = `https://graph.microsoft.com/v1.0/drives/${c.parentReference.driveId}/items/${c.id}`;\nconst ruta = (...partes) => partes.map(encodeURIComponent).join('/');\nlet d;\nif ($('Desde la app').isExecuted) {\n  const w = $('Desde la app').first().json;\n  const clave = (w.headers || {})['x-clave'] || '';\n  if (!cfg.claveWebhook || clave !== cfg.claveWebhook) throw new Error('Aviso PR con clave incorrecta: revisa PR_AVISOS_CLAVE en Vercel y «claveWebhook» en Configuración');\n  d = w.body;\n} else {\n  try {\n    d = await this.helpers.httpRequest({ method: 'GET', url: `${cfg.app}/api/pr/resumen`, json: true,\n      headers: { 'X-Codigo-Acceso': cfg.codigoAcceso }, timeout: 60000 });\n  } catch (e) { throw new Error(`No se ha podido pedir el resumen a la app (${cfg.app}): ${e.message}`); }\n}\n// direcciones de Graph para las fotos (carpeta del tren dentro de Automatizacion)\nif (d.carpeta) {\n  d.urlCrearCarpeta = `${base}/children`;\n  if (d.nombre) d.urlFoto = `${base}:/${ruta(d.carpeta, d.nombre)}:`;\n  if (d.viejo) d.urlFoto = `${base}:/${ruta(d.carpeta, d.viejo)}:`;\n}\nd.base = base;\nreturn [{ json: d }];\n"
    },
-   "id": "73758ef8-1864-4ad7-ac7d-23c07b8afb87",
+   "id": "797887e3-60d9-467f-8ad1-bfa3c011cd91",
    "name": "Datos (app o resumen)",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    680,
+    660,
     200
    ]
   },
   {
    "parameters": {
-    "jsCode": "// Un elemento por Excel que subir a SharePoint (con su dirección) y uno para el correo con las Excel adjuntas\n// (la composición del tren viene con correo: false: solo se sube a SharePoint).\nconst cfg = $('Configuración').first().json;\nconst carpeta = $('Buscar la carpeta').first().json;\nconst d = $input.first().json;\nconst archivos = d.archivos || [];\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = archivos.map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre,\n    url: `https://graph.microsoft.com/v1.0/drives/${carpeta.parentReference.driveId}/items/${carpeta.id}:/${encodeURIComponent(a.nombre)}:/content` },\n  binary: { archivo: { data: a.b64, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName: a.nombre } } }));\nif (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio, graph: { message: { subject: d.asunto || 'PR SAICA',\n  body: { contentType: 'HTML', content: d.html || '' }, toRecipients: para.map(a => ({ emailAddress: { address: a } })),\n  attachments: archivos.map(a => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.nombre, contentBytes: a.b64 })) },\n  saveToSentItems: true } } });\nreturn salida;\n"
+    "rules": {
+     "values": [
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict",
+         "version": 2
+        },
+        "conditions": [
+         {
+          "id": "0b7dbc89-dade-48e7-acb7-25fed1b56f23",
+          "leftValue": "={{ $json.evento }}",
+          "rightValue": "foto_subir",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "foto_subir"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict",
+         "version": 2
+        },
+        "conditions": [
+         {
+          "id": "796d929a-6799-474a-afba-e26173c14bfa",
+          "leftValue": "={{ $json.evento }}",
+          "rightValue": "foto_renombrar",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "foto_renombrar"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict",
+         "version": 2
+        },
+        "conditions": [
+         {
+          "id": "59851946-3c99-4074-9940-0ffa309b2c58",
+          "leftValue": "={{ $json.evento }}",
+          "rightValue": "foto_borrar",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "foto_borrar"
+      }
+     ]
+    },
+    "options": {
+     "fallbackOutput": "extra",
+     "renameFallbackOutput": "Excel y correo"
+    }
    },
-   "id": "c4cb2a2a-639a-4423-bbf4-b156a583e4ca",
+   "id": "7389d5ec-798f-4c96-b3bb-18f1effa7da9",
+   "name": "¿Qué hay que hacer?",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    880,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $json.urlCrearCarpeta }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "options": {},
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ name: $json.carpeta, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }}"
+   },
+   "id": "1b6b461b-b70d-4400-bbaa-3a6bb79892da",
+   "name": "Crear carpeta del tren",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1120,
+    -240
+   ],
+   "credentials": {
+    "microsoftExcelOAuth2Api": {
+     "id": "",
+     "name": "Microsoft Excel (SharePoint RRHH)"
+    }
+   },
+   "retryOnFail": false,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// La foto viaja en base64: se convierte en archivo para subirla.\nconst d = $('Datos (app o resumen)').first().json;\nreturn [{ json: { url: `${d.urlFoto}/content?@microsoft.graph.conflictBehavior=replace` },\n  binary: { foto: { data: d.b64, mimeType: d.tipo || 'image/jpeg', fileName: d.nombre } } }];\n"
+   },
+   "id": "8d81a985-46cf-47d4-bf0b-fd5ae5583b21",
+   "name": "Foto como archivo",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1340,
+    -240
+   ]
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $json.url }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "options": {},
+    "sendBody": true,
+    "contentType": "binaryData",
+    "inputDataFieldName": "foto"
+   },
+   "id": "3aa9b52e-016d-4bac-97a7-271e549dcc00",
+   "name": "Subir foto",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1560,
+    -240
+   ],
+   "credentials": {
+    "microsoftExcelOAuth2Api": {
+     "id": "",
+     "name": "Microsoft Excel (SharePoint RRHH)"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000
+  },
+  {
+   "parameters": {
+    "method": "PATCH",
+    "url": "={{ $json.urlFoto }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "options": {},
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ name: $json.nuevo }) }}"
+   },
+   "id": "e665b5aa-1cea-4f51-86a0-0051f02bbfc8",
+   "name": "Renombrar foto",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1120,
+    -80
+   ],
+   "credentials": {
+    "microsoftExcelOAuth2Api": {
+     "id": "",
+     "name": "Microsoft Excel (SharePoint RRHH)"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000
+  },
+  {
+   "parameters": {
+    "method": "DELETE",
+    "url": "={{ $json.urlFoto }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "options": {}
+   },
+   "id": "bd6bdb17-9349-4604-b698-ba7471db5be3",
+   "name": "Borrar foto",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1120,
+    60
+   ],
+   "credentials": {
+    "microsoftExcelOAuth2Api": {
+     "id": "",
+     "name": "Microsoft Excel (SharePoint RRHH)"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// Un elemento por Excel que subir a SharePoint y uno para el correo (si lo lleva).\nconst cfg = $('Configuración').first().json;\nconst d = $input.first().json;\nconst archivos = d.archivos || [];\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = archivos.map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre, url: `${d.base}:/${encodeURIComponent(a.nombre)}:/content` },\n  binary: { archivo: { data: a.b64, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName: a.nombre } } }));\nif (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio,\n  mensaje: { subject: d.asunto || 'PR SAICA', body: { contentType: 'HTML', content: d.html || '' },\n             toRecipients: para.map(a => ({ emailAddress: { address: a } })) } } });\nreturn salida;\n"
+   },
+   "id": "c5720d8d-72d1-417f-b027-fa34ad60764f",
    "name": "Preparar SharePoint y correo",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    900,
-    200
+    1120,
+    300
    ]
   },
   {
@@ -123,7 +344,7 @@
      },
      "conditions": [
       {
-       "id": "0091b995-7843-4904-a829-201870f89e05",
+       "id": "801b8466-f3c3-423e-9c7c-c802fd249a69",
        "leftValue": "={{ $json.tipo }}",
        "rightValue": "sharepoint",
        "operator": {
@@ -136,13 +357,13 @@
     },
     "options": {}
    },
-   "id": "46a8e5b1-6423-4c61-8565-6346e60e7d8f",
+   "id": "641935f8-3524-4cd8-96a5-5745d8845eea",
    "name": "¿SharePoint o correo?",
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
    "position": [
-    1120,
-    200
+    1340,
+    300
    ]
   },
   {
@@ -151,18 +372,18 @@
     "url": "={{ $json.url }}",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftExcelOAuth2Api",
+    "options": {},
     "sendBody": true,
     "contentType": "binaryData",
-    "inputDataFieldName": "archivo",
-    "options": {}
+    "inputDataFieldName": "archivo"
    },
-   "id": "3d4134d5-8b85-461c-a0b7-9a446f2d7c44",
+   "id": "1487d3c6-e90d-4a1d-9e23-2717e6b51ae3",
    "name": "Subir Excel a SharePoint",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    1360,
-    80
+    1560,
+    220
    ],
    "credentials": {
     "microsoftExcelOAuth2Api": {
@@ -172,27 +393,27 @@
    },
    "retryOnFail": true,
    "maxTries": 3,
-   "waitBetweenTries": 5000,
+   "waitBetweenTries": 3000,
    "onError": "continueRegularOutput"
   },
   {
    "parameters": {
     "method": "POST",
-    "url": "=https://graph.microsoft.com/v1.0/users/{{ $json.buzon }}/sendMail",
+    "url": "=https://graph.microsoft.com/v1.0/users/{{ $json.buzon }}/messages",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftOutlookOAuth2Api",
+    "options": {},
     "sendBody": true,
     "specifyBody": "json",
-    "jsonBody": "={{ JSON.stringify($json.graph) }}",
-    "options": {}
+    "jsonBody": "={{ JSON.stringify($json.mensaje) }}"
    },
-   "id": "f11de049-cffa-4307-af89-b42a5e703ef0",
-   "name": "Enviar correo",
+   "id": "d77a21ab-81f5-4cab-a4bf-2f3d6b14ea14",
+   "name": "Crear borrador",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    1360,
-    320
+    1560,
+    420
    ],
    "credentials": {
     "microsoftOutlookOAuth2Api": {
@@ -206,17 +427,120 @@
   },
   {
    "parameters": {
-    "content": "## PR SAICA · app de conductores → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave): avisos de pedido nuevo o punto de carga nuevo, la composición del tren (libro CARTON PAJA TREN con las cajas vacías; solo SharePoint, sin correo) y el tren terminado con las dos Excel.\n**Cada mañana 7:10** (lunes a sábado): pide a la app el resumen (viajes de ayer, datos pendientes, stock) con la Excel de registro.\n\nSiempre: sube las Excel a SharePoint › GestionStinsa2 › Automatizacion (las sobrescribe) y manda el correo con las Excel adjuntas desde agente.trafico@.\n\nEn «Configuración»: código de acceso de la app y clave del webhook. Los destinatarios los decide la app (PR_CORREO_PARA en Vercel).",
-    "height": 300,
-    "width": 600
+    "jsCode": "// Las Excel y las fotos se añaden de una en una al borrador (así no hay límite de tamaño del correo).\nconst d = $('Datos (app o resumen)').first().json;\nconst borrador = $('Crear borrador').first().json;\nconst buzon = $('Configuración').first().json.buzonEnvio;\nconst url = `https://graph.microsoft.com/v1.0/users/${buzon}/messages/${borrador.id}/attachments`;\nconst todos = [...(d.archivos || []).map(a => ({ name: a.nombre, contentBytes: a.b64 })),\n               ...(d.fotos || []).map(f => ({ name: f.nombre, contentBytes: f.b64, contentType: f.tipo }))];\nif (!todos.length) return [{ json: { sinAdjuntos: true } }];\nreturn todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.type': '#microsoft.graph.fileAttachment', ...a } } }));\n"
    },
-   "id": "e08f32d4-f6b8-48a1-b7b0-ec51f9dd6fbc",
+   "id": "729ea3dc-da0e-4d1b-9dd4-7b3cc313c80c",
+   "name": "Adjuntos",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1780,
+    420
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "5dfa22a1-7d7f-44f9-82f5-5b76fe89df30",
+       "leftValue": "={{ $json.sinAdjuntos }}",
+       "rightValue": true,
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "406be4a7-5285-4be0-9a69-c1a656ca90a4",
+   "name": "¿Sin adjuntos?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2000,
+    420
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $json.url }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftOutlookOAuth2Api",
+    "options": {},
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.adjunto) }}"
+   },
+   "id": "3cc5566d-ed02-4c9c-b692-cd325bcbc898",
+   "name": "Añadir adjunto",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2220,
+    500
+   ],
+   "credentials": {
+    "microsoftOutlookOAuth2Api": {
+     "id": "RKtfxCpWlTpVxiJw",
+     "name": "Outlook Agente Trafico"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "=https://graph.microsoft.com/v1.0/users/{{ $('Configuración').first().json.buzonEnvio }}/messages/{{ $('Crear borrador').first().json.id }}/send",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "microsoftOutlookOAuth2Api",
+    "options": {}
+   },
+   "id": "a49686e7-fc7b-417f-8437-e29fd1e00e42",
+   "name": "Enviar correo",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2440,
+    420
+   ],
+   "credentials": {
+    "microsoftOutlookOAuth2Api": {
+     "id": "RKtfxCpWlTpVxiJw",
+     "name": "Outlook Agente Trafico"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "executeOnce": true
+  },
+  {
+   "parameters": {
+    "content": "## PR SAICA · app de conductores → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave):\n- foto_subir / foto_renombrar / foto_borrar: foto del albarán en Automatizacion › CARTON PAJA TREN <n> (nombre «código Paper - caja móvil»; la carpeta se crea si no existe).\n- composición del tren: libro CARTON PAJA TREN <n>.xlsx (solo SharePoint).\n- tren terminado: libro + REGISTRO VIAJES PR.xlsx a SharePoint y correo con las Excel y todas las fotos.\n- avisos: pedido nuevo del mes, punto de carga nuevo.\n**Cada mañana 7:10** (lunes a sábado): resumen con la Excel de registro.\n\nLos correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.\nEn «Configuración»: código de acceso de la app y clave del webhook. Destinatarios: los decide la app (PR_CORREO_PARA).",
+    "height": 380,
+    "width": 640
+   },
+   "id": "679c9ab9-61c7-4603-8a8b-e1dda4725197",
    "name": "Instrucciones",
    "type": "n8n-nodes-base.stickyNote",
    "typeVersion": 1,
    "position": [
     0,
-    -380
+    -500
    ]
   }
  ],
@@ -280,7 +604,61 @@
    "main": [
     [
      {
+      "node": "¿Qué hay que hacer?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "¿Qué hay que hacer?": {
+   "main": [
+    [
+     {
+      "node": "Crear carpeta del tren",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Renombrar foto",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Borrar foto",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
       "node": "Preparar SharePoint y correo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Crear carpeta del tren": {
+   "main": [
+    [
+     {
+      "node": "Foto como archivo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Foto como archivo": {
+   "main": [
+    [
+     {
+      "node": "Subir foto",
       "type": "main",
       "index": 0
      }
@@ -307,6 +685,57 @@
       "index": 0
      }
     ],
+    [
+     {
+      "node": "Crear borrador",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Crear borrador": {
+   "main": [
+    [
+     {
+      "node": "Adjuntos",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Adjuntos": {
+   "main": [
+    [
+     {
+      "node": "¿Sin adjuntos?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "¿Sin adjuntos?": {
+   "main": [
+    [
+     {
+      "node": "Enviar correo",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Añadir adjunto",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Añadir adjunto": {
+   "main": [
     [
      {
       "node": "Enviar correo",

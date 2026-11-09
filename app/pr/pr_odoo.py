@@ -316,7 +316,7 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
                     "linea": l["name"], "toneladas": l.get("product_uom_qty"), "peso_kg": p.get("shipping_weight") or None,
                     "bultos": p.get("number_of_packages") or None, "codigo_paper": p.get("carrier_tracking_ref") or "",
                     "contenedor": (l.get("equipment_id") or [None, ""])[1],
-                    **{k: o.get(k, "") for k in ("albaran", "codigo_natur", "ler", "calidad", "tren", "convoy", "fecha_tren",
+                    **{k: o.get(k, "") for k in ("albaran", "codigo_natur", "ler", "calidad", "tren", "convoy", "fecha_tren", "foto",
                                                  "vagon", "caja_movil", "comprobaciones")},
                     "tipo": R.tipo_calidad(o.get("calidad")),
                     "estado": f"Tren {o['tren']}" if o.get("caja_movil") and o.get("tren") else "En stock"})
@@ -329,9 +329,43 @@ def siguiente_tren(lista: list[dict]) -> int:
     return max(nums + [int(os.environ.get("PR_ULTIMO_TREN", "85"))]) + 1
 
 
+# ---- foto del albarán: se guarda en Odoo, adjunta a la orden de transporte -----------------------------------------
+
+PREFIJO_FOTO = "Foto albarán"
+
+
+def guardar_foto(odoo, tarea_id: int, albaran: str, b64: str, tipo: str) -> None:
+    """La foto (o el PDF) del albarán queda adjunta a la tarea. Si ya había una, se sustituye por la nueva."""
+    previa = odoo("ir.attachment", "search_read", [[["res_model", "=", "project.task"], ["res_id", "=", tarea_id],
+                                                    ["name", "=like", PREFIJO_FOTO + "%"]]], fields=["id"], order="id desc", limit=1)
+    vals = {"name": f"{PREFIJO_FOTO} {albaran or ''}".strip() + R.extension(tipo), "datas": b64, "mimetype": tipo}
+    if previa:
+        odoo("ir.attachment", "write", [[previa[0]["id"]], vals])
+    else:
+        odoo("ir.attachment", "create", [dict(vals, res_model="project.task", res_id=tarea_id, type="binary")])
+
+
+def leer_foto(odoo, tarea_id: int | None) -> dict | None:
+    """{"b64", "tipo"} de la foto del albarán de esa tarea, o None si no tiene."""
+    if not tarea_id:
+        return None
+    a = odoo("ir.attachment", "search_read", [[["res_model", "=", "project.task"], ["res_id", "=", tarea_id],
+                                               ["name", "=like", PREFIJO_FOTO + "%"]]], fields=["datas", "mimetype"],
+             order="id desc", limit=1)
+    return {"b64": a[0]["datas"], "tipo": a[0].get("mimetype") or "image/jpeg"} if a and a[0].get("datas") else None
+
+
+def apuntar_foto(odoo, bulto_id: int, ruta: str | None) -> None:
+    """Guarda (o borra) en las observaciones del bulto dónde está su foto en SharePoint («carpeta/nombre»)."""
+    p = odoo("tms.package", "search_read", [[["id", "=", bulto_id]]], fields=["unload_note"])
+    if p:
+        nuevo = R.observaciones({"foto": ruta}, p[0].get("unload_note")) if ruta else R.observaciones({}, p[0].get("unload_note"), quitar=("foto",))
+        odoo("tms.package", "write", [[bulto_id], {"unload_note": nuevo}])
+
+
 # ---- tren: composición (la carga la oficina) y asignación de cargas a cajas (oficina o almacén) -------------------
 
-CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones")
+CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones", "foto")
 TODO_OK = R.texto_comprobaciones({k: True for k, _ in R.COMPROBACIONES})   # de momento no se revisan: siempre OK
 
 
