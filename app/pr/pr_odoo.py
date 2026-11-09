@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import re
 
 from . import pr_reglas as R
@@ -32,6 +33,15 @@ PERMITIDO = {
     ("fleet.vehicle", "search_read"), ("ir.sequence", "next_by_code"),
 }
 GOODS_PAPEL_RECUPERADO = 233   # tms.goods «PAPEL RECUPERADO»
+COSTE_VIAJE_DEFECTO = 85.0     # € por viaje al colaborador (decisión 09/11/2026); el recargo por gasóleo se añade a mano
+
+
+def coste_viaje() -> float:
+    """Coste de compra por viaje (pasa solo a la línea de compra del colaborador). Variable PR_COSTE_VIAJE."""
+    try:
+        return float((os.environ.get("PR_COSTE_VIAJE") or str(COSTE_VIAJE_DEFECTO)).replace(",", "."))
+    except ValueError:
+        return COSTE_VIAJE_DEFECTO
 
 
 class ErrorPR(Exception):
@@ -185,6 +195,7 @@ def registrar(odoo, v: dict) -> dict:
     linea = {"product_id": punto.producto_id, "name": punto.linea, "price_unit": punto.precio_t,
              "product_uom_qty": R.toneladas(punto, v.get("peso_kg")) or 0, "pickup_date": cuando,
              "shipping_origin_id": punto.origen_id, "shipping_destination_id": R.DESTINO_ID,
+             "purchase_price": coste_viaje(),  # Odoo lo pasa a la línea de compra del colaborador
              "tractor_id": tr["id"], "trailer_id": re_["id"] if re_ else False, "driver_id": vendedor, "vendor_id": vendedor,
              "tms_package_ids": [(6, 0, [bulto_id])]}
     eq = equipo(odoo, v.get("contenedor"))

@@ -110,7 +110,7 @@ def test_primer_viaje_del_mes_crea_confirma_y_desbloquea():
     linea = next(iter(odoo.lineas.values()))["vals"]
     assert (linea["product_id"], linea["product_uom_qty"], linea["price_unit"], linea["shipping_origin_id"]) == (719, 24.8, 8.82, 7274)
     assert (linea["tractor_id"], linea["trailer_id"], linea["vendor_id"], linea["driver_id"]) == (4155, 3356, 9928, 9928)
-    assert linea["pickup_date"] == "2026-11-09 12:35:00"
+    assert linea["pickup_date"] == "2026-11-09 12:35:00" and linea["purchase_price"] == 85.0
     bulto = odoo.bultos[r["bulto_id"]]
     assert (bulto["carrier_tracking_ref"], bulto["shipping_weight"], bulto["number_of_packages"]) == ("S261104001499", 24800, 21)
     assert R.leer_observaciones(bulto["unload_note"])["albaran"] == "592611000006"
@@ -157,3 +157,10 @@ def test_actualizar_codigo_paper_peso_y_tren():
     assert obs["albaran"] == "26371" and obs["codigo_paper"] == "S261104001502" and obs["caja_movil"] == "ICR102043"
     with pytest.raises(O.ErrorPR, match="S seguido de 12"):
         O.actualizar(odoo, b, {"codigo_paper": "1502"})
+
+
+def test_coste_configurable(monkeypatch):
+    monkeypatch.setenv("PR_COSTE_VIAJE", "92,5")
+    assert O.coste_viaje() == 92.5
+    monkeypatch.setenv("PR_COSTE_VIAJE", "")
+    assert O.coste_viaje() == 85.0
