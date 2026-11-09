@@ -127,8 +127,14 @@ def test_lector_fuerza_la_herramienta(monkeypatch):
     resp = {"content": [{"type": "tool_use", "name": "datos_albaran", "input": JEREZ}]}
     assert L.leer_albaran(b"\xff\xd8foto", "image/jpeg", _cliente(resp, guardar=enviados)) == JEREZ
     cuerpo = enviados[0]
-    assert cuerpo["tool_choice"] == {"type": "tool", "name": "datos_albaran"}
+    assert cuerpo["tool_choice"] == {"type": "auto"} and cuerpo["tools"][0]["name"] == "datos_albaran"
     assert cuerpo["messages"][0]["content"][0]["type"] == "image"
+
+
+def test_lector_respuesta_en_texto(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    resp = {"content": [{"type": "text", "text": "Aquí están los datos:\n```json\n" + json.dumps(JEREZ) + "\n```"}]}
+    assert L.leer_albaran(b"x", "image/jpeg", _cliente(resp)) == JEREZ
 
 
 def test_lector_errores(monkeypatch):

@@ -8,8 +8,10 @@ Variables de entorno: ANTHROPIC_API_KEY (obligatoria), PR_MODELO (por defecto cl
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
+import re
 
 import httpx
 
@@ -121,8 +123,11 @@ def _preguntar(archivos: list[tuple[bytes, str]], prompt: str, herramienta: str,
         "model": os.environ.get("PR_MODELO", MODELO_DEFECTO),
         "max_tokens": 4000,
         "tools": [{"name": herramienta, "description": "Devuelve los datos leídos", "input_schema": esquema}],
-        "tool_choice": {"type": "tool", "name": herramienta},
-        "messages": [{"role": "user", "content": [*(_bloque(c, t) for c, t in archivos), {"type": "text", "text": prompt}]}],
+        # Algunos modelos no admiten obligar a usar la herramienta («tool_choice: tool»): se pide en el texto
+        # y, si aun así contesta con texto, se busca el JSON en la respuesta.
+        "tool_choice": {"type": "auto"},
+        "messages": [{"role": "user", "content": [*(_bloque(c, t) for c, t in archivos), {"type": "text", "text":
+                      prompt + f"\n\nResponde SOLO llamando a la herramienta «{herramienta}» con los datos leídos."}]}],
     }
     cab = {"x-api-key": clave, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     cli = cliente or httpx.Client(timeout=25)
@@ -133,9 +138,18 @@ def _preguntar(archivos: list[tuple[bytes, str]], prompt: str, herramienta: str,
     if r.status_code != 200:
         log.warning("Lectura con Claude: HTTP %s %s", r.status_code, r.text[:300])
         raise LecturaError("No se ha podido leer el documento. Inténtalo de nuevo o haz otra foto.")
-    for b in r.json().get("content", []):
+    bloques = r.json().get("content", [])
+    for b in bloques:
         if b.get("type") == "tool_use" and b.get("name") == herramienta:
             return b["input"]
+    texto = "".join(b.get("text", "") for b in bloques if b.get("type") == "text")
+    m = re.search(r"\{.*\}", texto, re.S)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except ValueError:
+            pass
+    log.warning("Lectura con Claude: respuesta sin datos (%s)", texto[:200])
     raise LecturaError("No se ha podido leer el documento. Haz otra foto con más luz.")
 
 
