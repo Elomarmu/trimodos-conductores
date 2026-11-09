@@ -280,11 +280,14 @@ def limpiar(leido: dict, hoy: dt.date | None = None) -> Viaje:
     return v
 
 
-def observaciones(datos: dict, anteriores: str | None = None) -> str:
+def observaciones(datos: dict, anteriores: str | None = None, quitar: tuple[str, ...] = ()) -> str:
     """Observaciones de descarga del bulto: «Clave: valor» por línea, tras la marca [PR SAICA].
-    Si ya había observaciones con la marca, se actualizan esos valores y se respeta lo demás que hubiera escrito."""
+    Si ya había observaciones con la marca, se actualizan esos valores y se respeta lo demás que hubiera escrito.
+    `quitar`: claves que se borran (p. ej. al deshacer la asignación a una caja)."""
     previos = leer_observaciones(anteriores)
     previos.update({k: v for k, v in datos.items() if v not in (None, "")})
+    for k in quitar:
+        previos.pop(k, None)
     otras = [l for l in (anteriores or "").splitlines()
              if l.strip() and l.strip() != MARCA_OBS and not any(l.startswith(f"{t}:") for _, t in CAMPOS_OBS)]
     lineas = [MARCA_OBS] + [f"{t}: {previos[k]}" for k, t in CAMPOS_OBS if previos.get(k) not in (None, "")]

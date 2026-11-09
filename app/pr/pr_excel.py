@@ -53,8 +53,9 @@ COLS_TREN = ["ord", "Fecha", "Matrícula", "Balas", "Peso", "Lugar de carga", "O
 ANCHOS_TREN = [5, 11, 11, 7, 9, 22, 16, 15, 15, 14, 10, 7, 7, 11, 9, 8, 9, 9]
 
 
-def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viajes_por_bulto: dict[int, dict]) -> bytes:
-    """cajas: filas del tren (orden, vagon, segunda, caja_movil, tara_kg, bulto_id?, comprobaciones?)."""
+def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viajes_por_caja: dict[str, dict]) -> bytes:
+    """cajas: filas del tren (orden, vagon, segunda, caja_movil, tara_kg). viajes_por_caja: caja móvil → viaje que lleva.
+    Las comprobaciones de momento no se revisan: salen siempre OK."""
     wb = Workbook()
     ws = wb.active
     ws.title = f"TREN {tren}"
@@ -77,13 +78,12 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     _cabecera(ws, 5, COLS_TREN, ANCHOS_TREN)
     fila, cargadas, peso = 6, 0, 0
     for c in cajas:
-        v = viajes_por_bulto.get(c.get("bulto_id")) or {}
-        comp = c.get("comprobaciones") or {}
+        v = viajes_por_caja.get(c.get("caja_movil")) or {}
         valores = ["“" if c.get("segunda") else c.get("orden"), _fecha(v.get("fecha")), v.get("tractora"), v.get("bultos"),
                    v.get("peso_kg"), v.get("lugar"), v.get("codigo_paper"), v.get("albaran"),
                    "“" if c.get("segunda") else c.get("vagon"), c.get("caja_movil"), c.get("tara_kg"), v.get("tipo"),
                    v.get("bultos"), v.get("peso_kg")]
-        valores += [("OK" if comp.get(k) else "NO") if v else "" for k, _ in R.COMPROBACIONES]
+        valores += ["OK" if v else "" for _ in R.COMPROBACIONES]
         for col, val in enumerate(valores, start=1):
             celda = ws.cell(fila, col, val if val not in ("", None) else None)
             celda.border = BORDE
@@ -107,7 +107,27 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     ws.freeze_panes = "A6"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
+    hoja_composicion(wb, tren, convoy, fecha, cajas)
     return _guardar(wb)
+
+
+# ---- COMPOSICIÓN DEL TREN (la carga la oficina) -----------------------------------------------------------------
+
+def hoja_composicion(wb: Workbook, tren: int, convoy: str, fecha: str, cajas: list[dict]):
+    """Hoja «COMPOSICION» del libro CARTON PAJA TREN: vagones, cajas y taras tal como los cargó la oficina."""
+    ws = wb.create_sheet("COMPOSICION")
+    ws["A1"] = f"COMPOSICIÓN DEL TREN {tren}"
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A2"] = f"Nº convoy: {convoy or '—'} · Fecha: {'-'.join(reversed((fecha or '').split('-')))} · {len(cajas)} cajas"
+    _cabecera(ws, 4, ["Orden", "Vagón", "Caja móvil", "Tara C.Movil"], [8, 16, 16, 13])
+    for i, c in enumerate(cajas, start=5):
+        for col, val in enumerate(["“" if c.get("segunda") else c.get("orden"), "“" if c.get("segunda") else c.get("vagon"),
+                                   c.get("caja_movil"), c.get("tara_kg")], start=1):
+            celda = ws.cell(i, col, val)
+            celda.border, celda.alignment = BORDE, Alignment(horizontal="center")
+            if col == 4:
+                celda.number_format = "#,##0"
+    ws.freeze_panes = "A5"
 
 
 # ---- REGISTRO VIAJES PR -------------------------------------------------------------------------------------------

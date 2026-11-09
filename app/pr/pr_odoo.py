@@ -14,7 +14,9 @@ Desde la v18 no se rellena el campo División.
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
+import json
 import logging
 import os
 import re
@@ -31,6 +33,7 @@ PERMITIDO = {
     ("tms.package", "search_read"), ("tms.package", "search_count"), ("tms.package", "create"), ("tms.package", "write"),
     ("tms.equipment", "search_read"), ("tms.equipment", "create"),
     ("fleet.vehicle", "search_read"), ("ir.sequence", "next_by_code"),
+    ("ir.attachment", "search_read"), ("ir.attachment", "create"), ("ir.attachment", "write"),  # composición del tren
 }
 GOODS_PAPEL_RECUPERADO = 233   # tms.goods «PAPEL RECUPERADO»
 COSTE_VIAJE_DEFECTO = 85.0     # € por viaje al colaborador (decisión 09/11/2026); el recargo por gasóleo se añade a mano
@@ -326,26 +329,84 @@ def siguiente_tren(lista: list[dict]) -> int:
     return max(nums + [int(os.environ.get("PR_ULTIMO_TREN", "85"))]) + 1
 
 
-def guardar_tren(odoo, tren: int, convoy: str, fecha: str, asignaciones: list[dict]) -> list[str]:
-    """Apunta en cada viaje (observaciones de su bulto) el tren, vagón, caja móvil y comprobaciones.
-    asignaciones: [{"bulto_id", "vagon", "caja_movil", "comprobaciones": {...}}]. Devuelve los bultos actualizados."""
-    ids = [a["bulto_id"] for a in asignaciones if a.get("bulto_id")]
-    if len(ids) != len(set(ids)):
-        raise ErrorPR("Hay un viaje asignado a dos cajas. Revísalo.")
-    if not ids:
-        raise ErrorPR("No has asignado ningún viaje a ninguna caja.")
-    ps = {p["id"]: p for p in odoo("tms.package", "search_read", [[["id", "in", ids], ["partner_id", "=", R.CLIENTE_ID]]],
-                                   fields=["name", "unload_note"])}
-    hechos = []
-    for a in asignaciones:
-        p = ps.get(a.get("bulto_id"))
-        if not p:
-            continue
-        datos = {"tren": str(tren), "convoy": convoy, "fecha_tren": fecha, "vagon": a.get("vagon"),
-                 "caja_movil": a.get("caja_movil"), "comprobaciones": R.texto_comprobaciones(a.get("comprobaciones") or {})}
-        odoo("tms.package", "write", [[p["id"]], {"unload_note": R.observaciones(datos, p.get("unload_note"))}])
-        hechos.append(p["name"])
-    return hechos
+# ---- tren: composición (la carga la oficina) y asignación de cargas a cajas (oficina o almacén) -------------------
+
+CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones")
+TODO_OK = R.texto_comprobaciones({k: True for k, _ in R.COMPROBACIONES})   # de momento no se revisan: siempre OK
+
+
+def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[dict]) -> dict:
+    """La composición del tren (vagones, cajas y taras) se guarda como adjunto JSON «PR_TREN_<n>.json» del pedido de PR
+    del mes del tren (o del último pedido de PR). Si ya existía ese tren, se sustituye."""
+    if not cajas:
+        raise ErrorPR("El tren no tiene cajas.")
+    pedido = buscar_pedido_mes(odoo, fecha) or (pedidos_pr(odoo, desde_defecto()) or [None])[-1]
+    if not pedido:
+        raise ErrorPR("Todavía no hay ningún pedido de PR en Odoo: registra antes algún viaje.")
+    datos = {"tren": int(tren), "convoy": convoy, "fecha": fecha, "pedido_id": pedido["id"],
+             "cajas": [{k: c.get(k) for k in ("orden", "vagon", "segunda", "caja_movil", "tara_kg")} for c in cajas]}
+    contenido = base64.b64encode(json.dumps(datos, ensure_ascii=False).encode()).decode()
+    nombre = f"PR_TREN_{int(tren)}.json"
+    previo = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=", nombre]]], fields=["id"], limit=1)
+    if previo:
+        odoo("ir.attachment", "write", [[previo[0]["id"]], {"datas": contenido}])
+    else:
+        odoo("ir.attachment", "create", [{"name": nombre, "res_model": "sale.order", "res_id": pedido["id"], "datas": contenido,
+                                          "mimetype": "application/json", "type": "binary"}])
+    return datos
+
+
+def tren_actual(odoo) -> dict | None:
+    """El último tren cargado por la oficina."""
+    adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=like", "PR_TREN_%"]]],
+               fields=["name", "datas"], order="id desc", limit=1)
+    if not adj:
+        return None
+    return json.loads(base64.b64decode(adj[0]["datas"]).decode())
+
+
+def estado_tren(odoo, tren: dict, lista: list[dict]) -> dict:
+    """Cajas del tren con la carga que lleva cada una, y cargas en stock."""
+    por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(tren["tren"]) and v.get("caja_movil")}
+    cajas = [dict(c, carga=_carga(por_caja.get(c["caja_movil"]))) for c in tren["cajas"]]
+    stock = [_carga(v) for v in lista if v["estado"] == "En stock"]
+    return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "cajas": cajas, "stock": stock}
+
+
+def _carga(v: dict | None) -> dict | None:
+    if not v:
+        return None
+    return {k: v.get(k) for k in ("bulto_id", "bulto", "codigo_paper", "albaran", "bultos", "peso_kg", "fecha", "lugar")}
+
+
+def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str) -> str:
+    caja = next((c for c in tren["cajas"] if c["caja_movil"] == caja_movil), None)
+    if not caja:
+        raise ErrorPR(f"La caja {caja_movil} no está en el tren {tren['tren']}.")
+    ocupada = next((v for v in lista if v.get("tren") == str(tren["tren"]) and v.get("caja_movil") == caja_movil), None)
+    if ocupada:
+        raise ErrorPR(f"La caja {caja_movil} ya lleva la carga {ocupada.get('codigo_paper') or ocupada.get('albaran')}.")
+    viaje = next((v for v in lista if v.get("bulto_id") == bulto_id), None)
+    if not viaje:
+        raise ErrorPR("No encuentro esa carga.")
+    if viaje["estado"] != "En stock":
+        raise ErrorPR(f"Esa carga ya va en el {viaje['estado'].lower()} (caja {viaje.get('caja_movil')}).")
+    p = odoo("tms.package", "search_read", [[["id", "=", bulto_id], ["partner_id", "=", R.CLIENTE_ID]]], fields=["name", "unload_note"])
+    if not p:
+        raise ErrorPR("No encuentro esa carga.")
+    datos = {"tren": str(tren["tren"]), "convoy": tren.get("convoy"), "fecha_tren": tren.get("fecha"), "vagon": caja.get("vagon"),
+             "caja_movil": caja_movil, "comprobaciones": TODO_OK}
+    odoo("tms.package", "write", [[bulto_id], {"unload_note": R.observaciones(datos, p[0].get("unload_note"))}])
+    return p[0]["name"]
+
+
+def quitar(odoo, bulto_id: int) -> str:
+    """Deshace la asignación: la carga vuelve a stock."""
+    p = odoo("tms.package", "search_read", [[["id", "=", bulto_id], ["partner_id", "=", R.CLIENTE_ID]]], fields=["name", "unload_note"])
+    if not p:
+        raise ErrorPR("No encuentro esa carga.")
+    odoo("tms.package", "write", [[bulto_id], {"unload_note": R.observaciones({}, p[0].get("unload_note"), quitar=CLAVES_TREN)}])
+    return p[0]["name"]
 
 
 def _placa(valor) -> str:

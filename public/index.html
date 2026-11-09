@@ -45,8 +45,10 @@
   </button>
   <button id="btn-pr" class="btn secondary">Carga de PR · foto del albarán</button>
   <a id="btn-guia" class="btn ghost" href="/guia.html">Cómo se usa (guía)</a>
-  <button id="btn-pr-tren" class="btn ghost small">Almacén: cargar el tren de PR</button>
-  <button id="btn-pr-oficina" class="btn ghost small">Oficina: completar un viaje de PR</button>
+  <div class="row2">
+    <button id="btn-pr-oficina" class="btn ghost small">Oficina · PR</button>
+    <button id="btn-pr-almacen" class="btn ghost small">Almacén · PR</button>
+  </div>
   <p id="modo" class="hint" hidden></p>
 </main>
 
@@ -151,11 +153,20 @@
   </div>
 </main>
 
-<!-- Almacén: tren de PR -->
+<!-- Oficina: menú -->
+<main id="s-pr-oficina" class="screen" hidden>
+  <h1>Oficina · viajes de PR</h1>
+  <button id="of-tren" class="btn primary huge">Cargar la composición del tren</button>
+  <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
+  <button id="of-completar" class="btn secondary">Completar un viaje (código Paper, peso…)</button>
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- Oficina: composición del tren -->
 <main id="s-pr-tren" class="screen" hidden>
-  <h1>Tren de PR</h1>
+  <h1>Composición del tren</h1>
   <div id="tren-paso1">
-    <p class="hint">Sube el listado de cajas del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>
+    <p class="hint">Sube el listado de vagones y cajas móviles del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>
     <label class="btn primary huge" for="tren-archivo">Subir el listado del tren</label>
     <input id="tren-archivo" class="oculto" type="file" accept="application/pdf,image/*" multiple>
   </div>
@@ -168,21 +179,41 @@
       <div class="field"><label for="tren-fecha">Fecha</label><input id="tren-fecha" type="date"></div>
     </div>
     <div id="tren-avisos" class="avisos"></div>
-    <p id="tren-cuenta" class="banner info"></p>
-    <div id="tren-cajas"></div>
+    <div id="tren-cajas" class="lista"></div>
     <div class="actions">
-      <button id="tren-guardar" class="btn primary">Guardar el tren y generar las Excel</button>
+      <button id="tren-guardar" class="btn primary">Guardar la composición del tren</button>
+      <button id="tren-otra" class="btn ghost">Subir otro listado</button>
     </div>
   </div>
   <div id="tren-hecho" hidden>
     <div id="tren-hecho-cuerpo" class="result"></div>
-    <div id="tren-descargas" class="actions"></div>
+    <button id="tren-ir-asignar" class="btn primary">Asignar cargas a cajas</button>
   </div>
-  <button class="btn ghost" data-go="menu">Volver al menú</button>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
+</main>
+
+<!-- Asignar cargas a cajas (almacén y oficina) -->
+<main id="s-pr-almacen" class="screen" hidden>
+  <h1>Cargar cajas móviles</h1>
+  <p id="alm-tren" class="banner info"></p>
+  <form id="alm-form" class="pkg" novalidate>
+    <div class="field"><label for="alm-caja">Caja móvil</label><select id="alm-caja"></select></div>
+    <div class="field"><label for="alm-carga">Carga</label><select id="alm-carga"></select></div>
+    <button type="submit" class="btn primary huge">Asignar</button>
+  </form>
+  <p id="alm-cuenta" class="hint"></p>
+  <h2 id="alm-hechas-titulo">Ya cargadas</h2>
+  <div id="alm-hechas" class="lista"></div>
+  <div class="actions">
+    <button id="alm-recargar" class="btn ghost">Actualizar</button>
+    <button id="alm-enviar" class="btn secondary" hidden>Terminar el tren y enviar las Excel</button>
+  </div>
+  <div id="alm-descargas" class="actions"></div>
+  <button id="alm-volver" class="btn ghost">Volver</button>
 </main>
 
 <!-- Oficina: completar un viaje de PR -->
-<main id="s-pr-oficina" class="screen" hidden>
+<main id="s-pr-completar" class="screen" hidden>
   <h1>Completar un viaje de PR</h1>
   <form id="pr-buscar-form" class="manual" novalidate>
     <label class="hint" for="pr-buscar">Nº de albarán, código Paper o bulto (PK…)</label>
@@ -201,7 +232,7 @@
     <button type="submit" class="btn primary">Guardar</button>
   </form>
   <div id="pr-completar-ok" class="banner info" hidden></div>
-  <button class="btn ghost" data-go="menu">Volver al menú</button>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
 </main>
 
 <div id="confirm" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-q" hidden>

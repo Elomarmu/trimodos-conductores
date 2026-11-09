@@ -278,3 +278,10 @@ select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; disp
 .btn.chk { min-height: 48px; padding: 6px 4px; font-size: .86rem; }
 .btn.chk.si { background: #04220f; border-color: var(--ok); color: var(--ok); }
 .btn.chk.no { background: #250808; border-color: var(--bad); color: var(--bad); }
+.lista { display: flex; flex-direction: column; gap: 8px; }
+.lista:empty { display: none; }
+.fila { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--surface);
+        border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 14px; }
+.fila > span:first-child { min-width: 0; }
+.btn.quitar { width: auto; min-height: 44px; padding: 6px 14px; font-size: .9rem; border-color: var(--bad); color: var(--bad); }
+#alm-form .btn.huge { margin-top: 4px; }
