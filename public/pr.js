@@ -2,10 +2,12 @@
 // Viajes de PR (SAICA): foto del albarán → revisar → guardar en Odoo y descargar la orden de transporte.
 // Usa las utilidades de app.js ($, h, post, api, busy, showError, go, state, loadPdf, abrirPdf…).
 
-const pr = { viaje: null, vehiculos: null, puntos: [] };
+const pr = { viaje: null, vehiculos: null, puntos: [], oficina: false };   // oficina: entra desde «Oficina · PR»
 const MAX_LADO = 2000;   // la foto se reduce en el móvil: se lee igual de bien y sube en un momento
 
-$("btn-pr").addEventListener("click", () => go("pr-foto"));
+$("btn-pr").addEventListener("click", () => { pr.oficina = false; go("pr-foto"); });
+$("of-registrar").addEventListener("click", () => { pr.oficina = true; go("pr-foto"); });
+document.addEventListener("click", (e) => { if (e.target.closest(".pr-volver")) go(pr.oficina ? "pr-oficina" : "menu"); });
 $("btn-pr-oficina").addEventListener("click", () => go("pr-oficina"));
 $("btn-pr-almacen").addEventListener("click", () => abrirAlmacen(false));
 $("of-tren").addEventListener("click", () => {
@@ -14,7 +16,9 @@ $("of-tren").addEventListener("click", () => {
 });
 $("of-asignar").addEventListener("click", () => abrirAlmacen(true));
 $("of-completar").addEventListener("click", () => {
+  pr.oficina = true;
   $("pr-completar").hidden = true; $("pr-completar-ok").hidden = true; $("pr-buscar").value = "";
+  $("pr-m-avisos").replaceChildren();
   go("pr-completar");
 });
 $("pr-otra-foto").addEventListener("click", () => go("pr-foto"));
@@ -204,11 +208,62 @@ $("pr-buscar-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   clearError();
   $("pr-completar-ok").hidden = true;
+  $("pr-m-avisos").replaceChildren();
   const q = val("pr-buscar");
   if (!q) return;
   busy("Buscando…");
+  try { mostrarCarga(await api("/api/pr/buscar?q=" + encodeURIComponent(q))); }
+  catch (e) { $("pr-completar").hidden = true; showError(e.message); } finally { busy(null); }
+});
+
+// Modificar con la foto: se lee el albarán, se busca su viaje y se proponen los datos leídos (con lo que hay ahora en Odoo al lado).
+async function modificarConFoto(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  clearError();
+  $("pr-completar-ok").hidden = true;
+  $("pr-m-avisos").replaceChildren();
+  busy("Leyendo el albarán…");
   try {
-    const r = await api("/api/pr/buscar?q=" + encodeURIComponent(q));
+    const leido = await post("/api/pr/leer-albaran", await reducir(file));
+    const v = leido.viaje;
+    let r = null;
+    for (const q of [v.albaran, v.codigo_paper].filter(Boolean)) {
+      try { r = await api("/api/pr/buscar?q=" + encodeURIComponent(q)); break; } catch (e) { if (e.code !== "no_encontrado") throw e; }
+    }
+    if (!r) {
+      $("pr-completar").hidden = true;
+      $("pr-m-avisos").replaceChildren(h("div", { class: "banner warn" },
+        `El albarán ${v.albaran || "(sin número)"} no está registrado todavía.`,
+        h("div", { class: "sugg" }, h("button", { type: "button", class: "btn", onclick: () => {
+          pr.viaje = v; pr.vehiculos = leido.vehiculos || null; pr.puntos = leido.puntos || []; pr.oficina = true;
+          pintarRevision(); go("pr-revisar");
+        } }, "Registrarlo ahora"))));
+      return;
+    }
+    mostrarCarga(r);
+    $("pr-buscar").value = v.albaran || "";
+    // lo leído en la foto sustituye a lo que hay en Odoo (se ve al lado para revisarlo antes de guardar)
+    const propuesta = [["pr-c-paper", v.codigo_paper, r.bulto.carrier_tracking_ref], ["pr-c-bultos", v.bultos, r.bulto.number_of_packages],
+      ["pr-c-peso", v.peso_kg, r.bulto.shipping_weight], ["pr-c-contenedor", v.contenedor, ""]];
+    const cambios = [];
+    for (const [id, leidoV, actual] of propuesta) {
+      if (leidoV == null || leidoV === "" || String(leidoV) === String(actual || "")) continue;
+      $(id).value = id === "pr-c-peso" ? fmtNum(leidoV) : leidoV;
+      cambios.push(`${$(id).labels[0].textContent}: ${actual ? (id === "pr-c-peso" ? fmtNum(actual) : actual) : "vacío"} → ${$(id).value}`);
+    }
+    $("pr-m-avisos").replaceChildren(
+      h("div", { class: "banner info" }, cambios.length ? "Leído en el albarán (revisa y pulsa Guardar): " + cambios.join(" · ") :
+        "Lo leído en el albarán coincide con lo que hay en Odoo."),
+      ...(v.avisos || []).map((a) => h("div", { class: "banner warn" }, a)));
+  } catch (e) { showError(e.message); } finally { busy(null); }
+}
+$("pr-m-camara").addEventListener("change", modificarConFoto);
+$("pr-m-archivo").addEventListener("change", modificarConFoto);
+
+function mostrarCarga(r) {
+  {
     bultoActual = r.bulto;
     const d = r.datos || {};
     $("pr-completar-titulo").replaceChildren(h("span", {}, "Albarán " + (d.albaran || "—")), h("span", { class: "code" }, r.bulto.name));
@@ -218,8 +273,8 @@ $("pr-buscar-form").addEventListener("submit", async (ev) => {
     $("pr-c-peso").value = r.bulto.shipping_weight ? fmtNum(r.bulto.shipping_weight) : "";
     $("pr-c-contenedor").value = "";
     $("pr-completar").hidden = false;
-  } catch (e) { $("pr-completar").hidden = true; showError(e.message); } finally { busy(null); }
-});
+  }
+}
 $("pr-completar").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   clearError();

@@ -108,7 +108,7 @@
   <input id="pr-camara" class="oculto" type="file" accept="image/*" capture="environment">
   <label class="btn secondary" for="pr-archivo">Elegir foto o PDF</label>
   <input id="pr-archivo" class="oculto" type="file" accept="image/*,application/pdf">
-  <button class="btn ghost" data-go="menu">Volver al menú</button>
+  <button class="btn ghost pr-volver">Volver</button>
 </main>
 
 <!-- PR 2: revisar lo leído -->
@@ -149,16 +149,17 @@
     <button id="pr-abrir" class="btn primary">Abrir PDF</button>
     <button id="pr-descargar" class="btn secondary">Descargar PDF</button>
     <button id="pr-compartir" class="btn secondary" hidden>Compartir</button>
-    <button class="btn ghost" data-go="menu">Volver al menú</button>
+    <button class="btn ghost pr-volver">Volver</button>
   </div>
 </main>
 
 <!-- Oficina: menú -->
 <main id="s-pr-oficina" class="screen" hidden>
   <h1>Oficina · viajes de PR</h1>
-  <button id="of-tren" class="btn primary huge">Cargar la composición del tren</button>
+  <button id="of-registrar" class="btn primary">Registrar un viaje (foto del albarán)</button>
+  <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
+  <button id="of-tren" class="btn secondary">Cargar la composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
-  <button id="of-completar" class="btn secondary">Completar un viaje (código Paper, peso…)</button>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
 </main>
 
@@ -214,9 +215,14 @@
 
 <!-- Oficina: completar un viaje de PR -->
 <main id="s-pr-completar" class="screen" hidden>
-  <h1>Completar un viaje de PR</h1>
+  <h1>Modificar una carga de PR</h1>
+  <label class="btn primary" for="pr-m-camara">Hacer foto del albarán</label>
+  <input id="pr-m-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <label class="btn secondary" for="pr-m-archivo">Elegir foto o PDF del albarán</label>
+  <input id="pr-m-archivo" class="oculto" type="file" accept="image/*,application/pdf">
+  <div id="pr-m-avisos" class="avisos"></div>
   <form id="pr-buscar-form" class="manual" novalidate>
-    <label class="hint" for="pr-buscar">Nº de albarán, código Paper o bulto (PK…)</label>
+    <label class="hint" for="pr-buscar">O búscala por nº de albarán, código Paper o bulto (PK…)</label>
     <input id="pr-buscar" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="search">
     <button type="submit" class="btn primary">Buscar</button>
   </form>
