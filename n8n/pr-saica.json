@@ -241,7 +241,14 @@
     "url": "={{ $json.url }}",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftExcelOAuth2Api",
-    "options": {},
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 500
+      }
+     }
+    },
     "sendBody": true,
     "contentType": "binaryData",
     "inputDataFieldName": "foto"
@@ -262,7 +269,7 @@
    },
    "retryOnFail": true,
    "maxTries": 3,
-   "waitBetweenTries": 3000
+   "waitBetweenTries": 5000
   },
   {
    "parameters": {
@@ -270,7 +277,14 @@
     "url": "={{ $json.urlFoto }}",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftExcelOAuth2Api",
-    "options": {},
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 500
+      }
+     }
+    },
     "sendBody": true,
     "specifyBody": "json",
     "jsonBody": "={{ JSON.stringify({ name: $json.nuevo }) }}"
@@ -291,7 +305,7 @@
    },
    "retryOnFail": true,
    "maxTries": 3,
-   "waitBetweenTries": 3000
+   "waitBetweenTries": 5000
   },
   {
    "parameters": {
@@ -299,7 +313,14 @@
     "url": "={{ $json.urlFoto }}",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftExcelOAuth2Api",
-    "options": {}
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 500
+      }
+     }
+    }
    },
    "id": "bd6bdb17-9349-4604-b698-ba7471db5be3",
    "name": "Borrar foto",
@@ -317,7 +338,7 @@
    },
    "retryOnFail": true,
    "maxTries": 3,
-   "waitBetweenTries": 3000,
+   "waitBetweenTries": 5000,
    "onError": "continueRegularOutput"
   },
   {
@@ -372,7 +393,14 @@
     "url": "={{ $json.url }}",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftExcelOAuth2Api",
-    "options": {},
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 500
+      }
+     }
+    },
     "sendBody": true,
     "contentType": "binaryData",
     "inputDataFieldName": "archivo"
@@ -393,7 +421,7 @@
    },
    "retryOnFail": true,
    "maxTries": 3,
-   "waitBetweenTries": 3000,
+   "waitBetweenTries": 5000,
    "onError": "continueRegularOutput"
   },
   {
@@ -478,7 +506,14 @@
     "url": "={{ $json.url }}",
     "authentication": "predefinedCredentialType",
     "nodeCredentialType": "microsoftOutlookOAuth2Api",
-    "options": {},
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 1000
+      }
+     }
+    },
     "sendBody": true,
     "specifyBody": "json",
     "jsonBody": "={{ JSON.stringify($json.adjunto) }}"
@@ -498,8 +533,8 @@
     }
    },
    "retryOnFail": true,
-   "maxTries": 3,
-   "waitBetweenTries": 3000
+   "maxTries": 5,
+   "waitBetweenTries": 5000
   },
   {
    "parameters": {
