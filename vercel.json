@@ -1,6 +1,6 @@
 {
   "regions": ["cdg1"],
-  "functions": { "api/index.py": { "maxDuration": 30 } },
+  "functions": { "api/index.py": { "maxDuration": 60 } },
   "headers": [
     {
       "source": "/(.*)",
