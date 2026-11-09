@@ -133,6 +133,8 @@ def test_pedido_existente_bloqueado_se_desbloquea_y_no_se_duplica():
 def test_errores_claros():
     with pytest.raises(O.ErrorPR, match="Punto de carga nuevo"):
         O.registrar(OdooV18(), dict(JEREZ, punto=None))
+    with pytest.raises(O.ErrorPR, match="contenedor no es correcto"):
+        O.registrar(OdooV18(), dict(LEOPROEX, contenedor="NPWU4957554"))
     with pytest.raises(O.ErrorPR, match="no está en Flota"):
         O.registrar(OdooV18(), dict(JEREZ, tractora="1222LTP"))
 

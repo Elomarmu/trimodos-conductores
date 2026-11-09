@@ -255,3 +255,20 @@ input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-col
   .guia { max-width: 760px; }
   .guia > a.btn { width: auto; align-self: flex-start; padding-inline: 28px; }
 }
+
+/* ---------- Viajes de PR ---------- */
+.oculto { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+label.btn { cursor: pointer; text-align: center; }
+.btn.small { min-height: 48px; font-size: .94rem; }
+.avisos { display: flex; flex-direction: column; gap: 10px; }
+.avisos:empty { display: none; }
+.avisos .sugg { flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
+.avisos .sugg .btn { min-height: 52px; padding: 8px 18px; background: #000; font-size: 1.1rem; }
+select, input[type=date], input[type=time] {
+  width: 100%; min-height: var(--field); font-size: 1.15rem; padding: 10px 14px; border-radius: var(--r-sm);
+  border: 1.5px solid var(--line-strong); background: #000; color: var(--fg); color-scheme: dark;
+}
+select:focus-visible, input[type=date]:focus-visible, input[type=time]:focus-visible { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 35%, transparent); }
+#s-menu #btn-pr { min-height: 64px; font-size: 1.1rem; }
+.row2 > * { min-width: 0; }                 /* los campos de fecha y hora no empujan la tarjeta */
+select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; display: block; }

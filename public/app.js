@@ -81,7 +81,7 @@ $("access-form").addEventListener("submit", async (ev) => {
     }
     saveCode(code);
     $("access").hidden = true;
-    $("btn-scan").disabled = false;
+    $("btn-scan").disabled = false; $("btn-pr").disabled = false;
   } catch (e) {
     $("access-err").textContent = e instanceof TypeError ? "No hay conexión. Inténtalo de nuevo." : e.message;
     $("access-err").hidden = false;
@@ -115,7 +115,7 @@ function show(name) {
 function go(name) {
   if (name === currentScreen) return show(name);
   if (name === "menu") {                      // volver al menú: se limpia la orden y el historial
-    state.data = null; state.edits = {}; pending = null; state.company = null;
+    state.data = null; state.edits = {}; pending = null; state.company = null; state.onConfirm = null; state.pdfName = null;
     for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", "false");
     setBrand(null, "menu");
     history.replaceState({ s: "menu" }, "");
@@ -438,7 +438,7 @@ document.addEventListener("keydown", (e) => {
   if (!$("confirm").hidden) $("btn-no").click();
   else if (!$("mma").hidden) $("btn-mma-no").click();
 });
-$("btn-yes").addEventListener("click", save);
+$("btn-yes").addEventListener("click", () => (state.onConfirm || save)());
 
 async function save() {
   $("confirm").hidden = true;
@@ -511,7 +511,7 @@ function loadPdf() {
   }
   return state.pdfLoading;
 }
-const pdfName = () => `orden-${(state.data.tarea.pedido || state.data.tarea.id)}.pdf`;
+const pdfName = () => state.pdfName || `orden-${(state.data.tarea.pedido || state.data.tarea.id)}.pdf`;
 function pdfAction(fn) {
   clearError();
   const run = (b) => {   // se llama sin esperas intermedias: abrir y compartir ocurren dentro del toque
@@ -527,19 +527,22 @@ function pdfObjectUrl(b) {
   return u;
 }
 
-$("btn-open").addEventListener("click", () => pdfAction((b) => {
+const abrirPdf = () => pdfAction((b) => {
   const w = window.open(pdfObjectUrl(b), "_blank");
   if (!w) showError("El navegador ha bloqueado la ventana. Usa «Descargar PDF».");
-}));
-$("btn-download").addEventListener("click", () => pdfAction((b) => {
+});
+const descargarPdf = () => pdfAction((b) => {
   const a = h("a", { href: pdfObjectUrl(b), download: pdfName() });
   document.body.append(a); a.click(); a.remove();
-}));
-$("btn-share").addEventListener("click", () => pdfAction(async (b) => {
+});
+const compartirPdf = () => pdfAction(async (b) => {
   const file = new File([b], pdfName(), { type: "application/pdf" });
   if (!navigator.canShare({ files: [file] })) throw new Error("Este móvil no permite compartir el PDF. Usa «Descargar PDF».");
   try { await navigator.share({ files: [file], title: "Orden de transporte" }); } catch (e) { if (e.name !== "AbortError") throw new Error("No se ha podido compartir. Inténtalo de nuevo."); }
-}));
+});
+$("btn-open").addEventListener("click", abrirPdf);
+$("btn-download").addEventListener("click", descargarPdf);
+$("btn-share").addEventListener("click", compartirPdf);
 
 // ---------- arranque ----------
 if ("serviceWorker" in navigator && window.isSecureContext) {
@@ -550,13 +553,13 @@ $("btn-scan").addEventListener("click", () => go("scan"));
   try {
     state.health = await api("/api/health");
     if (state.health.requiere_codigo) {
-      $("btn-scan").disabled = true;           // hasta comprobar el código guardado
+      $("btn-scan").disabled = true; $("btn-pr").disabled = true;   // hasta comprobar el código guardado
       const guardado = getCode();
       let ok = false, sinRed = false;
       if (guardado) {
         try { ok = (await fetch("/api/login", { method: "POST", headers: authHeaders(guardado) })).ok; } catch { sinRed = true; }
       }
-      if (ok || sinRed) $("btn-scan").disabled = false;   // sin red no se puede comprobar: ya avisará al buscar
+      if (ok || sinRed) { $("btn-scan").disabled = false; $("btn-pr").disabled = false; }   // sin red no se puede comprobar: ya avisará al buscar
       else askCode();
     }
     if (state.health.modo !== "real") {

@@ -165,6 +165,8 @@ def registrar(odoo, v: dict) -> dict:
         raise ErrorPR("Punto de carga nuevo: la oficina tiene que darlo de alta. Ya se ha avisado.")
     if not v.get("fecha"):
         raise ErrorPR("Falta la fecha de carga.")
+    if v.get("contenedor") and not R.contenedor(v["contenedor"])[1]:
+        raise ErrorPR("El contenedor no es correcto (no cuadra el último dígito). Corrígelo o déjalo en blanco.")
     previo = ya_registrado(odoo, v.get("albaran"))
     if previo:
         return {"duplicado": True, "bulto": previo["name"], "tarea_id": (previo.get("task_ids") or [None])[0],

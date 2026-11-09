@@ -43,7 +43,9 @@
     <svg class="qr" viewBox="0 0 21 21" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" fill-rule="evenodd" d="M0 0h7v7H0zM1 1v5h5V1zM2 2h3v3H2zM14 0h7v7h-7zM15 1v5h5V1zM16 2h3v3h-3zM0 14h7v7H0zM1 15v5h5v-5zM2 16h3v3H2zM9 0h2v2H9zM9 4h3v2H9zM8 8h2v3H8zM12 8h2v2h-2zM0 9h2v2H0zM4 9h3v2H4zM16 9h2v2h-2zM19 9h2v3h-2zM10 12h3v2h-3zM14 12h3v2h-3zM9 15h2v2H9zM13 15h2v3h-2zM17 15h4v2h-4zM9 19h3v2H9zM16 18h2v3h-2zM19 19h2v2h-2z"/></svg>
     <span>Escanear orden de transporte</span>
   </button>
+  <button id="btn-pr" class="btn secondary">Carga de PR · foto del albarán</button>
   <a id="btn-guia" class="btn ghost" href="/guia.html">Cómo se usa (guía)</a>
+  <button id="btn-pr-oficina" class="btn ghost small">Oficina: completar un viaje de PR</button>
   <p id="modo" class="hint" hidden></p>
 </main>
 
@@ -95,6 +97,82 @@
   </div>
 </main>
 
+<!-- PR 1: foto del albarán -->
+<main id="s-pr-foto" class="screen" hidden>
+  <h1>Carga de PR</h1>
+  <p class="hint">Haz una foto al albarán entero, de frente y con luz. Se leen los datos solos y los revisas antes de guardar.</p>
+  <label class="btn primary huge" for="pr-camara">Hacer foto del albarán</label>
+  <input id="pr-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <label class="btn secondary" for="pr-archivo">Elegir foto o PDF</label>
+  <input id="pr-archivo" class="oculto" type="file" accept="image/*,application/pdf">
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- PR 2: revisar lo leído -->
+<main id="s-pr-revisar" class="screen" hidden>
+  <h1>Revisa los datos</h1>
+  <div id="pr-avisos" class="avisos"></div>
+  <form id="pr-form" class="pkg" novalidate>
+    <div class="field"><label for="pr-punto">Punto de carga</label><select id="pr-punto"></select></div>
+    <div class="row2">
+      <div class="field"><label for="pr-fecha">Fecha</label><input id="pr-fecha" type="date"></div>
+      <div class="field"><label for="pr-hora">Hora</label><input id="pr-hora" type="time"></div>
+    </div>
+    <div class="field"><label for="pr-albaran">Nº albarán</label><input id="pr-albaran" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <div class="row2">
+      <div class="field"><label for="pr-tractora">Tractora</label><input id="pr-tractora" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="pr-remolque">Remolque</label><input id="pr-remolque" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <p id="pr-colaborador" class="hint"></p>
+    <div class="row2">
+      <div class="field"><label for="pr-bultos">Balas</label><input id="pr-bultos" type="text" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pr-peso">Peso neto (kg)</label><input id="pr-peso" type="text" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="pr-paper">Código carga Paper</label><input id="pr-paper" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="S261104001499"></div>
+    <div class="field" id="pr-cont-campo"><label for="pr-contenedor">Contenedor</label><input id="pr-contenedor" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="NPWU4954328"></div>
+    <p class="hint">Lo que no venga en el albarán (peso, balas, código Paper) se puede dejar en blanco: la oficina lo completa después.</p>
+  </form>
+  <div class="actions">
+    <button id="pr-guardar" class="btn primary">Guardar y generar la orden</button>
+    <button id="pr-otra-foto" class="btn ghost">Hacer otra foto</button>
+  </div>
+</main>
+
+<!-- PR 3: hecho -->
+<main id="s-pr-hecho" class="screen" hidden>
+  <h1 id="pr-hecho-titulo">Orden generada</h1>
+  <div id="pr-hecho-cuerpo" class="result"></div>
+  <div class="actions">
+    <button id="pr-abrir" class="btn primary">Abrir PDF</button>
+    <button id="pr-descargar" class="btn secondary">Descargar PDF</button>
+    <button id="pr-compartir" class="btn secondary" hidden>Compartir</button>
+    <button class="btn ghost" data-go="menu">Volver al menú</button>
+  </div>
+</main>
+
+<!-- Oficina: completar un viaje de PR -->
+<main id="s-pr-oficina" class="screen" hidden>
+  <h1>Completar un viaje de PR</h1>
+  <form id="pr-buscar-form" class="manual" novalidate>
+    <label class="hint" for="pr-buscar">Nº de albarán, código Paper o bulto (PK…)</label>
+    <input id="pr-buscar" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <button type="submit" class="btn primary">Buscar</button>
+  </form>
+  <form id="pr-completar" class="pkg" hidden novalidate>
+    <h2 id="pr-completar-titulo"></h2>
+    <p id="pr-completar-datos" class="route"></p>
+    <div class="field"><label for="pr-c-paper">Código carga Paper</label><input id="pr-c-paper" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <div class="row2">
+      <div class="field"><label for="pr-c-bultos">Balas</label><input id="pr-c-bultos" type="text" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pr-c-peso">Peso neto (kg)</label><input id="pr-c-peso" type="text" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="pr-c-contenedor">Contenedor</label><input id="pr-c-contenedor" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <button type="submit" class="btn primary">Guardar</button>
+  </form>
+  <div id="pr-completar-ok" class="banner info" hidden></div>
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
 <div id="confirm" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-q" hidden>
   <div class="dialog">
     <h2 id="confirm-q">¿Seguro?</h2>
@@ -128,5 +206,6 @@
   <div class="dialog" role="status" aria-live="polite"><h2 id="busy-msg">Un momento…</h2><div class="progress" aria-hidden="true"><span></span></div></div>
 </div>
 <script src="app.js"></script>
+<script src="pr.js"></script>
 </body>
 </html>
