@@ -3,10 +3,11 @@
 Conductor y oficina:
   POST /api/pr/leer-albaran         foto del albarán → datos leídos + comprobación de matrículas en Flota
   POST /api/pr/comprobar-vehiculos  ?tractora=&remolque=
-  POST /api/pr/registrar            {"viaje", "foto"} → línea en el pedido del mes + orden de transporte (PDF)
+  POST /api/pr/registrar            {"viaje", "foto", "di"} → línea en el pedido del mes + orden de transporte (PDF)
 Oficina:
-  GET  /api/pr/buscar?q=            nº de albarán, código Paper o bulto
-  POST /api/pr/actualizar           {"bulto_id", "cambios", "foto"} (código Paper, peso, balas, contenedor)
+  GET  /api/pr/buscar?q=            nº de albarán, código Paper o bulto (con los documentos que tiene)
+  GET  /api/pr/pendientes           cargas a las que les falta algún dato o documento
+  POST /api/pr/actualizar           {"bulto_id", "cambios", "foto", "di"} (código Paper, peso, balas, contenedor, documentos)
   POST /api/pr/leer-tren            listado del tren → cajas
   POST /api/pr/tren/composicion     guarda la composición (avisa si es repetida; «confirmado» para seguir)
   POST /api/pr/tren/enviar          las dos Excel + correo con fotos (n8n)
@@ -140,12 +141,14 @@ class Archivos(BaseModel):
 class ViajeIn(BaseModel):
     viaje: dict
     foto: Archivo | None = None      # la foto del albarán (se guarda en Odoo y luego en SharePoint)
+    di: Archivo | None = None        # foto o PDF del DI (documento de identificación de residuos)
 
 
 class Actualizar(BaseModel):
     bulto_id: int
     cambios: dict
     foto: Archivo | None = None      # foto nueva del albarán (la oficina al modificar la carga)
+    di: Archivo | None = None        # DI de residuos nuevo
 
 
 def _bytes(a: Archivo) -> tuple[bytes, str]:
@@ -213,12 +216,16 @@ def registrar(body: ViajeIn):
                 "vehiculos": O.comprobar_vehiculos(odoo, v["tractora"], v["remolque"])}
     odoo = odoo_pr()
     res = _pr(O.registrar, odoo, v)
-    if body.foto and not res["duplicado"]:
-        try:
-            datos, tipo = _bytes(body.foto)
-            O.guardar_foto(odoo, res["tarea_id"], v.get("albaran"), base64.b64encode(datos).decode(), tipo)
-        except Exception:  # la foto nunca debe impedir el viaje
-            log.warning("no se pudo guardar la foto del albarán en la tarea %s", res["tarea_id"])
+    res["documentos"] = {}
+    for doc, archivo in (("albaran", body.foto), ("di", body.di)):
+        if archivo and not res["duplicado"]:
+            try:
+                datos, tipo = _bytes(archivo)
+                O.guardar_foto(odoo, res["tarea_id"], v.get("albaran"), base64.b64encode(datos).decode(), tipo, doc)
+                res["documentos"][doc] = True
+            except Exception:  # un documento nunca debe impedir el viaje
+                log.warning("no se pudo guardar %s en la tarea %s", R.DOCUMENTOS[doc][3], res["tarea_id"])
+    res["faltan_docs"] = [] if res["duplicado"] else [R.DOCUMENTOS[d][3] for d in R.DOCUMENTOS if not res["documentos"].get(d)]
     if res.get("pedido_nuevo"):
         avisar("pedido_nuevo", {"pedido": res["pedido"], "referencia": R.referencia_pedido(v["fecha"])})
     from ..main import get_odoo  # nota en la tarea con el cliente general
@@ -242,7 +249,10 @@ def buscar(q: str = Query("", max_length=40)):
     p = O.buscar_viaje(odoo_pr(), q)
     if not p:
         raise AppError("No encuentro ese viaje.", 404, "no_encontrado")
-    return {"bulto": p, "datos": R.leer_observaciones(p.get("unload_note"))}
+    odoo = odoo_pr()
+    tarea = (p.get("task_ids") or [None])[0]
+    return {"bulto": p, "datos": R.leer_observaciones(p.get("unload_note")),
+            "documentos": O.documentos(odoo, [tarea]).get(tarea, {d: False for d in R.DOCUMENTOS})}
 
 
 @router.post("/actualizar")
@@ -257,16 +267,21 @@ def actualizar(body: Actualizar):
         return {"simulado": True, "bulto": ps[0]["name"]}
     hechos = _pr(O.actualizar, odoo, ps[0], body.cambios) if body.cambios else []
     tarea = (ps[0].get("task_ids") or [None])[0]
-    if body.foto and tarea:
-        datos, tipo = _bytes(body.foto)
-        O.guardar_foto(odoo, tarea, R.leer_observaciones(ps[0].get("unload_note")).get("albaran"), base64.b64encode(datos).decode(), tipo)
-        hechos.append("foto del albarán")
+    nuevos = set()
+    for doc, archivo in (("albaran", body.foto), ("di", body.di)):
+        if archivo and tarea:
+            datos, tipo = _bytes(archivo)
+            O.guardar_foto(odoo, tarea, R.leer_observaciones(ps[0].get("unload_note")).get("albaran"), base64.b64encode(datos).decode(),
+                           tipo, doc)
+            hechos.append(R.DOCUMENTOS[doc][3])
+            nuevos.add(doc)
     if not hechos:
         raise AppError("No has cambiado nada.", 400, "sin_cambios")
     viaje = next((v for v in O.viajes(odoo) if v["bulto_id"] == body.bulto_id), None)
     if viaje and viaje.get("caja_movil") and viaje.get("tren"):   # ya va en un tren: su foto en SharePoint se pone al día
-        sincronizar_foto(odoo, viaje, foto_nueva=bool(body.foto))
-    res = {"bulto": ps[0]["name"], "cambiado": hechos}
+        sincronizar_foto(odoo, viaje, nuevos=nuevos)
+    res = {"bulto": ps[0]["name"], "cambiado": hechos,
+           "faltan_docs": [R.DOCUMENTOS[d][3] for d in R.DOCUMENTOS if viaje and viaje.get("doc_" + d) is False]}
     if tarea and set(hechos) & {"código Paper", "peso", "balas", "contenedor"}:
         imprimir(tarea, res)
     subir_registro(odoo)
@@ -289,39 +304,47 @@ def imprimir(tarea_id: int | None, res: dict) -> dict | None:
 
 # ---- foto del albarán en SharePoint › Automatizacion › CARTON PAJA TREN <n> (lo hace n8n) --------------------------
 
-def sincronizar_foto(odoo, viaje: dict, foto_nueva: bool = False, lista: list[dict] | None = None) -> None:
-    """Deja la foto del viaje en la carpeta de su tren con el nombre «código Paper - caja móvil»: la sube si no estaba,
-    la renombra si ha cambiado el código, o la sustituye si la oficina ha hecho una foto nueva. Nunca para el trabajo."""
-    try:
-        carpeta = R.carpeta_tren(viaje["tren"])
-        lista = lista if lista is not None else O.viajes(odoo)
-        actual = viaje.get("foto") or ""                      # «carpeta/nombre» si ya está en SharePoint
-        ocupados = {v["foto"].split("/", 1)[-1] for v in lista
-                    if v.get("foto", "").startswith(carpeta + "/") and v["bulto_id"] != viaje["bulto_id"]}
-        foto = leer_foto_o_nada(odoo, viaje)
-        ext = R.extension(foto["tipo"]) if foto else (("." + actual.rsplit(".", 1)[-1]) if "." in actual else ".jpg")
-        nombre = R.nombre_foto(viaje.get("codigo_paper"), viaje.get("albaran"), viaje["caja_movil"], ext, ocupados)
-        destino = f"{carpeta}/{nombre}"
-        if actual and actual.startswith(carpeta + "/") and not foto_nueva:
-            if actual != destino:
-                enviar_n8n({"evento": "foto_renombrar", "correo": False, "carpeta": carpeta,
-                            "viejo": actual.split("/", 1)[1], "nuevo": nombre})
-                O.apuntar_foto(odoo, viaje["bulto_id"], destino)
-            return
-        if not foto:
-            return                                              # viaje sin foto guardada (anterior a este cambio)
-        if actual and actual != destino:
-            borrar_foto(actual)
-        enviar_n8n({"evento": "foto_subir", "correo": False, "carpeta": carpeta, "nombre": nombre, "tipo": foto["tipo"],
-                    "b64": foto["b64"]})
-        O.apuntar_foto(odoo, viaje["bulto_id"], destino)
-    except Exception:
-        log.exception("no se pudo poner al día la foto del bulto %s en SharePoint", viaje.get("bulto"))
+def sincronizar_foto(odoo, viaje: dict, nuevos: set[str] | frozenset = frozenset(), lista: list[dict] | None = None) -> None:
+    """Deja los documentos del viaje (foto del albarán y DI de residuos) en la carpeta de su tren: «código Paper - caja móvil»
+    y «código Paper - caja móvil - DI». Los sube si no estaban, los renombra si ha cambiado el código o la caja, o los
+    sustituye si la oficina ha puesto uno nuevo («nuevos»). Nunca para el trabajo."""
+    for doc in R.DOCUMENTOS:
+        try:
+            lista = lista if lista is not None else O.viajes(odoo)
+            _sincronizar_doc(odoo, viaje, doc, doc in nuevos, lista)
+        except Exception:
+            log.exception("no se pudo poner al día %s del bulto %s en SharePoint", R.DOCUMENTOS[doc][3], viaje.get("bulto"))
 
 
-def leer_foto_o_nada(odoo, viaje: dict) -> dict | None:
+def _sincronizar_doc(odoo, viaje: dict, doc: str, nuevo: bool, lista: list[dict]) -> None:
+    _, clave, sufijo, _ = R.DOCUMENTOS[doc]
+    carpeta = R.carpeta_tren(viaje["tren"])
+    actual = viaje.get(clave) or ""                      # «carpeta/nombre» si ya está en SharePoint
+    claves = [c for _, c, _, _ in R.DOCUMENTOS.values()]
+    ocupados = {x[k].split("/", 1)[-1] for x in lista for k in claves
+                if (x.get(k) or "").startswith(carpeta + "/") and not (x["bulto_id"] == viaje["bulto_id"] and k == clave)}
+    foto = leer_foto_o_nada(odoo, viaje, doc)
+    ext = R.extension(foto["tipo"]) if foto else (("." + actual.rsplit(".", 1)[-1]) if "." in actual else ".jpg")
+    nombre = R.nombre_foto(viaje.get("codigo_paper"), viaje.get("albaran"), viaje["caja_movil"], ext, ocupados, sufijo)
+    destino = f"{carpeta}/{nombre}"
+    if actual and actual.startswith(carpeta + "/") and not nuevo:
+        if actual != destino:
+            enviar_n8n({"evento": "foto_renombrar", "correo": False, "carpeta": carpeta,
+                        "viejo": actual.split("/", 1)[1], "nuevo": nombre})
+            O.apuntar_foto(odoo, viaje["bulto_id"], destino, doc)
+        return
+    if not foto:
+        return                                              # todavía no tiene ese documento
+    if actual and actual != destino:
+        borrar_foto(actual)
+    enviar_n8n({"evento": "foto_subir", "correo": False, "carpeta": carpeta, "nombre": nombre, "tipo": foto["tipo"],
+                "b64": foto["b64"]})
+    O.apuntar_foto(odoo, viaje["bulto_id"], destino, doc)
+
+
+def leer_foto_o_nada(odoo, viaje: dict, doc: str = "albaran") -> dict | None:
     try:
-        return O.leer_foto(odoo, viaje.get("tarea_id"))
+        return O.leer_foto(odoo, viaje.get("tarea_id"), doc)
     except Exception:
         return None
 
@@ -330,6 +353,14 @@ def borrar_foto(ruta: str) -> None:
     if ruta and "/" in ruta:
         carpeta, nombre = ruta.split("/", 1)
         enviar_n8n({"evento": "foto_borrar", "correo": False, "carpeta": carpeta, "nombre": nombre})
+
+
+@router.get("/pendientes")
+def pendientes():
+    """Oficina: cargas a las que les falta algún dato o documento (foto del albarán, DI de residuos)."""
+    lista = O.viajes(odoo_pr())
+    return {"pendientes": [{k: v.get(k) for k in ("bulto_id", "bulto", "albaran", "codigo_paper", "fecha", "lugar", "estado", "tarea_id")}
+                           | {"faltan": R.faltan(v)} for v in lista if R.faltan(v)]}
 
 
 @router.get("/viajes")
@@ -424,7 +455,7 @@ def tarea(v: dict):
 
 
 def faltan(v: dict) -> str:
-    return ", ".join(t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"), ("bultos", "balas")) if not v.get(k))
+    return ", ".join(R.faltan(v))
 
 
 def excel_tren(tren: dict | None) -> str:
@@ -507,8 +538,9 @@ def tren_quitar(body: Asignar):
         return O.estado_tren(odoo, t, lista)
     previo = next((v for v in lista if v["bulto_id"] == body.bulto_id), None)
     _pr(O.quitar, odoo, body.bulto_id, t, lista)
-    if previo and previo.get("foto"):
-        borrar_foto(previo["foto"])
+    for _, clave, _, _ in R.DOCUMENTOS.values():
+        if previo and previo.get(clave):
+            borrar_foto(previo[clave])
     lista = O.viajes(odoo)
     subir_registro(odoo, lista)
     return O.estado_tren(odoo, t, lista)
@@ -571,16 +603,24 @@ def tren_enviar():
                                   "CAJA VACÍA" if c["vacia"] else "sin asignar", "", "", "", ""] for c in cajas])
               + f"<p style='{LETRA}'><b>Quedan en stock para el siguiente tren: {len(stock)}</b></p>"
               + tabla_html(["Fecha", "Código Paper", "Albarán", "Lugar"], [[v["fecha"], v["codigo_paper"], tarea(v), v["lugar"]] for v in stock]))
-    fotos = []
+    fotos, sin_docs = [], []
     for c in cajas:
         v = por_caja.get(c["caja_movil"])
-        f = leer_foto_o_nada(odoo, v) if v else None
-        if f:
-            nombre = (v.get("foto") or "").split("/", 1)[-1] or R.nombre_foto(v.get("codigo_paper"), v.get("albaran"),
-                                                                              c["caja_movil"], R.extension(f["tipo"]), set())
-            fotos.append({"nombre": nombre, "b64": f["b64"], "tipo": f["tipo"]})
-    cuerpo += (f"<p style='font:11pt Calibri,Arial'>Van adjuntas las {len(fotos)} fotos de los albaranes "
-               f"(también en SharePoint › Automatizacion › {R.carpeta_tren(t['tren'])}).</p>")
+        if not v:
+            continue
+        for doc, (_, clave, sufijo, texto) in R.DOCUMENTOS.items():
+            f = leer_foto_o_nada(odoo, v, doc)
+            if f:
+                nombre = (v.get(clave) or "").split("/", 1)[-1] or R.nombre_foto(v.get("codigo_paper"), v.get("albaran"),
+                                                                                c["caja_movil"], R.extension(f["tipo"]), set(), sufijo)
+                fotos.append({"nombre": nombre, "b64": f["b64"], "tipo": f["tipo"]})
+            else:
+                sin_docs.append([c["caja_movil"], tarea(v), v.get("codigo_paper"), texto])
+    cuerpo += (f"<p style='{LETRA}'>Van adjuntos {len(fotos)} documentos (fotos de los albaranes y DI de residuos), también en "
+               f"SharePoint › Automatizacion › {R.carpeta_tren(t['tren'])}.</p>")
+    if sin_docs:
+        cuerpo += (f"<p style='{LETRA};color:#C00000'><b>Faltan {len(sin_docs)} documentos:</b></p>"
+                   + tabla_html(["Caja", "Albarán (tarea)", "Código Paper", "Falta"], sin_docs))
     enviado = False if s.dry_run else enviar_n8n({"evento": "tren", "asunto": f"PR SAICA · Tren {t['tren']} del {fecha_es} ({len(por_caja)} cargas)",
                                                   "html": cuerpo, "archivos": archivos, "fotos": fotos,
                                                   "carpeta": R.carpeta_tren(t["tren"]), "excel_tren": ruta_excel_tren(t)})
@@ -626,7 +666,7 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
               + tabla_html(["Tren", "Vagón", "Caja", "Albarán (tarea)", "Código Paper", "Lugar", "Peso kg"],
                            [[v["tren"], v.get("vagon"), v["caja_movil"], tarea(v), v.get("codigo_paper"), v["lugar"], v["peso_kg"]]
                             for v in al_tren])
-              + h3(f"Viajes con datos pendientes: {len(pendientes)}")
+              + h3(f"Viajes con datos o documentos pendientes: {len(pendientes)}")
               + tabla_html(["Fecha carga", "Albarán (tarea)", "Lugar", "Estado", "Falta"],
                            [[v["fecha"], tarea(v), v["lugar"], v["estado"], faltan(v)] for v in pendientes])
               + h3(f"Viajes que quedan en stock: {len(stock)}")

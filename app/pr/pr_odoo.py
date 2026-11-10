@@ -330,8 +330,10 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
     ps = odoo("tms.package", "search_read", [[["id", "in", [i for l in ls for i in l["tms_package_ids"]]]]],
               fields=["name", "carrier_tracking_ref", "shipping_weight", "number_of_packages", "unload_note"])
     por_id = {p["id"]: p for p in ps}
+    docs = documentos(odoo, [(l.get("task_id") or [None])[0] for l in ls])
     res = []
     for l in ls:
+        tarea = (l.get("task_id") or [None])[0]
         p = por_id.get(l["tms_package_ids"][0], {})
         o = R.leer_observaciones(p.get("unload_note"))
         origen = (l.get("shipping_origin_id") or [None])[0]
@@ -345,7 +347,8 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
                     "bultos": p.get("number_of_packages") or None, "codigo_paper": p.get("carrier_tracking_ref") or "",
                     "contenedor": (l.get("equipment_id") or [None, ""])[1],
                     **{k: o.get(k, "") for k in ("albaran", "codigo_natur", "ler", "calidad", "tren", "convoy", "fecha_tren", "foto",
-                                                 "vagon", "caja_movil", "comprobaciones")},
+                                                 "foto_di", "vagon", "caja_movil", "comprobaciones")},
+                    **{"doc_" + d: ok for d, ok in docs.get(tarea, {d: False for d in R.DOCUMENTOS}).items()},
                     "tipo": R.tipo_calidad(o.get("calidad")),
                     "estado": f"Tren {o['tren']}" if o.get("caja_movil") and o.get("tren") else "En stock"})
     return res
@@ -359,41 +362,58 @@ def siguiente_tren(lista: list[dict]) -> int:
 
 # ---- foto del albarán: se guarda en Odoo, adjunta a la orden de transporte -----------------------------------------
 
-PREFIJO_FOTO = "Foto albarán"
+PREFIJO_FOTO = R.DOCUMENTOS["albaran"][0]
 
 
-def guardar_foto(odoo, tarea_id: int, albaran: str, b64: str, tipo: str) -> None:
-    """La foto (o el PDF) del albarán queda adjunta a la tarea. Si ya había una, se sustituye por la nueva."""
+def guardar_foto(odoo, tarea_id: int, albaran: str, b64: str, tipo: str, doc: str = "albaran") -> None:
+    """La foto (o el PDF) del documento (albarán o DI de residuos) queda adjunta a la tarea. Si ya había, se sustituye."""
+    prefijo = R.DOCUMENTOS[doc][0]
     previa = odoo("ir.attachment", "search_read", [[["res_model", "=", "project.task"], ["res_id", "=", tarea_id],
-                                                    ["name", "=like", PREFIJO_FOTO + "%"]]], fields=["id"], order="id desc", limit=1)
-    vals = {"name": f"{PREFIJO_FOTO} {albaran or ''}".strip() + R.extension(tipo), "datas": b64, "mimetype": tipo}
+                                                    ["name", "=like", prefijo + "%"]]], fields=["id"], order="id desc", limit=1)
+    vals = {"name": f"{prefijo} {albaran or ''}".strip() + R.extension(tipo), "datas": b64, "mimetype": tipo}
     if previa:
         odoo("ir.attachment", "write", [[previa[0]["id"]], vals])
     else:
         odoo("ir.attachment", "create", [dict(vals, res_model="project.task", res_id=tarea_id, type="binary")])
 
 
-def leer_foto(odoo, tarea_id: int | None) -> dict | None:
-    """{"b64", "tipo"} de la foto del albarán de esa tarea, o None si no tiene."""
+def leer_foto(odoo, tarea_id: int | None, doc: str = "albaran") -> dict | None:
+    """{"b64", "tipo"} del documento de esa tarea, o None si no tiene."""
     if not tarea_id:
         return None
     a = odoo("ir.attachment", "search_read", [[["res_model", "=", "project.task"], ["res_id", "=", tarea_id],
-                                               ["name", "=like", PREFIJO_FOTO + "%"]]], fields=["datas", "mimetype"],
+                                               ["name", "=like", R.DOCUMENTOS[doc][0] + "%"]]], fields=["datas", "mimetype"],
              order="id desc", limit=1)
     return {"b64": a[0]["datas"], "tipo": a[0].get("mimetype") or "image/jpeg"} if a and a[0].get("datas") else None
 
 
-def apuntar_foto(odoo, bulto_id: int, ruta: str | None) -> None:
-    """Guarda (o borra) en las observaciones del bulto dónde está su foto en SharePoint («carpeta/nombre»)."""
+def documentos(odoo, tareas: list[int]) -> dict[int, dict[str, bool]]:
+    """Qué documentos tiene cada tarea: {tarea: {"albaran": True, "di": False}}. Una sola consulta para todas."""
+    tareas = [t for t in tareas if t]
+    res = {t: {d: False for d in R.DOCUMENTOS} for t in tareas}
+    if not tareas:
+        return res
+    dom = [["res_model", "=", "project.task"], ["res_id", "in", tareas]]
+    dom += ["|"] * (len(R.DOCUMENTOS) - 1) + [["name", "=like", pref + "%"] for pref, *_ in R.DOCUMENTOS.values()]
+    for a in odoo("ir.attachment", "search_read", [dom], fields=["name", "res_id"]):
+        for d, (pref, *_) in R.DOCUMENTOS.items():
+            if (a.get("name") or "").startswith(pref) and a.get("res_id") in res:
+                res[a["res_id"]][d] = True
+    return res
+
+
+def apuntar_foto(odoo, bulto_id: int, ruta: str | None, doc: str = "albaran") -> None:
+    """Guarda (o borra) en las observaciones del bulto dónde está el documento en SharePoint («carpeta/nombre»)."""
+    clave = R.DOCUMENTOS[doc][1]
     p = odoo("tms.package", "search_read", [[["id", "=", bulto_id]]], fields=["unload_note"])
     if p:
-        nuevo = R.observaciones({"foto": ruta}, p[0].get("unload_note")) if ruta else R.observaciones({}, p[0].get("unload_note"), quitar=("foto",))
+        nuevo = R.observaciones({clave: ruta}, p[0].get("unload_note")) if ruta else R.observaciones({}, p[0].get("unload_note"), quitar=(clave,))
         odoo("tms.package", "write", [[bulto_id], {"unload_note": nuevo}])
 
 
 # ---- tren: composición (la carga la oficina) y asignación de cargas a cajas (oficina o almacén) -------------------
 
-CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones", "foto")
+CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones", "foto", "foto_di")
 TODO_OK = R.texto_comprobaciones({k: True for k, _ in R.COMPROBACIONES})   # de momento no se revisan: siempre OK
 
 
@@ -608,7 +628,8 @@ def _cambiar_obs(odoo, bulto_id: int, datos: dict) -> None:
 def _carga(v: dict | None) -> dict | None:
     if not v:
         return None
-    return {k: v.get(k) for k in ("bulto_id", "bulto", "codigo_paper", "albaran", "bultos", "peso_kg", "fecha", "lugar")}
+    return {**{k: v.get(k) for k in ("bulto_id", "bulto", "codigo_paper", "albaran", "bultos", "peso_kg", "fecha", "lugar")},
+            "faltan_docs": [R.DOCUMENTOS[d][3] for d in R.DOCUMENTOS if v.get("doc_" + d) is False]}
 
 
 def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str) -> str:

@@ -180,7 +180,7 @@ def _hoja_registro(ws, titulo_hoja: str, titulo: str, nota: str, viajes: list[di
             elif k == "toneladas":
                 celda.number_format = "0.00"
         ws.cell(i, 2).fill = AMARILLO if v.get("estado") == "En stock" else VERDE
-        faltan = [t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"), ("bultos", "balas")) if not v.get(k)]
+        faltan = R.faltan(v)
         if faltan:
             ws.cell(i, len(cols) + 1, "Falta: " + ", ".join(faltan)).font = Font(color="C00000", bold=True)
     ws.cell(4, len(cols) + 1, "Avisos").font = Font(bold=True)

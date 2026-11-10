@@ -12,8 +12,9 @@ BASE = {"bulto_id": 11, "bulto": "PK1", "tarea_id": 204234, "codigo_paper": "S26
 def eventos(monkeypatch):
     enviados, apuntes = [], {}
     monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
-    monkeypatch.setattr(O, "apuntar_foto", lambda odoo, bulto, ruta: apuntes.__setitem__(bulto, ruta))
-    monkeypatch.setattr(O, "leer_foto", lambda odoo, tarea: {"b64": "QUJD", "tipo": "image/jpeg"} if tarea else None)
+    monkeypatch.setattr(O, "apuntar_foto", lambda odoo, bulto, ruta, doc="albaran": apuntes.__setitem__((bulto, doc) if doc != "albaran" else bulto, ruta))
+    # de momento solo foto del albarán (el DI, en su propia prueba)
+    monkeypatch.setattr(O, "leer_foto", lambda odoo, tarea, doc="albaran": {"b64": "QUJD", "tipo": "image/jpeg"} if tarea and doc == "albaran" else None)
     return enviados, apuntes
 
 
@@ -52,23 +53,47 @@ def test_sin_cambios_no_se_toca(eventos):
 def test_foto_nueva_sustituye(eventos):
     enviados, _ = eventos
     v = dict(BASE, foto="CARTON PAJA TREN 86/S261104001499 - CRPU0910069.jpg")
-    A.sincronizar_foto(None, v, foto_nueva=True, lista=[v])
+    A.sincronizar_foto(None, v, nuevos={"albaran"}, lista=[v])
     assert [e["evento"] for e in enviados] == ["foto_subir"] and enviados[0]["nombre"] == "S261104001499 - CRPU0910069.jpg"
 
 
 def test_cambia_codigo_y_foto_nueva_borra_la_vieja(eventos):
     enviados, _ = eventos
     v = dict(BASE, codigo_paper="S261104001502", foto="CARTON PAJA TREN 86/ALBARAN 592611000006 - CRPU0910069.jpg")
-    A.sincronizar_foto(None, v, foto_nueva=True, lista=[v])
+    A.sincronizar_foto(None, v, nuevos={"albaran"}, lista=[v])
     assert [e["evento"] for e in enviados] == ["foto_borrar", "foto_subir"]
     assert enviados[0]["nombre"] == "ALBARAN 592611000006 - CRPU0910069.jpg"
 
 
 def test_viaje_sin_foto_no_hace_nada(eventos, monkeypatch):
     enviados, apuntes = eventos
-    monkeypatch.setattr(O, "leer_foto", lambda odoo, tarea: None)
+    monkeypatch.setattr(O, "leer_foto", lambda odoo, tarea, doc="albaran": None)
     A.sincronizar_foto(None, dict(BASE), lista=[dict(BASE)])
     assert enviados == [] and apuntes == {}
+
+
+def test_el_di_va_con_su_nombre_junto_al_albaran(eventos, monkeypatch):
+    enviados, apuntes = eventos
+    monkeypatch.setattr(O, "leer_foto", lambda odoo, tarea, doc="albaran": {"b64": "QUJD", "tipo": "application/pdf" if doc == "di" else "image/jpeg"})
+    A.sincronizar_foto(None, dict(BASE), lista=[dict(BASE)])
+    assert [e["nombre"] for e in enviados] == ["S261104001499 - CRPU0910069.jpg", "S261104001499 - CRPU0910069 - DI.pdf"]
+    assert apuntes[(11, "di")] == "CARTON PAJA TREN 86/S261104001499 - CRPU0910069 - DI.pdf"
+
+
+def test_faltan_documentos():
+    from app.pr import pr_reglas as R
+    v = {"codigo_paper": "S1", "peso_kg": 1, "bultos": 2, "doc_albaran": True, "doc_di": False}
+    assert R.faltan(v) == ["DI de residuos"]
+    assert R.faltan(dict(v, doc_albaran=False, peso_kg=None)) == ["peso", "foto del albarán", "DI de residuos"]
+    assert R.faltan({"codigo_paper": "S1", "peso_kg": 1, "bultos": 2}) == []   # sin saber los documentos no avisa
+
+
+def test_documentos_de_las_tareas():
+    def odoo(modelo, metodo, args, **kw):
+        assert (modelo, metodo) == ("ir.attachment", "search_read")
+        return [{"name": "Foto albarán 592611000006.jpg", "res_id": 1}, {"name": "DI residuos 592611000006.pdf", "res_id": 1},
+                {"name": "Foto albarán 26371.jpg", "res_id": 2}]
+    assert O.documentos(odoo, [1, 2, None]) == {1: {"albaran": True, "di": True}, 2: {"albaran": True, "di": False}}
 
 
 def test_guardar_foto_en_la_tarea():

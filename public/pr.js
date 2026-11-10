@@ -57,6 +57,7 @@ async function alElegir(ev) {
     const foto = await reducir(file);
     const r = await post("/api/pr/leer-albaran", foto);
     pr.viaje = r.viaje; pr.vehiculos = r.vehiculos || null; pr.puntos = r.puntos || []; pr.foto = foto;
+    pr.docs = { albaran: foto, di: null };
     pintarRevision();
     go("pr-revisar");
   } catch (e) { showError(e.message); } finally { busy(null); }
@@ -92,6 +93,47 @@ function pintarRevision() {
   $("pr-paper").value = v.codigo_paper || "";
   $("pr-contenedor").value = v.contenedor || "";
   pintarAvisos();
+  pintarDocsRegistro();
+}
+
+// ---------- documentos de cada carga: foto del albarán y DI (documento de identificación de residuos) ----------
+const DOCS = [["albaran", "Foto del albarán"], ["di", "DI de residuos"]];
+const MAX_DOC_B64 = 2_600_000, MAX_ENVIO_B64 = 4_000_000;   // Vercel admite ~4,5 MB por envío
+async function leerDocumento(file) {
+  const d = await reducir(file);
+  if (d.archivo_b64.length > MAX_DOC_B64) throw new Error("El archivo es demasiado grande. Haz una foto del documento en vez de subir el PDF.");
+  return d;
+}
+function tamañoEnvio(...archivos) { return archivos.reduce((n, a) => n + (a ? a.archivo_b64.length : 0), 0); }
+
+// tiene: lo que ya está guardado en Odoo {albaran, di}; nuevos: archivos elegidos ahora {albaran, di}
+function pintarDocs(id, tiene, nuevos, soloDi) {
+  $(id).replaceChildren(h("h2", {}, "Documentos para el cliente"), ...DOCS.map(([doc, nombre]) => {
+    const nuevo = nuevos[doc], ok = !!(nuevo || tiene[doc]);
+    const estado = nuevo ? (tiene[doc] ? "Nuevo: sustituye al guardado al pulsar Guardar" : "Listo: se guarda al pulsar Guardar")
+      : tiene[doc] ? "Guardado" : "Falta";
+    const elegir = async (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!f) return;
+      clearError();
+      busy("Preparando el documento…");
+      try { nuevos[doc] = await leerDocumento(f); pintarDocs(id, tiene, nuevos, soloDi); }
+      catch (e) { showError(e.message); } finally { busy(null); }
+    };
+    const cam = h("input", { type: "file", accept: "image/*", capture: "environment", class: "oculto", id: `${id}-${doc}-cam`, onchange: elegir });
+    const arc = h("input", { type: "file", accept: "image/*,application/pdf", class: "oculto", id: `${id}-${doc}-arc`, onchange: elegir });
+    const botones = soloDi && doc === "albaran" ? [] : [cam, arc,
+      h("label", { class: "btn secondary small", for: cam.id }, ok ? "Hacer otra foto" : "Hacer foto"),
+      h("label", { class: "btn ghost small", for: arc.id }, "Elegir foto o PDF")];
+    return h("div", { class: "doc " + (ok ? "ok" : "falta") },
+      h("span", {}, h("b", {}, (ok ? "✓ " : "✗ ") + nombre), h("br"), h("span", { class: "hint" }, estado)),
+      botones.length ? h("span", { class: "doc-botones" }, ...botones) : null);
+  }));
+}
+function pintarDocsRegistro() {
+  if (!pr.docs) pr.docs = { albaran: pr.foto || null, di: null };
+  pintarDocs("pr-docs", { albaran: false, di: false }, pr.docs, true);
 }
 
 function pintarAvisos() {
@@ -160,8 +202,11 @@ $("pr-guardar").addEventListener("click", () => {
   clearError();
   let datos;
   try { datos = recoger(); } catch (e) { return showError(e.message); }
+  const docs = pr.docs || {};
+  if (tamañoEnvio(docs.albaran, docs.di) > MAX_ENVIO_B64) return showError("Los documentos pesan demasiado juntos. Haz una foto del DI en vez de subir el PDF.");
   state.onConfirm = () => guardar(datos);
-  $("confirm-txt").textContent = "Se guardará el viaje en el pedido del mes y se generará la orden de transporte.";
+  $("confirm-txt").textContent = "Se guardará el viaje en el pedido del mes y se generará la orden de transporte." +
+    (docs.di ? "" : " OJO: falta el DI de residuos. El viaje se guarda igual y queda pendiente hasta que se añada (Oficina › Modificar una carga).");
   $("confirm").hidden = false;
   $("btn-no").focus();
 });
@@ -170,7 +215,8 @@ async function guardar(datos) {
   $("confirm").hidden = true;
   busy("Guardando el viaje y generando la orden…");
   try {
-    const r = await post("/api/pr/registrar", { viaje: datos, foto: pr.foto || null });
+    const docs = pr.docs || {};
+    const r = await post("/api/pr/registrar", { viaje: datos, foto: docs.albaran || pr.foto || null, di: docs.di || null });
     pintarHecho(r);
     go("pr-hecho");
   } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
@@ -192,6 +238,8 @@ function pintarHecho(r) {
     cuerpo.push(mark, h("p", {}, `Viaje guardado en el pedido ${r.pedido} (bulto ${r.bulto}).`));
   }
   if (r.aviso_pdf) cuerpo.push(h("div", { class: "banner warn" }, r.aviso_pdf));
+  if (r.faltan_docs && r.faltan_docs.length) cuerpo.push(h("div", { class: "banner warn" },
+    `Falta: ${r.faltan_docs.join(" y ")}. Se puede añadir después en Oficina › Modificar una carga.`));
   $("pr-hecho-cuerpo").replaceChildren(...cuerpo);
   const hayPdf = !!(r.pdf && r.pdf.id);
   state.pdfUrl = hayPdf ? `/api/pdf/${r.pdf.id}?token=${encodeURIComponent(r.pdf.token || "")}` : null;
@@ -244,6 +292,7 @@ async function modificarConFoto(ev) {
         `El albarán ${v.albaran || "(sin número)"} no está registrado todavía.`,
         h("div", { class: "sugg" }, h("button", { type: "button", class: "btn", onclick: () => {
           pr.viaje = v; pr.vehiculos = leido.vehiculos || null; pr.puntos = leido.puntos || []; pr.oficina = true; pr.foto = foto;
+          pr.docs = { albaran: foto, di: null };
           pintarRevision(); go("pr-revisar");
         } }, "Registrarlo ahora"))));
       return;
@@ -278,6 +327,9 @@ function mostrarCarga(r) {
     $("pr-c-bultos").value = r.bulto.number_of_packages || "";
     $("pr-c-peso").value = r.bulto.shipping_weight ? fmtNum(r.bulto.shipping_weight) : "";
     $("pr-c-contenedor").value = "";
+    pr.cargaDocs = r.documentos || {};
+    pr.docsMod = { albaran: pr.fotoMod || null, di: null };
+    pintarDocs("pr-c-docs", pr.cargaDocs, pr.docsMod, false);
     $("pr-completar").hidden = false;
   }
 }
@@ -295,11 +347,19 @@ $("pr-completar").addEventListener("submit", async (ev) => {
   if (peso !== null && peso !== b.shipping_weight) cambios.peso_kg = peso;
   if (paper && !/^S\d{12}$/.test(paper)) return showError("El código de carga Paper es una S y 12 cifras.");
   if (val("pr-c-contenedor")) cambios.contenedor = limpiaPlaca(val("pr-c-contenedor"));
-  if (!Object.keys(cambios).length && !pr.fotoMod) return showError("No has cambiado nada.");
+  const docs = pr.docsMod || {};
+  if (!Object.keys(cambios).length && !docs.albaran && !docs.di) return showError("No has cambiado nada.");
+  if (tamañoEnvio(docs.albaran, docs.di) > MAX_ENVIO_B64) return showError("Los documentos pesan demasiado juntos. Guárdalos de uno en uno.");
   busy("Guardando…");
   try {
-    const r = await post("/api/pr/actualizar", { bulto_id: b.id, cambios, foto: pr.fotoMod || null });
+    const r = await post("/api/pr/actualizar", { bulto_id: b.id, cambios, foto: docs.albaran || null, di: docs.di || null });
     pr.fotoMod = null;
+    if (!r.simulado) {
+      if (docs.albaran) pr.cargaDocs.albaran = true;
+      if (docs.di) pr.cargaDocs.di = true;
+    }
+    pr.docsMod = { albaran: null, di: null };
+    pintarDocs("pr-c-docs", pr.cargaDocs, pr.docsMod, false);
     $("pr-completar-ok").textContent = r.simulado ? "Modo de prueba: no se ha guardado nada." :
       `Guardado en ${r.bulto}: ${r.cambiado.join(", ")}.` + (r.pdf ? " La orden de transporte se ha regenerado." : "") +
       (r.aviso_pdf ? " " + r.aviso_pdf : "");
@@ -377,7 +437,33 @@ const alm = { estado: null, oficina: false };
 const fechaEs = (f) => (f || "").split("-").reverse().join("-");
 const textoCaja = (c) => `${c.caja_movil} - ${c.vagon}`;
 const textoCarga = (g) => [g.codigo_paper || `sin código (albarán ${g.albaran || "?"})`, g.bultos != null ? g.bultos : "¿?",
-  g.peso_kg ? fmtNum(g.peso_kg) + " kg" : "¿? kg"].join(" - ");
+  g.peso_kg ? fmtNum(g.peso_kg) + " kg" : "¿? kg"].join(" - ") + (g.faltan_docs && g.faltan_docs.length ? ` · falta ${g.faltan_docs.join(" y ")}` : "");
+
+// ---------- oficina: cargas con datos o documentos pendientes ----------
+$("of-pendientes").addEventListener("click", () => { go("pr-pendientes"); cargarPendientes(); });
+$("pend-recargar").addEventListener("click", cargarPendientes);
+async function cargarPendientes() {
+  clearError();
+  busy("Buscando cargas pendientes…");
+  try {
+    const r = await api("/api/pr/pendientes");
+    const n = r.pendientes.length;
+    $("pend-cuenta").textContent = n ? (n === 1 ? "1 carga tiene algo pendiente." : `${n} cargas tienen algo pendiente.`)
+      : "Todas las cargas tienen sus datos y documentos.";
+    $("pend-lista").replaceChildren(...r.pendientes.map((p) => h("div", { class: "fila" },
+      h("span", {}, h("b", {}, `Albarán ${p.albaran || "—"}`), ` · ${p.lugar || ""}`, h("br"),
+        h("span", { class: "code" }, [fechaEs(p.fecha), p.codigo_paper, p.estado].filter(Boolean).join(" · ")), h("br"),
+        h("span", { class: "falta-txt" }, "Falta: " + p.faltan.join(", "))),
+      h("button", { type: "button", class: "btn secondary mini", onclick: () => completarDesde(p) }, "Completar"))));
+  } catch (e) { showError(e.message); } finally { busy(null); }
+}
+function completarDesde(p) {
+  pr.oficina = true;
+  $("pr-completar").hidden = true; $("pr-completar-ok").hidden = true; $("pr-m-avisos").replaceChildren();
+  $("pr-buscar").value = p.albaran || p.bulto || "";
+  go("pr-completar");
+  $("pr-buscar-form").requestSubmit();
+}
 
 async function abrirAlmacen(desdeOficina) {
   alm.oficina = desdeOficina;

@@ -135,6 +135,7 @@
     <div class="field" id="pr-cont-campo"><label for="pr-contenedor">Contenedor</label><input id="pr-contenedor" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="NPWU4954328"></div>
     <p class="hint">Lo que no venga en el albarán (peso, balas, código Paper) se puede dejar en blanco: la oficina lo completa después.</p>
   </form>
+  <section id="pr-docs" class="docs" aria-label="Documentos"></section>
   <div class="actions">
     <button id="pr-guardar" class="btn primary">Guardar y generar la orden</button>
     <button id="pr-otra-foto" class="btn ghost">Hacer otra foto</button>
@@ -158,10 +159,23 @@
   <h1>Oficina · viajes de PR</h1>
   <button id="of-registrar" class="btn primary">Registrar un viaje (foto del albarán)</button>
   <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
+  <button id="of-pendientes" class="btn secondary">Cargas con documentos o datos pendientes</button>
   <button id="of-tren" class="btn secondary">Cargar la composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
   <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- Oficina: cargas con datos o documentos pendientes -->
+<main id="s-pr-pendientes" class="screen" hidden>
+  <h1>Cargas pendientes</h1>
+  <p class="hint">Cargas a las que les falta la foto del albarán, el DI de residuos, el código Paper, el peso o las balas.</p>
+  <p id="pend-cuenta" class="banner info"></p>
+  <div id="pend-lista" class="lista"></div>
+  <div class="actions">
+    <button id="pend-recargar" class="btn ghost">Actualizar</button>
+    <button class="btn ghost" data-go="pr-oficina">Volver</button>
+  </div>
 </main>
 
 <!-- Oficina: composición del tren -->
@@ -260,6 +274,7 @@
       <div class="field"><label for="pr-c-peso">Peso neto (kg)</label><input id="pr-c-peso" type="text" inputmode="numeric" autocomplete="off"></div>
     </div>
     <div class="field"><label for="pr-c-contenedor">Contenedor</label><input id="pr-c-contenedor" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <div id="pr-c-docs" class="docs"></div>
     <button type="submit" class="btn primary">Guardar</button>
   </form>
   <div id="pr-completar-ok" class="banner info" hidden></div>

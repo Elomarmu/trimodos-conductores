@@ -188,8 +188,19 @@ CAMPOS_OBS = (  # orden de las líneas en las observaciones de descarga del bult
     ("albaran", "Albarán salida"), ("codigo_paper", "Código carga Paper"), ("codigo_natur", "Código carga Natur"),
     ("ler", "LER"), ("calidad", "Calidad"), ("bruto_kg", "Peso bruto kg"), ("tara_kg", "Tara kg"),
     ("tren", "Tren"), ("convoy", "Nº convoy"), ("fecha_tren", "Fecha tren"), ("vagon", "Vagón"), ("caja_movil", "Caja móvil"),
-    ("comprobaciones", "Comprobaciones"), ("foto", "Foto en SharePoint"),
+    ("comprobaciones", "Comprobaciones"), ("foto", "Foto en SharePoint"), ("foto_di", "DI en SharePoint"),
 )
+# Documentos de cada carga que hay que mandar al cliente: foto del albarán y DI (documento de identificación de residuos).
+# clave → (inicio del nombre del adjunto en la tarea de Odoo, clave de las observaciones con su ruta en SharePoint,
+#          añadido al nombre del archivo en SharePoint, nombre para la gente)
+DOCUMENTOS = {"albaran": ("Foto albarán", "foto", "", "foto del albarán"),
+              "di": ("DI residuos", "foto_di", " - DI", "DI de residuos")}
+
+
+def faltan(v: dict) -> list[str]:
+    """Lo que le falta a una carga: datos (código Paper, peso, balas) y documentos (foto del albarán, DI de residuos)."""
+    res = [t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"), ("bultos", "balas")) if not v.get(k)]
+    return res + [DOCUMENTOS[d][3] for d in DOCUMENTOS if v.get("doc_" + d) is False]
 COMPROBACIONES = (("dist_balas", "Dist. balas"), ("lonas", "Lonas"), ("puertas", "Puertas"), ("precinto", "Precinto"))
 
 
@@ -371,10 +382,10 @@ def extension(tipo: str | None) -> str:
     return ".pdf" if tipo == "application/pdf" else ".png" if tipo == "image/png" else ".jpg"
 
 
-def nombre_foto(codigo_paper: str, albaran: str, caja_movil: str, ext: str, ocupados: set[str]) -> str:
+def nombre_foto(codigo_paper: str, albaran: str, caja_movil: str, ext: str, ocupados: set[str], sufijo: str = "") -> str:
     """«S261104001499 - CRPU0910069.jpg». Sin código Paper: «ALBARAN 26371 - caja». Si el nombre ya está cogido en la
     carpeta se añade « (2)», « (3)»… para no pisar otra foto. Sin caracteres que SharePoint no admite."""
-    base = f"{codigo_paper or 'ALBARAN ' + (albaran or 'SIN NUMERO')} - {caja_movil}"
+    base = f"{codigo_paper or 'ALBARAN ' + (albaran or 'SIN NUMERO')} - {caja_movil}{sufijo}"
     base = re.sub(r'[\\/:*?"<>|#%]+', "-", base).strip(" .")
     nombre, n = base + ext, 2
     while nombre.lower() in {o.lower() for o in ocupados}:
