@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="robots" content="noindex, nofollow">
+<title>Guía de uso - Oficina y almacén Trimodos</title>
+<link rel="manifest" href="/oficina/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body data-screen="guia">
+<!-- Archivo GENERADO por scripts/generar_guia.py desde GUIA_OFICINA.md: no lo edites a mano. -->
+<header class="brandbar"><a href="/oficina/"><img src="/img/trimodos.png" alt="Grupo Trimodos"></a></header>
+<main class="screen guia">
+<a class="btn primary" href="/oficina/">Volver a la app</a>
+<h1>Guía de la app de oficina y almacén</h1>
+<p>Esta app es para el <strong>personal de oficina y de almacén</strong>. Los conductores usan otra, la de siempre: en ella solo tienen «DECA - Trimodos» y «Carga de PR».</p>
+<p>En la pantalla principal tienes:</p>
+<ul>
+<li><strong>DECA - Trimodos</strong>: corregir una orden de transporte escaneando su QR (igual que los conductores).</li>
+<li><strong>Carga de PR · foto del albarán</strong>: dar de alta un viaje de PR con la foto del albarán y del DI.</li>
+<li><strong>Oficina · PR</strong>: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).</li>
+<li><strong>Almacén · PR</strong>: cargar las cajas móviles del tren.</li>
+<li><strong>Cómo se usa (guía)</strong>: esta guía.</li>
+</ul>
+<h2>Antes de empezar</h2>
+<ul>
+<li><strong>Dirección:</strong> la de siempre terminada en <strong>/oficina/</strong>. Instálala en el móvil o el ordenador: en <strong>Chrome</strong>, menú ⋮ → <strong>«Instalar aplicación»</strong> (o «Añadir a pantalla de inicio»). En iPhone: <strong>Safari → Compartir → «Añadir a pantalla de inicio»</strong>. Sale como <strong>«Oficina Trimodos»</strong>.</li>
+<li><strong>Código de acceso:</strong> el de <strong>oficina y almacén</strong>, que no es el de los conductores. Con el de conductor no se puede entrar. Solo se pide la primera vez.</li>
+<li>Todo lo que hace la app queda en <strong>Odoo</strong>, que es donde están los datos. Las Excel y los documentos de SharePoint se rehacen solos a partir de Odoo: <strong>no escribas a mano en esas Excel</strong>.</li>
+</ul>
+<h2>Cómo funcionan los viajes de PR</h2>
+<ul>
+<li>Cada viaje es <strong>una línea del pedido del mes</strong> («PR NOVIEMBRE», «PR DICIEMBRE»…) del cliente SAICA PAPER, con su orden de transporte (tarea) y su bulto. El pedido del mes <strong>se crea solo</strong> con el primer viaje del mes y llega un correo con el enlace.</li>
+<li>Cada carga necesita <strong>dos documentos para el cliente</strong>: la <strong>foto del albarán</strong> y el <strong>DI de residuos</strong>. Pueden ser fotos o PDF.</li>
+<li>Si un albarán trae un <strong>punto de carga que no está dado de alta</strong>, el viaje no se guarda y llega un correo para darlo de alta.</li>
+<li><strong>Correo de cada mañana</strong> (lunes a sábado): viajes que llegaron ayer a la nave (el lunes, los del sábado y el domingo), los que se cargaron en el tren, los que tienen datos o documentos pendientes y los que quedan en stock. Lleva botones al pedido y a la Excel del tren, y cada albarán enlaza con su orden de transporte en Odoo.</li>
+</ul>
+<h2>Foto de documentos: encuadre y escaneo</h2>
+<p>Cada vez que hagas una foto a un albarán o a un DI:</p>
+<ol>
+<li>La app marca las <strong>cuatro esquinas del folio</strong> con círculos amarillos. Si alguna no está bien, <strong>arrástrala con el dedo</strong>.</li>
+<li>Pulsa <strong>«Aceptar»</strong>: endereza el folio, quita el fondo y oscurece el texto.</li>
+<li>Revisa el resultado y pulsa <strong>«Usar este escaneo»</strong>. También puedes elegir «Volver a encuadrar» o, en el primer paso, «Usar la foto tal cual».</li>
+</ol>
+<p>Consejo: el folio entero, sobre una superficie oscura y con buena luz.</p>
+<h2>Oficina · PR</h2>
+<h3>Registrar un viaje (foto del albarán)</h3>
+<p>Igual que el conductor:</p>
+<ol>
+<li>Haz la foto del albarán y espera a que se lea.</li>
+<li>Revisa los datos y añade el <strong>DI de residuos</strong> en «Documentos para el cliente».</li>
+<li>Pulsa <strong>«Guardar y generar la orden»</strong>.</li>
+</ol>
+<p>Si falta el DI, el viaje se guarda igual y queda pendiente.</p>
+<h3>Modificar una carga</h3>
+<p>Úsalo para completar lo que no venía en el albarán (código Paper, peso, balas, contenedor) o para añadir o cambiar documentos.</p>
+<ol>
+<li>Busca la carga de una de estas dos formas:<ul>
+<li><strong>Con foto del albarán:</strong> la app lo lee, encuentra el viaje y te propone lo leído junto a lo que hay en Odoo. Si el viaje no existe, ofrece <strong>«Registrarlo ahora»</strong>.</li>
+<li><strong>Buscando:</strong> escribe el <strong>nº de albarán, el código Paper o el bulto (PK…)</strong> y pulsa «Buscar».</li>
+</ul>
+</li>
+<li>Cambia los datos que haga falta.</li>
+<li>En <strong>«Documentos para el cliente»</strong> verás si cada uno está <strong>✓ Guardado</strong> o <strong>✗ Falta</strong>. Para añadir o sustituir uno, pulsa «Hacer foto» o «Elegir foto o PDF».</li>
+<li>Pulsa <strong>«Guardar»</strong>.<ul>
+<li>Si cambian el código Paper, el peso, las balas o el contenedor, se genera una orden de transporte nueva.</li>
+<li>Si la carga ya está en un tren, sus documentos de SharePoint se renombran solos.</li>
+</ul>
+</li>
+</ol>
+<h3>Cargas con documentos o datos pendientes</h3>
+<p>Lista de las cargas a las que les falta algo: foto del albarán, DI de residuos, código Paper, peso o balas. En cada una pone <strong>«Falta: …»</strong>.</p>
+<ul>
+<li>Pulsa <strong>«Completar»</strong> y se abre esa carga en «Modificar una carga».</li>
+<li>Revísala a menudo, sobre todo antes de cerrar un tren.</li>
+</ul>
+<h3>Cargar la composición del tren</h3>
+<ol>
+<li>Pulsa <strong>«Subir el listado del tren»</strong>. Puedes subir el PDF de Captrain o fotos de la primera y la última hoja.</li>
+<li>La app lee los vagones y las cajas móviles. Revisa:<ul>
+<li>el <strong>Nº de tren</strong>: es nuestro número correlativo y la app propone el siguiente;</li>
+<li>el <strong>Nº convoy</strong> (el de Captrain);</li>
+<li>la <strong>fecha</strong>;</li>
+<li>la lista de vagones y cajas.</li>
+</ul>
+</li>
+<li>Pulsa <strong>«Guardar la composición del tren»</strong>.<ul>
+<li>Si parece <strong>repetida</strong> (mismo tren, mismo convoy o casi las mismas cajas que otro tren), la app avisa con el motivo. Solo se guarda si confirmas otra vez.</li>
+</ul>
+</li>
+<li>En SharePoint › Automatizacion se crea la carpeta <strong>«CARTON PAJA TREN N»</strong> con su Excel. La composición va en la hoja «COMPOSICION».</li>
+</ol>
+<h3>Bobinas de un convoy</h3>
+<ol>
+<li>Sube la captura (o una foto) de la pantalla <strong>«SAICA - Detalle convoy»</strong>. Si el convoy no cabe en una pantalla, sube hasta 4 capturas.</li>
+<li>Revisa el total por clase de bobina y los avisos, por ejemplo una caja que no suma lo que dice su cabecera o una captura que falta.</li>
+<li>Pulsa <strong>«Enviar la Excel a Sevilla»</strong>. También se puede descargar.</li>
+</ol>
+<h2>Almacén · PR: cargar las cajas móviles</h2>
+<p>Arriba pone <strong>«Está cargado el tren N de fecha DD-MM-AAAA»</strong>. Comprueba que es el tren que estáis cargando. Si no lo es, la oficina tiene que cargar su composición.</p>
+<h3>Asignar una carga a una caja</h3>
+<ol>
+<li>En <strong>«Caja móvil»</strong> elige la caja. Salen como «caja - vagón», y solo las que están libres.</li>
+<li>En <strong>«Carga»</strong> elige lo que va dentro: «código Paper - balas - kilos». Si a una carga le falta un documento, lo verás al lado (por ejemplo «· falta DI de residuos»).<ul>
+<li>Si la caja va <strong>vacía</strong>, elige <strong>«Caja vacía»</strong> (la última opción).</li>
+</ul>
+</li>
+<li>Pulsa <strong>«Asignar»</strong>.</li>
+</ol>
+<h3>El orden del tren</h3>
+<p>La lista <strong>«Ya cargadas»</strong> está en el orden del tren: <strong>arriba los vagones pegados a la locomotora, abajo los de cola</strong>. La Excel del tren sale en ese mismo orden.</p>
+<ul>
+<li>Como se carga de atrás hacia delante, <strong>cada vagón que empiezas a cargar sube arriba</strong>. Esto vale también si va vacío.</li>
+<li>Si un vagón lleva dos cajas y cargas la segunda, <strong>se junta con su vagón sin moverlo</strong>.</li>
+<li>Si un vagón no está en su sitio, muévelo con <strong>▲</strong> (hacia la locomotora) o <strong>▼</strong> (hacia la cola).</li>
+</ul>
+<h3>Corregir y quitar</h3>
+<ul>
+<li><strong>Modificar</strong>: cambia el nombre de la caja móvil o el número del vagón. El vagón tiene 12 cifras y la app comprueba su dígito de control. Al cambiar el vagón, cambia en todas sus cajas.<ul>
+<li>Para corregir una caja antes de cargarla, elígela en el desplegable y pulsa <strong>«Modificar la caja elegida»</strong>.</li>
+</ul>
+</li>
+<li><strong>Quitar</strong>: la carga vuelve a stock. En una caja marcada como vacía, quita esa marca.</li>
+</ul>
+<h3>Terminar el tren</h3>
+<p>Cuando esté todo cargado, pulsa <strong>«Terminar el tren y enviar las Excel»</strong> y confirma. Se hacen tres cosas:</p>
+<ul>
+<li>se generan las Excel <strong>CARTON PAJA TREN N</strong> y <strong>REGISTRO VIAJES PR</strong>, que también se pueden descargar;</li>
+<li>se guardan en SharePoint;</li>
+<li>se envía un correo con las Excel y <strong>todas las fotos de albaranes y DI</strong>. Si falta algún documento, el correo lo indica.</li>
+</ul>
+<h2>Dónde queda todo en SharePoint (Automatizacion)</h2>
+<ul>
+<li><strong>Carpeta «CARTON PAJA TREN N»</strong> (una por tren):<ul>
+<li>la Excel del tren con sus hojas «TREN N» y «COMPOSICION»;</li>
+<li>las fotos de los albaranes, que se llaman <strong>«código Paper - caja móvil»</strong>;</li>
+<li>los DI, que se llaman <strong>«código Paper - caja móvil - DI»</strong>.</li>
+</ul>
+</li>
+<li><strong>REGISTRO VIAJES PR.xlsx</strong>:<ul>
+<li>hoja <strong>«STOCK EN NAVE»</strong>: lo que hay en la nave pendiente de cargar, que es el stock real;</li>
+<li>hoja <strong>«HISTORICO TRENES»</strong>: lo que ya se cargó, con el último tren arriba.</li>
+<li>Se pone al día sola cada vez que se da de alta o se cambia una carga.</li>
+</ul>
+</li>
+</ul>
+<h2>Avisos que puedes ver</h2>
+<table>
+<thead>
+<tr>
+<th>Mensaje</th>
+<th>Qué hacer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>«Este es el código de los conductores…»</td>
+<td>Estás en la app de oficina con el código de conductor. Pide el código de oficina y almacén.</td>
+</tr>
+<tr>
+<td>«Esta función es de la app de oficina y almacén»</td>
+<td>Se ha intentado usar una función de oficina desde la app de conductores. Abre <strong>…/oficina/</strong>.</td>
+</tr>
+<tr>
+<td>«Composición repetida»</td>
+<td>Lee el motivo. Si de verdad es un tren nuevo o quieres sustituir el anterior, confirma; si no, cancela.</td>
+</tr>
+<tr>
+<td>«Otra persona acaba de cargar la caja …»</td>
+<td>Dos personas han asignado la misma caja a la vez. Elige otra caja.</td>
+</tr>
+<tr>
+<td>«La caja … ya lleva la carga …»</td>
+<td>Esa caja ya está ocupada. Quita antes la carga si te has equivocado.</td>
+</tr>
+<tr>
+<td>«El vagón … no cuadra con su dígito de control»</td>
+<td>Revisa el número del vagón: la última cifra no corresponde.</td>
+</tr>
+<tr>
+<td>«Falta: DI de residuos» (u otro)</td>
+<td>Completa la carga en «Modificar una carga» o desde «Cargas pendientes».</td>
+</tr>
+<tr>
+<td>«El archivo es demasiado grande»</td>
+<td>Haz una foto del documento en vez de subir el PDF.</td>
+</tr>
+<tr>
+<td>«Modo de prueba: no se ha guardado nada»</td>
+<td>La app está en pruebas. Avisa al responsable de la app.</td>
+</tr>
+</tbody>
+</table>
+<h2>Consejos</h2>
+<ul>
+<li>Si un dato del albarán se ha leído mal, corrígelo <strong>antes de guardar</strong>. Después también se puede, desde «Modificar una carga».</li>
+<li>Revisa <strong>«Cargas pendientes»</strong> antes de terminar cada tren, para que el correo a SAICA vaya completo.</li>
+<li>Si la app no muestra lo nuevo después de una actualización, ciérrala del todo y vuelve a abrirla.</li>
+</ul>
+<a class="btn primary" href="/oficina/">Volver a la app</a>
+</main>
+</body>
+</html>

@@ -665,10 +665,13 @@ def test_no_se_puede_guardar_en_una_orden_sin_bultos():
 # --- guía dentro de la app
 def test_la_guia_de_la_app_se_genera_desde_el_markdown_y_no_esta_desfasada():
     from pathlib import Path
-    from scripts.generar_guia import generar
-    actual = (Path(__file__).resolve().parent.parent / "public" / "guia.html").read_text(encoding="utf-8")
-    assert actual.replace("\r\n", "\n") == generar().replace("\r\n", "\n"), "guia.html desfasada: ejecuta scripts.generar_guia"
-    assert "Cómo corregir la orden de transporte" in actual and "Volver a la app" in actual
+    from scripts.generar_guia import GUIAS, generar
+    for nombre, (_, destino, inicio, *_) in GUIAS.items():
+        actual = destino.read_text(encoding="utf-8")
+        assert actual.replace("\r\n", "\n") == generar(nombre).replace("\r\n", "\n"), f"{destino.name} desfasada: ejecuta scripts.generar_guia"
+        assert f'href="{inicio}">Volver a la app' in actual
+    assert "corregir la orden de transporte" in (GUIAS["conductores"][1]).read_text(encoding="utf-8")
+    assert "Almacén · PR" in (GUIAS["oficina"][1]).read_text(encoding="utf-8")
 
 
 def test_el_menu_enlaza_a_la_guia_y_se_guarda_para_uso_sin_conexion():

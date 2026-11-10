@@ -17,6 +17,7 @@ CAMBIOS = [
     ('<meta property="og:title" content="Modificación DECA - Trimodos">', '<meta property="og:title" content="Oficina y almacén - Trimodos">'),
     ('<meta name="twitter:title" content="Modificación DECA - Trimodos">', '<meta name="twitter:title" content="Oficina y almacén - Trimodos">'),
     ('<h1 id="menu-titulo">Conductores</h1>', '<h1 id="menu-titulo">Oficina y almacén</h1>'),
+    ('<a id="btn-guia" class="btn ghost" href="/guia.html">', '<a id="btn-guia" class="btn ghost" href="/oficina/guia.html">'),
     ("<p id=\"access-help\">Pídelo en la oficina. Solo hace falta la primera vez.</p>",
      "<p id=\"access-help\">Es el código de oficina y almacén (no el de los conductores). Solo hace falta la primera vez.</p>"),
 ]
