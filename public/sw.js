@@ -1,8 +1,8 @@
 // Service worker: solo guarda la "carcasa" de la app para que abra aunque no haya cobertura.
 // Los datos (/api/*) NUNCA se guardan en caché: siempre van a la red.
-const CACHE = "conductores-v29"; // súbelo (v2, v3…) cuando cambies archivos de la carcasa
+const CACHE = "conductores-v30"; // súbelo (v2, v3…) cuando cambies archivos de la carcasa
 const SHELL = [
-  "/", "/index.html", "/oficina/", "/oficina/index.html", "/oficina/manifest.webmanifest", "/guia.html", "/styles.css", "/app.js", "/pr.js", "/manifest.webmanifest",
+  "/", "/index.html", "/oficina/", "/oficina/index.html", "/oficina/manifest.webmanifest", "/guia.html", "/styles.css", "/app.js", "/pr.js", "/escaner.js", "/manifest.webmanifest",
   "/vendor/jsQR.js", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png",
   "/img/trimodos.png", "/img/stinsa.png", "/img/transargi.png", "/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2",
 ];

@@ -52,9 +52,11 @@ async function alElegir(ev) {
   ev.target.value = "";   // así se puede volver a elegir la misma foto
   if (!file) return;
   clearError();
+  let foto;
+  try { foto = await escanearDocumento(file); } catch (e) { return showError(e.message); }
+  if (!foto) return;   // ha cancelado el encuadre
   busy("Leyendo el albarán…");
   try {
-    const foto = await reducir(file);
     const r = await post("/api/pr/leer-albaran", foto);
     pr.viaje = r.viaje; pr.vehiculos = r.vehiculos || null; pr.puntos = r.puntos || []; pr.foto = foto;
     pr.docs = { albaran: foto, di: null };
@@ -100,7 +102,8 @@ function pintarRevision() {
 const DOCS = [["albaran", "Foto del albarán"], ["di", "DI de residuos"]];
 const MAX_DOC_B64 = 2_600_000, MAX_ENVIO_B64 = 4_000_000;   // Vercel admite ~4,5 MB por envío
 async function leerDocumento(file) {
-  const d = await reducir(file);
+  const d = await escanearDocumento(file);
+  if (!d) return null;
   if (d.archivo_b64.length > MAX_DOC_B64) throw new Error("El archivo es demasiado grande. Haz una foto del documento en vez de subir el PDF.");
   return d;
 }
@@ -117,9 +120,8 @@ function pintarDocs(id, tiene, nuevos, soloDi) {
       ev.target.value = "";
       if (!f) return;
       clearError();
-      busy("Preparando el documento…");
-      try { nuevos[doc] = await leerDocumento(f); pintarDocs(id, tiene, nuevos, soloDi); }
-      catch (e) { showError(e.message); } finally { busy(null); }
+      try { const d = await leerDocumento(f); if (d) { nuevos[doc] = d; pintarDocs(id, tiene, nuevos, soloDi); } }
+      catch (e) { showError(e.message); }
     };
     const cam = h("input", { type: "file", accept: "image/*", capture: "environment", class: "oculto", id: `${id}-${doc}-cam`, onchange: elegir });
     const arc = h("input", { type: "file", accept: "image/*,application/pdf", class: "oculto", id: `${id}-${doc}-arc`, onchange: elegir });
@@ -276,9 +278,11 @@ async function modificarConFoto(ev) {
   clearError();
   $("pr-completar-ok").hidden = true;
   $("pr-m-avisos").replaceChildren();
+  let foto;
+  try { foto = await escanearDocumento(file); } catch (e) { return showError(e.message); }
+  if (!foto) return;
   busy("Leyendo el albarán…");
   try {
-    const foto = await reducir(file);
     const leido = await post("/api/pr/leer-albaran", foto);
     const v = leido.viaje;
     pr.fotoMod = foto;
