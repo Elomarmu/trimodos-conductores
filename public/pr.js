@@ -464,6 +464,74 @@ async function enviarTren() {
   } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
 }
 
+// ---------- oficina: bobinas de un convoy (captura de «SAICA - Detalle convoy») ----------
+let bobinas = null;
+const descargarXlsx = (a) => {
+  const bytes = Uint8Array.from(atob(a.b64), (ch) => ch.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const link = h("a", { href: url, download: a.nombre });
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+const bobPaso = (n) => { $("bob-paso1").hidden = n !== 1; $("bob-paso2").hidden = n !== 2; };
+$("of-bobinas").addEventListener("click", () => { bobPaso(1); go("pr-bobinas"); });
+$("bob-otra").addEventListener("click", () => bobPaso(1));
+$("bob-archivo").addEventListener("change", async (ev) => {
+  const files = [...(ev.target.files || [])].slice(0, 4);
+  ev.target.value = "";
+  if (!files.length) return;
+  clearError();
+  busy("Leyendo las bobinas del convoy…");
+  try {
+    const archivos = [];
+    for (const f of files) archivos.push(await reducirBobinas(f));
+    const r = await post("/api/pr/bobinas/leer", { archivos });
+    bobinas = r;
+    $("bob-titulo").textContent = `Convoy ${r.convoy || "¿?"} · ${r.centro || ""} → ${r.destino || ""} · llegada ${fechaEs(r.fecha_llegada)} · ` +
+      `${r.cajas.length} cajas · ${r.total} bobinas · ${r.clases.length} clases`;
+    $("bob-avisos").replaceChildren(...(r.avisos.length ? r.avisos.map((a) => h("div", { class: "banner warn" }, a))
+      : [h("div", { class: "banner info" }, "Cada caja cuadra con su número de bobinas.")]));
+    $("bob-tabla").replaceChildren(
+      h("thead", {}, h("tr", {}, ...["Tipo", "Gramaje", "Diám.", "Altura", "Bobinas"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...r.clases.map((c) => h("tr", {}, h("td", {}, c.tipo), h("td", {}, String(c.gramaje)),
+        h("td", {}, String(c.diametro)), h("td", {}, String(c.altura)), h("td", {}, String(c.bobinas))))),
+      h("tfoot", {}, h("tr", {}, h("td", {}, "Total"), h("td"), h("td"), h("td"), h("td", {}, String(r.total)))));
+    $("bob-tipos").textContent = "Por tipo: " + r.por_tipo.map(([t, n]) => `${t} ${n}`).join(" · ");
+    $("bob-hecho").replaceChildren();
+    $("bob-enviar").disabled = false;
+    bobPaso(2);
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
+// La captura tiene letra pequeña: se reduce menos que la foto de un albarán.
+async function reducirBobinas(file) {
+  if (file.type === "application/pdf" || file.size < 3_000_000) {
+    return { archivo_b64: await leerArchivo(file), tipo: file.type || "image/jpeg" };
+  }
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.88));
+    return { archivo_b64: await leerArchivo(blob), tipo: "image/jpeg" };
+  } catch { return reducir(file); }
+}
+$("bob-enviar").addEventListener("click", async () => {
+  if (!bobinas) return;
+  clearError();
+  busy("Preparando la Excel…");
+  try {
+    const { clases, por_tipo, total, ...convoy } = bobinas;
+    const r = await post("/api/pr/bobinas/enviar", convoy);
+    $("bob-enviar").disabled = !r.simulado && r.enviado;
+    $("bob-hecho").replaceChildren(
+      h("div", { class: "banner info" }, r.simulado ? "Modo de prueba: no se ha enviado el correo." :
+        r.enviado ? `Excel enviada por correo a ${r.para}.` : "No se ha podido enviar el correo (el envío automático no está configurado o ha fallado). Descárgala aquí."),
+      ...r.archivos.map((a) => h("button", { class: "btn secondary", onclick: () => descargarXlsx(a) }, "Descargar " + a.nombre)));
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
+
 // Accesos directos: …/#almacen abre la asignación de cajas; …/#oficina el menú de oficina.
 function accesoDirecto() {
   if (location.hash === "#almacen") abrirAlmacen(false);

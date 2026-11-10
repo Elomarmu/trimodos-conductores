@@ -10,6 +10,8 @@ Oficina:
   POST /api/pr/leer-tren            listado del tren → cajas
   POST /api/pr/tren/composicion     guarda la composición (avisa si es repetida; «confirmado» para seguir)
   POST /api/pr/tren/enviar          las dos Excel + correo con fotos (n8n)
+  POST /api/pr/bobinas/leer         capturas del «Detalle convoy» de SAICA → cajas y total por clase de bobina
+  POST /api/pr/bobinas/enviar       Excel de bobinas por clase → descarga y correo a Sevilla (n8n)
 Oficina y almacén:
   GET  /api/pr/tren/actual · POST /api/pr/tren/asignar · POST /api/pr/tren/quitar
 n8n:
@@ -32,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
 from ..errors import AppError
+from . import pr_bobinas as B
 from . import pr_excel as X
 from . import pr_lector as L
 from . import pr_odoo as O
@@ -480,3 +483,67 @@ def leer_tren(body: Archivos):
     tren = R.limpiar_tren(leido)
     log.info("tren leído n=%s cajas=%s", tren["numero_tren"], len(tren["cajas"]))
     return tren
+
+
+# ---- oficina: bobinas de un convoy de SAICA --------------------------------------------------------------------------
+
+class LineaBobina(BaseModel):
+    bobinas: int = Field(ge=0, le=999)
+    tipo: str = Field(max_length=10)
+    gramaje: int = Field(ge=0, le=9999)
+    diametro: int = Field(ge=0, le=999)
+    altura: int = Field(ge=0, le=999)
+
+
+class CajaBobinas(BaseModel):
+    expedicion: str | None = Field(None, max_length=20)
+    caja_movil: str | None = Field(None, max_length=20)
+    bobinas: int | None = None
+    peso_t: float | None = None
+    lineas: list[LineaBobina] = Field(max_length=30)
+
+
+class ConvoyBobinas(BaseModel):
+    convoy: str | None = Field(None, max_length=20)
+    centro: str | None = Field(None, max_length=40)
+    destino: str | None = Field(None, max_length=40)
+    fecha_llegada: str | None = Field(None, max_length=10)
+    vagones: int | None = None
+    cajas: list[CajaBobinas] = Field(min_length=1, max_length=80)
+    avisos: list[str] = Field(default_factory=list, max_length=100)
+
+
+@router.post("/bobinas/leer")
+def bobinas_leer(body: Archivos):
+    """Oficina: capturas o fotos de «SAICA - Detalle convoy» → cajas con sus líneas y el total por clase."""
+    d = B.limpiar(_leer(B.leer, [_bytes(a) for a in body.archivos]))
+    if not d["cajas"]:
+        raise AppError("No se han leído cajas en la captura. Prueba con otra captura de la pantalla completa.", 422, "sin_cajas")
+    clases = B.agrupar(d["cajas"])
+    log.info("bobinas convoy %s: %s cajas, %s clases", d["convoy"], len(d["cajas"]), len(clases))
+    return {**d, "clases": clases, "por_tipo": B.por_tipo(clases), "total": sum(c["bobinas"] for c in clases)}
+
+
+@router.post("/bobinas/enviar")
+def bobinas_enviar(body: ConvoyBobinas):
+    """Oficina: la Excel de bobinas por clase se descarga en la app y se manda por correo a Sevilla (n8n)."""
+    d = body.model_dump()
+    clases = B.agrupar(d["cajas"])
+    total = sum(c["bobinas"] for c in clases)
+    nombre = B.nombre_excel(d)
+    libro = base64.b64encode(B.excel(d)).decode()
+    tipos = " · ".join(f"{t} {n}" for t, n in B.por_tipo(clases))
+    cuerpo = (f"<p style='font:11pt Calibri,Arial'><b>{html.escape(B.titulo(d))}</b>: {len(d['cajas'])} cajas, "
+              f"<b>{total} bobinas</b> en {len(clases)} clases ({html.escape(tipos)}).</p>"
+              + tabla_html(["Tipo", "Gramaje", "Diámetro", "Altura", "Bobinas"],
+                           [[c["tipo"], c["gramaje"], c["diametro"], c["altura"], c["bobinas"]] for c in clases])
+              + ("<p style='font:11pt Calibri,Arial'><b>Revisar:</b><br>" + "<br>".join(html.escape(a) for a in d["avisos"]) + "</p>"
+                 if d["avisos"] else "")
+              + f"<p style='font:11pt Calibri,Arial'>Va adjunta la Excel {html.escape(nombre)} (resumen por clase y detalle por caja).</p>")
+    archivos = [{"nombre": nombre, "b64": libro}]
+    s = get_settings()
+    enviado = False if s.dry_run else enviar_n8n({
+        "evento": "bobinas", "asunto": f"Bobinas convoy {d.get('convoy') or ''} · llegada {B.fecha_es(d.get('fecha_llegada'))} ({total} bobinas)",
+        "html": cuerpo, "archivos": archivos})
+    log.info("bobinas convoy %s enviadas: %s bobinas (%s)", d.get("convoy"), total, enviado)
+    return {"simulado": s.dry_run, "enviado": enviado, "para": destinatarios(), "total": total, "clases": len(clases), "archivos": archivos}

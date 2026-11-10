@@ -160,6 +160,7 @@
   <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
   <button id="of-tren" class="btn secondary">Cargar la composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
+  <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
 </main>
 
@@ -189,6 +190,28 @@
   <div id="tren-hecho" hidden>
     <div id="tren-hecho-cuerpo" class="result"></div>
     <button id="tren-ir-asignar" class="btn primary">Asignar cargas a cajas</button>
+  </div>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
+</main>
+
+<!-- Oficina: bobinas de un convoy (pantalla «SAICA - Detalle convoy») -->
+<main id="s-pr-bobinas" class="screen" hidden>
+  <h1>Bobinas de un convoy</h1>
+  <div id="bob-paso1">
+    <p class="hint">Sube la captura (o una foto) de la pantalla «SAICA - Detalle convoy». Si el convoy no cabe en una pantalla, sube hasta 4 capturas.</p>
+    <label class="btn primary huge" for="bob-archivo">Subir la captura del convoy</label>
+    <input id="bob-archivo" class="oculto" type="file" accept="image/*,application/pdf" multiple>
+  </div>
+  <div id="bob-paso2" hidden>
+    <p id="bob-titulo" class="hint"></p>
+    <div id="bob-avisos" class="avisos"></div>
+    <div class="bob-scroll"><table id="bob-tabla" class="bob-tabla"></table></div>
+    <p id="bob-tipos" class="hint"></p>
+    <div class="actions">
+      <button id="bob-enviar" class="btn primary">Enviar la Excel a Sevilla</button>
+      <button id="bob-otra" class="btn ghost">Subir otra captura</button>
+    </div>
+    <div id="bob-hecho" class="lista"></div>
   </div>
   <button class="btn ghost" data-go="pr-oficina">Volver</button>
 </main>

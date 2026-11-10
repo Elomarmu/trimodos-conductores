@@ -279,3 +279,12 @@ select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; disp
 .fila > span:first-child { min-width: 0; }
 .btn.quitar { width: auto; min-height: 44px; padding: 6px 14px; font-size: .9rem; border-color: var(--bad); color: var(--bad); }
 #alm-form .btn.huge { margin-top: 4px; }
+
+/* Oficina · bobinas de un convoy */
+.bob-scroll { overflow-x: auto; max-height: 60vh; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.bob-tabla { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.bob-tabla th, .bob-tabla td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.bob-tabla th:first-child, .bob-tabla td:first-child { text-align: left; }
+.bob-tabla thead th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 600; }
+.bob-tabla tfoot td { font-weight: 700; border-bottom: 0; }
+@media (max-width: 480px) { .bob-tabla { font-size: .9rem; } .bob-tabla th, .bob-tabla td { padding: 6px 5px; } }

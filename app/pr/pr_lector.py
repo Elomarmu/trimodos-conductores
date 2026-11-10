@@ -115,13 +115,13 @@ def _bloque(contenido: bytes, tipo: str) -> dict:
 
 
 def _preguntar(archivos: list[tuple[bytes, str]], prompt: str, herramienta: str, esquema: dict,
-               cliente: httpx.Client | None = None) -> dict:
+               cliente: httpx.Client | None = None, max_tokens: int = 4000, timeout: float = 25) -> dict:
     clave = os.environ.get("ANTHROPIC_API_KEY", "")
     if not clave:
         raise LecturaError("Falta configurar la lectura automática (ANTHROPIC_API_KEY).")
     cuerpo = {
         "model": os.environ.get("PR_MODELO", MODELO_DEFECTO),
-        "max_tokens": 4000,
+        "max_tokens": max_tokens,
         "tools": [{"name": herramienta, "description": "Devuelve los datos leídos", "input_schema": esquema}],
         # Algunos modelos no admiten obligar a usar la herramienta («tool_choice: tool»): se pide en el texto
         # y, si aun así contesta con texto, se busca el JSON en la respuesta.
@@ -130,7 +130,7 @@ def _preguntar(archivos: list[tuple[bytes, str]], prompt: str, herramienta: str,
                       prompt + f"\n\nResponde SOLO llamando a la herramienta «{herramienta}» con los datos leídos."}]}],
     }
     cab = {"x-api-key": clave, "anthropic-version": "2023-06-01", "content-type": "application/json"}
-    cli = cliente or httpx.Client(timeout=25)
+    cli = cliente or httpx.Client(timeout=timeout)
     try:
         r = cli.post(API_URL, json=cuerpo, headers=cab)
     except httpx.HTTPError as e:
