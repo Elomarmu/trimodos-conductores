@@ -17,6 +17,7 @@ CFG = {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41, "fecha_inicio"
 class OdooFalso:
     def __init__(self):
         self.pedidos, self.lineas, self.eq, self.llamadas, self.sig = {}, {}, {"AIRU6001460": 30558}, 0, 1000
+        self.uid = 7
 
     def __call__(self, modelo, metodo, args, **kw):
         assert (modelo, metodo) in E.PERMITIDO, (modelo, metodo)
@@ -44,13 +45,18 @@ class OdooFalso:
         if modelo == "sale.order" and metodo == "action_confirm":
             for i in args[0]: self.pedidos[i]["state"] = "sale"
             return True
+        if modelo == "sale.order" and metodo in ("action_unlock", "action_lock"):
+            return True
         raise AssertionError((modelo, metodo))
 
     def _lineas(self, oid, cmds):
-        for _, _, v in cmds:
+        for cmd, lid, v in cmds:
+            if cmd == 1:
+                self.lineas[lid].update(v); continue
             self.sig += 1
-            self.lineas[self.sig] = {"order_id": [oid, ""], "product_id": [v["product_id"], ""],
-                                     "pickup_date": v["pickup_date"], "equipment_id": [v["equipment_id"], ""] if v["equipment_id"] else False}
+            self.lineas[self.sig] = {**v, "order_id": [oid, ""], "product_id": [v["product_id"], ""],
+                                     "equipment_id": [v["equipment_id"], ""] if v["equipment_id"] else False,
+                                     "create_uid": [self.uid, ""], "qty_invoiced": 0}
 
 
 def test_crea_y_no_duplica():
@@ -530,3 +536,84 @@ def test_tren_amberes_llagosta_boella_en_dos_lineas_si_hay_tarifa_de_cada_parte(
         [("AMBERES", "LA BOELLA", "2026-11-02", "2026-11-05")]
     # si a una parte le falta tarifa, no se parte (avisa del tramo entero)
     assert trenes([tar("AMBERES", "LA LLAGOSTA", 1219)]) == [("AMBERES", "LA BOELLA", "2026-11-02", "2026-11-05")]
+
+
+
+# ------------------------------------------------------------------ conciliar lo ya pasado a Odoo con la Excel
+def _primera_de_pago(o):
+    return next(i for i, v in o.lineas.items() if not str(v.get("name", "")).startswith("INFO") and v.get("price_unit"))
+
+
+def test_conciliar_corrige_lo_cambiado_y_no_toca_lo_que_ya_esta_bien():
+    o = OdooFalso()
+    E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert not r["lineas_corregidas"] and not r["lineas_anuladas"], r["lineas_corregidas"][:3]
+    lid = _primera_de_pago(o)
+    bien = dict(o.lineas[lid])
+    o.lineas[lid].update(price_unit=bien["price_unit"] + 100, name="otro texto")  # «la Excel cambió»
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert len(r["lineas_corregidas"]) == 1 and "precio" in r["lineas_corregidas"][0]["cambio"]
+    assert o.lineas[lid]["price_unit"] == bien["price_unit"] and o.lineas[lid]["name"] == bien["name"]
+
+
+def test_conciliar_anula_lo_que_ya_no_esta_y_respeta_lo_manual_y_lo_facturado():
+    o = OdooFalso()
+    E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    lid = _primera_de_pago(o)
+    base = o.lineas[lid]
+    oid = base["order_id"][0]
+    o.sig += 1; sobra = o.sig   # línea del automatismo que ya no sale de la Excel
+    o.lineas[sobra] = dict(base, product_id=[999999, ""], name="Tramo que ya no existe")
+    o.sig += 1; manual = o.sig  # línea puesta a mano en Odoo
+    o.lineas[manual] = dict(base, product_id=[888888, ""], name="Manual", create_uid=[1, ""])
+    o.sig += 1; fact = o.sig    # facturada y ya no está en la Excel
+    o.lineas[fact] = dict(base, product_id=[777777, ""], name="Facturada", qty_invoiced=1)
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert [x["linea"] for x in r["lineas_anuladas"]] == ["Tramo que ya no existe"]
+    assert o.lineas[sobra]["product_uom_qty"] == 0 and o.lineas[sobra]["name"].startswith("ANULADA")
+    assert o.lineas[manual]["name"] == "Manual" and o.lineas[fact]["name"] == "Facturada"
+    assert [x["linea"] for x in r["cambios_facturados"]] == ["Facturada"]
+    # la noche siguiente no vuelve a anularla ni a avisar
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert not r["lineas_anuladas"] and oid in o.pedidos
+
+
+def test_conciliar_no_anula_si_ese_dia_faltan_datos():
+    o = OdooFalso()
+    E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    base = o.lineas[_primera_de_pago(o)]
+    cont = next(n for n, i in o.eq.items() if i == base["equipment_id"][0])
+    o.sig += 1
+    o.lineas[o.sig] = dict(base, product_id=[999999, ""], name="Pendiente")
+    import argon_facturacion as F
+    rot = E.preparar(F.calcular(EXCEL, dt.date(2026, 8, 16), hoy=dt.date.today()), dt.date(2026, 10, 15))
+    previos = o("sale.order", "search_read", [[["origin", "=like", "ARGON|%"]]])
+    res = {"lineas_corregidas": [], "lineas_anuladas": [], "cambios_facturados": []}
+    matricula = next(r.split("|")[0] for r in rot if r.split("|")[0].replace(" ", "").replace("-", "") == cont)
+    E.conciliar(o, rot, previos, o.eq, CFG, True, res, {(matricula, base["pickup_date"][:10])}, dt.date(2026, 10, 15))
+    assert not res["lineas_anuladas"] and o.lineas[o.sig]["name"] == "Pendiente"
+
+
+def test_correo_explica_lo_corregido_anulado_y_facturado():
+    import argon_api as A
+    x = {"pedido": "S1", "url": None, "contenedor": "CARU 1", "fecha": "2026-11-02", "linea": "Tramo", "cambio": "precio: 900 → 914"}
+    res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "errores": [], "modo": "real",
+           "pendientes_de_datos": [], "bloqueos_largos": [], "excel": {"avisos": [], "escrituras": []},
+           "lineas_corregidas": [x], "lineas_anuladas": [x], "cambios_facturados": [x]}
+    av = {k: [] for k in ("bloqueados", "sin_anotar", "sl_sin_numero", "revisar", "vencimientos")}
+    h = A.correo(dt.date(2026, 11, 10), res, av)
+    assert "1 corregidas y 1 anuladas" in h and "REVISAR A MANO" in h and "precio: 900 → 914" in h
+    assert h.index("<!--/ODOO-->") < h.index("Líneas corregidas")
+
+
+def test_conciliar_freno_si_hay_que_anular_demasiado():
+    o = OdooFalso()
+    E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    base = o.lineas[_primera_de_pago(o)]
+    for n in range(40):
+        o.sig += 1
+        o.lineas[o.sig] = dict(base, product_id=[900000 + n, ""], name=f"Sobra {n}")
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert not r["lineas_anuladas"] and any("demasiadas" in e for e in r["errores"])
+    assert not any(str(v.get("name", "")).startswith("ANULADA") for v in o.lineas.values())
