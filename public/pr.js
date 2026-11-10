@@ -491,8 +491,8 @@ function pintarAlmacen(e) {
   $("alm-caja").replaceChildren(h("option", { value: "" }, libres.length ? "— Elige la caja —" : "— No quedan cajas libres —"),
     ...libres.map((c) => h("option", { value: c.caja_movil }, textoCaja(c))));
   $("alm-carga").replaceChildren(h("option", { value: "" }, "— Elige la carga —"),
-    h("option", { value: "vacia" }, "Caja vacía"),
-    ...e.stock.map((g) => h("option", { value: g.bulto_id }, textoCarga(g))));
+    ...e.stock.map((g) => h("option", { value: g.bulto_id }, textoCarga(g))),
+    h("option", { value: "vacia" }, "Caja vacía"));
   const vacias = e.cajas.filter((c) => c.vacia).length;
   $("alm-cuenta").textContent = `${llenas.length - vacias} de ${e.cajas.length} cajas cargadas` + (vacias ? ` · ${vacias} ${vacias === 1 ? "vacía" : "vacías"}` : "") +
     ` · ${libres.length} sin asignar · ` +
