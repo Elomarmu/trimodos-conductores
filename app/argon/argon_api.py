@@ -89,7 +89,10 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
     modo = "" if odoo_res.get("modo") == "real" else " (MODO PRUEBA: no se ha escrito nada)"
     p = [enlaces(url_excel), "<!--ODOO-->", f"<p style='font:11pt Calibri,Arial'><b>ARGON · lectura del {hoy:%d/%m/%Y}{modo}</b><br>"
          f"Odoo: {len(odoo_res['pedidos_creados'])} pedidos nuevos, {len(odoo_res['pedidos_ampliados'])} ampliados, "
-         f"{odoo_res['lineas_nuevas']} líneas nuevas.</p>"]
+         f"{odoo_res['lineas_nuevas']} líneas nuevas"
+         + (f", {len(odoo_res.get('lineas_corregidas', []))} corregidas y {len(odoo_res.get('lineas_anuladas', []))} anuladas "
+            "por cambios en la Excel" if odoo_res.get("lineas_corregidas") or odoo_res.get("lineas_anuladas") else "")
+         + ".</p>"]
     if odoo_res["errores"]:
         p.append(h3("Errores al escribir en Odoo") + tabla(["Detalle"], [[x] for x in odoo_res["errores"]]))
     p.append(h3("Pedidos nuevos") + tabla(["Pedido", "Contenedor", "Líneas", "Importe €"],
@@ -97,6 +100,22 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
     p.append(h3("Pedidos ampliados") + tabla(["Pedido", "Contenedor", "Líneas nuevas"],
                                              [(ped(x), x["contenedor"], x["lineas"]) for x in odoo_res["pedidos_ampliados"]]))
     p.append("<!--/ODOO-->")
+    # lo ya pasado a Odoo que ha cambiado en la Excel (solo lo no facturado se toca)
+    cab_c = ["Pedido", "Contenedor", "Fecha", "Línea", "Qué ha cambiado"]
+    fila_c = lambda x: (ped(x), x["contenedor"], f(x["fecha"]), x["linea"], x["cambio"])  # noqa: E731
+    if odoo_res.get("lineas_corregidas"):
+        p.append(h3("Líneas corregidas en Odoo porque ha cambiado la Excel") +
+                 tabla(cab_c, [fila_c(x) for x in odoo_res["lineas_corregidas"]]))
+    if odoo_res.get("lineas_anuladas"):
+        p.append(h3("Líneas anuladas en Odoo (cantidad 0): ya no salen de la Excel") +
+                 "<p style='font:10pt Calibri,Arial;color:#555'>Odoo no deja borrar líneas de un pedido confirmado: se dejan "
+                 "a 0 con «ANULADA» delante. Si el servicio ha cambiado de producto, la línea buena se ha añadido en el mismo pedido.</p>" +
+                 tabla(cab_c, [fila_c(x) for x in odoo_res["lineas_anuladas"]]))
+    if odoo_res.get("cambios_facturados"):
+        p.append(h3("REVISAR A MANO: cambios en servicios ya facturados") +
+                 "<p style='font:10pt Calibri,Arial;color:#555'>La Excel ya no coincide con lo facturado. No se ha tocado nada: "
+                 "habría que hacer una rectificativa o corregir la celda.</p>" +
+                 tabla(cab_c, [fila_c(x) for x in odoo_res["cambios_facturados"]]))
     p.append(h3("Servicios que no han pasado a Odoo por falta de datos") +
              tabla(["Fecha", "Contenedor", "Servicio", "Texto", "Falta"],
                    [(f(x["fecha"]), x["contenedor"], x["servicio"], ("html", a_excel(x["texto"], x.get("celda"))),

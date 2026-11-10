@@ -24,6 +24,7 @@ import argon_referencias as R
 PERMITIDO = {
     ("sale.order", "search_read"), ("sale.order", "create"), ("sale.order", "write"), ("sale.order", "action_confirm"),
     ("sale.order.line", "search_read"), ("tms.equipment", "search_read"), ("tms.equipment", "create"),
+    ("sale.order", "action_unlock"), ("sale.order", "action_lock"),  # corregir líneas de pedidos bloqueados
     ("product.product", "search_read"), ("res.partner", "search_read"),  # referencias de la Excel (solo lectura)
     ("account.analytic.account", "search_read"), ("fleet.vehicle", "search_read"),
 }
@@ -81,9 +82,11 @@ def clave_linea(product_id, fecha, equipo_id):
     return (int(product_id), str(fecha)[:10], int(equipo_id or 0))
 
 
-def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20.0) -> dict:
+def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20.0, protegidos: set | None = None,
+             desde: dt.date = dt.date(2026, 10, 15)) -> dict:
     t0 = time.time()
     res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "lineas_ya_estaban": 0,
+           "lineas_corregidas": [], "lineas_anuladas": [], "cambios_facturados": [],
            "errores": [], "restantes": 0, "modo": "real" if real else "prueba"}
     if not rotaciones:
         return res
@@ -156,9 +159,130 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             res["lineas_nuevas"] += len(nuevas)
         except Exception as e:  # un contenedor con problemas no para a los demás
             res["errores"].append(f"{cont}: {e}")
+    if not res["restantes"] and time.time() - t0 <= limite_s:
+        try:
+            conciliar(odoo, rotaciones, previos, eq, cfg, real, res, protegidos or set(), desde)
+        except Exception as e:
+            res["errores"].append(f"Revisión de lo ya pasado a Odoo: {e}")
     res["llamadas_odoo"] = getattr(odoo, "llamadas", 0)
     res["segundos"] = round(time.time() - t0, 1)
     return res
+
+
+# Campos de la línea que el automatismo mantiene iguales a la Excel (mientras no esté facturada)
+CAMPOS = {"name": "descripción", "product_uom_qty": "cantidad", "price_unit": "precio", "purchase_price": "coste",
+          "vendor_id": "proveedor", "shipping_origin_id": "origen", "shipping_destination_id": "destino",
+          "forecast_unload_date": "fecha de llegada", "analytic_distribution": "analítica",
+          "tractor_id": "tractora", "trailer_id": "remolque", "driver_id": "conductor"}
+ANULADA = "ANULADA · "
+MAX_ANULAR = 10  # más de esto (o del 20 % de las líneas) en una noche: no se anula nada y se avisa
+
+
+def _norm(campo, v):
+    if v in (None, False, ""):
+        return None
+    if isinstance(v, (list, tuple)):  # many2one de Odoo: [id, nombre]
+        return v[0] if v else None
+    if campo in ("product_uom_qty", "price_unit", "purchase_price"):
+        return round(float(v), 2)
+    if campo == "forecast_unload_date":
+        return str(v)[:10]
+    if campo == "analytic_distribution":
+        return {str(k): round(float(x), 2) for k, x in dict(v).items()} or None
+    return v
+
+
+def _txt(campo, v):
+    if isinstance(v, (list, tuple)) and v:
+        return str(v[1] if len(v) > 1 and v[1] else v[0])
+    return "—" if v in (None, False, "") else str(v)
+
+
+def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: bool, res: dict,
+              protegidos: set, desde: dt.date):
+    """Lo ya pasado a Odoo y aún no facturado se mantiene igual que la Excel:
+    - si una celda pasada cambia (precio, proveedor, destino, conductor…), se corrige la línea;
+    - si un servicio ya no está en la Excel, su línea se anula (cantidad 0 y «ANULADA» delante: Odoo no deja borrar
+      líneas de un pedido confirmado);
+    - si lo que cambia ya está facturado, no se toca y se avisa en el correo para revisarlo a mano.
+    Solo toca líneas creadas por el automatismo (no las que se añaden a mano en Odoo) y nunca las de un día en el que a
+    ese contenedor le faltan datos (se avisa aparte, en «falta de datos»)."""
+    ids = [i for p in previos for i in p["order_line"]]
+    if not ids:
+        return
+    uid = getattr(odoo, "uid", None)
+    pedidos = {p["id"]: p for p in previos}
+    lineas = odoo("sale.order.line", "search_read", [[["id", "in", ids]]],
+                  fields=["order_id", "product_id", "pickup_date", "equipment_id", "qty_invoiced", "create_uid",
+                          *CAMPOS])
+    # lo que la Excel dice hoy: clave (producto, fecha, contenedor) → valores de la línea
+    esperadas = defaultdict(list)
+    for rot, servs in rotaciones.items():
+        eid = eq.get(rot.split("|")[0].replace(" ", "").replace("-", ""))
+        for s in servs:
+            v = AO.linea_de(s, cfg)
+            esperadas[clave_linea(s.producto_id, AO.utc_mediodia(s.fecha), eid)].append((s, v))
+    prot = {(eq.get(c.replace(" ", "").replace("-", "")), f) for c, f in protegidos}
+    cambios = defaultdict(list)  # pedido → [(1, línea, valores)]
+    for l in sorted(lineas, key=lambda x: x["id"]):
+        if not l["product_id"] or (uid and l.get("create_uid") and l["create_uid"][0] != uid):
+            continue  # línea puesta a mano en Odoo: no se toca
+        fecha = str(l["pickup_date"] or "")[:10]
+        if fecha < desde.isoformat():
+            continue
+        eid = l["equipment_id"] and l["equipment_id"][0]
+        k = clave_linea(l["product_id"][0], l["pickup_date"] or "", eid)
+        ped = pedidos.get(l["order_id"][0], {})
+        info = {"pedido": ped.get("name", l["order_id"][1] if len(l["order_id"]) > 1 else ""), "url": enlace(odoo, ped.get("id")) if ped else None,
+                "contenedor": next((n for n, i in eq.items() if i == eid), ""), "fecha": fecha,
+                "linea": str(l.get("name") or "").replace(ANULADA, "")}
+        facturada = float(l.get("qty_invoiced") or 0) > 0
+        if esperadas.get(k):
+            s, v = esperadas[k].pop(0)
+            nuevo = {c: v.get(c, False) for c in CAMPOS}
+            dif = {c: x for c, x in nuevo.items() if _norm(c, l.get(c)) != _norm(c, x)}
+            if not dif:
+                continue
+            txt = "; ".join(f"{CAMPOS[c]}: {_txt(c, l.get(c))} → {_txt(c, x)}" for c, x in dif.items() if c != "name") \
+                or "descripción"
+            if facturada:
+                res["cambios_facturados"].append(info | {"cambio": txt})
+            else:
+                cambios[l["order_id"][0]].append((1, l["id"], dif))
+                res["lineas_corregidas"].append(info | {"cambio": txt})
+        else:
+            if str(l.get("name") or "").startswith(ANULADA) and not float(l.get("product_uom_qty") or 0):
+                continue  # ya anulada otra noche
+            if (eid, fecha) in prot:
+                continue  # ese día le faltan datos al contenedor: no se anula hasta que se completen
+            if facturada:
+                res["cambios_facturados"].append(info | {"cambio": "ya no está en la Excel (o ha cambiado de producto)"})
+            else:
+                cambios[l["order_id"][0]].append((1, l["id"], {"product_uom_qty": 0, "name": ANULADA + str(l.get("name") or "")}))
+                res["lineas_anuladas"].append(info | {"cambio": "ya no está en la Excel (o ha cambiado de producto)"})
+    # freno de seguridad: si de golpe hubiera que anular muchas líneas, algo raro pasa (Excel a medio editar, hoja
+    # movida…). No se anula nada y se avisa en el correo.
+    revisadas = sum(1 for l in lineas if l["product_id"] and str(l["pickup_date"] or "")[:10] >= desde.isoformat())
+    if len(res["lineas_anuladas"]) > max(MAX_ANULAR, revisadas * 0.2):
+        n = len(res["lineas_anuladas"])
+        res["errores"].append(f"Habría que anular {n} líneas de {revisadas}: son demasiadas y no se ha anulado ninguna. "
+                              "Revisad si la Excel está bien (filas borradas o movidas) y escribidme.")
+        res["cambios_facturados"].extend(x | {"cambio": "SIN ANULAR (freno de seguridad): " + x["cambio"]}
+                                         for x in res["lineas_anuladas"])
+        res["lineas_anuladas"] = []
+        cambios = {oid: [c for c in cmds if not str(c[2].get("name", "")).startswith(ANULADA)] for oid, cmds in cambios.items()}
+        cambios = {oid: c for oid, c in cambios.items() if c}
+    if not real:
+        return
+    for oid, cmds in cambios.items():
+        try:
+            odoo("sale.order", "write", [[oid], {"order_line": cmds}])
+        except Exception as e:  # pedido bloqueado: se desbloquea, se corrige y se vuelve a bloquear
+            if "bloque" not in str(e).lower() and "lock" not in str(e).lower():
+                raise
+            odoo("sale.order", "action_unlock", [[oid]])
+            odoo("sale.order", "write", [[oid], {"order_line": cmds}])
+            odoo("sale.order", "action_lock", [[oid]])
 
 
 def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0,
@@ -176,7 +300,10 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
     # 60 días antes: para saber dónde empieza cada rotación. Productos y proveedores desde su referencia en Odoo.
     servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo), hoy=hoy)
     rot = preparar(servicios, desde)
-    res = escribir(odoo, rot, cfg, real, limite_s)
+    # días de cada contenedor con algún servicio sin datos: sus líneas de Odoo no se anulan mientras tanto
+    protegidos = {(s.contenedor, s.fecha) for s in servicios
+                  if s.fecha >= desde.isoformat() and s.estado not in ("LISTO PARA ODOO", "INFORMATIVO")}
+    res = escribir(odoo, rot, cfg, real, limite_s, protegidos, desde)
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
     hace7 = (hoy - dt.timedelta(days=7)).isoformat()
