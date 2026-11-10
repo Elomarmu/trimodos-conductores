@@ -401,28 +401,85 @@ function pintarAlmacen(e) {
   alm.estado = e;
   $("alm-form").hidden = false;
   $("alm-tren").textContent = `Está cargado el tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` (convoy ${e.convoy})` : "") + ".";
-  const libres = e.cajas.filter((c) => !c.carga), llenas = e.cajas.filter((c) => c.carga);
+  const libres = e.cajas.filter((c) => !c.carga && !c.vacia), llenas = e.cajas.filter((c) => c.carga || c.vacia);
   $("alm-caja").replaceChildren(h("option", { value: "" }, libres.length ? "— Elige la caja —" : "— No quedan cajas libres —"),
     ...libres.map((c) => h("option", { value: c.caja_movil }, textoCaja(c))));
-  $("alm-carga").replaceChildren(h("option", { value: "" }, e.stock.length ? "— Elige la carga —" : "— No hay cargas en stock —"),
+  $("alm-carga").replaceChildren(h("option", { value: "" }, "— Elige la carga —"),
+    h("option", { value: "vacia" }, "Caja vacía"),
     ...e.stock.map((g) => h("option", { value: g.bulto_id }, textoCarga(g))));
-  $("alm-cuenta").textContent = `${llenas.length} de ${e.cajas.length} cajas cargadas · ${libres.length} libres · ` +
+  const vacias = e.cajas.filter((c) => c.vacia).length;
+  $("alm-cuenta").textContent = `${llenas.length - vacias} de ${e.cajas.length} cajas cargadas` + (vacias ? ` · ${vacias} ${vacias === 1 ? "vacía" : "vacías"}` : "") +
+    ` · ${libres.length} sin asignar · ` +
     (e.stock.length === 1 ? "1 carga en stock." : `${e.stock.length} cargas en stock.`);
   $("alm-hechas-titulo").hidden = !llenas.length;
-  $("alm-hechas").replaceChildren(...llenas.map((c) => h("div", { class: "fila" },
-    h("span", {}, h("b", {}, textoCaja(c)), h("br"), h("span", { class: "code" }, textoCarga(c.carga))),
-    h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar"))));
+  $("alm-orden-hint").hidden = !llenas.length;
+  const grupos = e.grupos || [];
+  $("alm-hechas").replaceChildren(...grupos.map((g, i) => h("div", { class: "vagon" },
+    h("div", { class: "vagon-cab" },
+      h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`),
+      h("span", { class: "vagon-mover" },
+        h("button", { type: "button", class: "btn ghost mini", title: "Subir (hacia la locomotora)", "aria-label": `Subir el vagón ${g.vagon}`,
+          disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
+        h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
+          disabled: i === grupos.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼"))),
+    ...g.cajas.map((c) => h("div", { class: "fila" },
+      h("span", {}, h("b", {}, c.caja_movil), h("br"),
+        c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
+          : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía")),
+      h("span", { class: "vagon-mover" },
+        h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
+        c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null))))));
 }
+
+async function moverVagon(vagon, hacia) {
+  clearError();
+  busy("Cambiando el orden…");
+  try { const r = await post("/api/pr/tren/mover", { vagon, hacia }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+  catch (e) { showError(e.message); } finally { busy(null); }
+}
+
+// Corregir el nombre de la caja móvil o el número del vagón (el vagón cambia para todas sus cajas).
+function editarCaja(c, donde) {
+  document.querySelectorAll(".editar-caja").forEach((x) => x.remove());
+  const caja = h("input", { type: "text", value: c.caja_movil, autocapitalize: "characters", autocomplete: "off", spellcheck: "false", "aria-label": "Caja móvil" });
+  const vagon = h("input", { type: "text", value: c.vagon, inputmode: "numeric", autocomplete: "off", "aria-label": "Vagón" });
+  const panel = h("form", { class: "editar-caja", novalidate: "" },
+    h("div", { class: "field" }, h("label", {}, "Caja móvil"), caja),
+    h("div", { class: "field" }, h("label", {}, "Vagón (12 cifras; cambia para todas sus cajas)"), vagon),
+    h("div", { class: "row2" },
+      h("button", { type: "submit", class: "btn primary small" }, "Guardar"),
+      h("button", { type: "button", class: "btn ghost small", onclick: () => panel.remove() }, "Cancelar")));
+  panel.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    clearError();
+    const nuevaCaja = caja.value.replace(/[\s-]/g, "").toUpperCase(), nuevoVagon = vagon.value.replace(/\D/g, "");
+    const cambios = { caja_movil: c.caja_movil, nueva_caja: nuevaCaja !== c.caja_movil ? nuevaCaja : "",
+      nuevo_vagon: nuevoVagon !== c.vagon ? nuevoVagon : "" };
+    if (!cambios.nueva_caja && !cambios.nuevo_vagon) return panel.remove();
+    if (!nuevaCaja) return showError("Escribe la caja móvil.");
+    if (cambios.nuevo_vagon && cambios.nuevo_vagon.length !== 12) return showError("El vagón tiene que tener 12 cifras.");
+    busy("Guardando…");
+    try { const r = await post("/api/pr/tren/editar", cambios); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+    catch (e) { showError(e.message); } finally { busy(null); }
+  });
+  (donde || $("alm-form")).after(panel);
+  caja.focus();
+}
+$("alm-editar").addEventListener("click", () => {
+  const c = alm.estado && alm.estado.cajas.find((x) => x.caja_movil === $("alm-caja").value);
+  if (!c) return showError("Elige primero en la lista la caja que quieres modificar.");
+  editarCaja(c, $("alm-form"));
+});
 
 $("alm-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   clearError();
-  const caja = $("alm-caja").value, carga = Number($("alm-carga").value);
+  const caja = $("alm-caja").value, vacia = $("alm-carga").value === "vacia", carga = vacia ? 0 : Number($("alm-carga").value);
   if (!caja) return showError("Elige la caja móvil.");
-  if (!carga) return showError("Elige la carga.");
+  if (!carga && !vacia) return showError("Elige la carga (o «Caja vacía»).");
   busy("Guardando…");
   try {
-    const r = await post("/api/pr/tren/asignar", { bulto_id: carga, caja_movil: caja });
+    const r = await post("/api/pr/tren/asignar", { bulto_id: carga, caja_movil: caja, vacia });
     if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r);
   } catch (e) { showError(e.message); await cargarAlmacen(); } finally { busy(null); }
 });
@@ -431,10 +488,13 @@ async function quitarCarga(c) {
   state.onConfirm = async () => {
     $("confirm").hidden = true;
     busy("Quitando…");
-    try { const r = await post("/api/pr/tren/quitar", { bulto_id: c.carga.bulto_id, caja_movil: c.caja_movil }); if (!r.simulado) pintarAlmacen(r); }
-    catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
+    try {
+      const r = await post("/api/pr/tren/quitar", c.carga ? { bulto_id: c.carga.bulto_id, caja_movil: c.caja_movil } : { caja_movil: c.caja_movil, vacia: true });
+      if (!r.simulado) pintarAlmacen(r);
+    } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
   };
-  $("confirm-txt").textContent = `La carga ${textoCarga(c.carga)} sale de la caja ${c.caja_movil} y vuelve a stock.`;
+  $("confirm-txt").textContent = c.carga ? `La carga ${textoCarga(c.carga)} sale de la caja ${c.caja_movil} y vuelve a stock.`
+    : `La caja ${c.caja_movil} deja de estar marcada como vacía.`;
   $("confirm").hidden = false;
   $("btn-no").focus();
 }

@@ -158,6 +158,15 @@ def fecha_hora_utc(fecha: str | None, hora: str | None) -> str | None:
     return local.astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def fecha_madrid(utc: str | None) -> str:
+    """«2026-11-09 23:30:00» (UTC, como lo da Odoo) → «2026-11-10» (día en Madrid)."""
+    try:
+        d = dt.datetime.strptime((utc or "")[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return ""
+    return d.astimezone(MADRID).date().isoformat()
+
+
 def toneladas(punto: PuntoCarga | None, peso_kg: int | None) -> float | None:
     if punto and punto.toneladas_fijas:
         return punto.toneladas_fijas

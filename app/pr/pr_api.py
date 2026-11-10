@@ -14,6 +14,7 @@ Oficina:
   POST /api/pr/bobinas/enviar       Excel de bobinas por clase → descarga y correo a Sevilla (n8n)
 Oficina y almacén:
   GET  /api/pr/tren/actual · POST /api/pr/tren/asignar · POST /api/pr/tren/quitar
+  POST /api/pr/tren/mover {"vagon", "hacia": subir|bajar} · POST /api/pr/tren/editar {"caja_movil", "nueva_caja", "nuevo_vagon"}
 n8n:
   GET  /api/pr/resumen              resumen de la mañana con la Excel de registro
 Las fotos y las Excel van a SharePoint y los correos salen por n8n (PR_AVISOS_WEBHOOK).
@@ -340,15 +341,80 @@ class TrenIn(BaseModel):
 
 
 class Asignar(BaseModel):
-    bulto_id: int
+    bulto_id: int = 0                # 0 con «vacia»: la caja va vacía
     caja_movil: str = Field("", max_length=20)
+    vacia: bool = False
+
+
+class Mover(BaseModel):
+    vagon: str = Field(min_length=1, max_length=20)
+    hacia: str = Field(pattern=r"^(subir|bajar)$")
+
+
+class Editar(BaseModel):
+    caja_movil: str = Field(min_length=1, max_length=20)
+    nueva_caja: str = Field("", max_length=20)
+    nuevo_vagon: str = Field("", max_length=20)
+
+
+URL_EXCEL_TREN = "__URL_EXCEL_TREN__"   # n8n lo cambia por el enlace de la Excel del tren en SharePoint
+LETRA = "font:11pt Calibri,Arial"
+
+
+class Enlace(tuple):
+    """Celda con enlace: Enlace((texto, url))."""
+
+
+def enlace_odoo(modelo: str, ident: int | None) -> str:
+    url = get_settings().odoo_url
+    return f"{url}/web#id={int(ident)}&model={modelo}&view_type=form" if url and ident else ""
+
+
+def _celda(v) -> str:
+    if isinstance(v, Enlace):
+        texto, url = v
+        texto = html.escape(str(texto if texto not in (None, "") else "ver"))
+        return f"<a href='{html.escape(url)}' style='color:#1F4E79'>{texto}</a>" if url else texto
+    return html.escape(str(v if v is not None else ""))
 
 
 def tabla_html(cab: list[str], filas: list[list]) -> str:
     th = "".join(f"<th style='padding:4px 8px;background:#1F4E79;color:#fff;text-align:left'>{html.escape(c)}</th>" for c in cab)
-    tr = "".join("<tr>" + "".join(f"<td style='padding:3px 8px;border-bottom:1px solid #ddd'>{html.escape(str(v if v is not None else ''))}</td>"
+    tr = "".join("<tr>" + "".join(f"<td style='padding:3px 8px;border-bottom:1px solid #ddd'>{_celda(v)}</td>"
                                   for v in f) + "</tr>" for f in filas)
-    return f"<table style='border-collapse:collapse;font:10pt Calibri,Arial'><tr>{th}</tr>{tr}</table>" if filas else "<p>Ninguno.</p>"
+    return f"<table style='border-collapse:collapse;font:10pt Calibri,Arial'><tr>{th}</tr>{tr}</table>" if filas else f"<p style='{LETRA}'>Ninguno.</p>"
+
+
+def boton(texto: str, url: str) -> str:
+    if not url:
+        return ""
+    return (f"<a href='{html.escape(url)}' style='display:inline-block;margin:0 8px 8px 0;padding:8px 16px;background:#1F4E79;"
+            f"color:#fff;text-decoration:none;border-radius:4px;font:bold 10pt Calibri,Arial'>{html.escape(texto)}</a>")
+
+
+def botones(lista: list[dict], tren: dict | None) -> str:
+    """Al principio del correo: un botón por pedido de PR que salga en el correo y otro a la Excel del tren."""
+    pedidos = {}
+    for v in lista:
+        if v.get("pedido_id"):
+            pedidos[v["pedido_id"]] = v["pedido"]
+    res = "".join(boton(f"Pedido {nombre}", enlace_odoo("sale.order", ident)) for ident, nombre in pedidos.items())
+    if tren:
+        res += boton(f"Excel del tren {int(tren['tren'])}", URL_EXCEL_TREN)
+    return f"<p>{res}</p>" if res else ""
+
+
+def tarea(v: dict):
+    """Celda «albarán» con enlace a la tarea del viaje en Odoo."""
+    return Enlace((v.get("albaran") or v.get("bulto"), enlace_odoo("project.task", v.get("tarea_id"))))
+
+
+def faltan(v: dict) -> str:
+    return ", ".join(t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"), ("bultos", "balas")) if not v.get(k))
+
+
+def excel_tren(tren: dict | None) -> str:
+    return f"CARTON PAJA TREN {int(tren['tren'])}.xlsx" if tren else ""
 
 
 @router.post("/tren/composicion")
@@ -366,7 +432,7 @@ def tren_composicion(body: TrenIn):
     # El libro CARTON PAJA TREN <n> (cajas aún vacías + hoja COMPOSICION) a SharePoint › Automatizacion (n8n), sin correo.
     # Al terminar el tren se vuelve a subir con las cargas.
     nombre = f"CARTON PAJA TREN {datos['tren']}.xlsx"
-    libro = X.carton_paja_tren(datos["tren"], body.convoy, body.fecha, datos["cajas"], {})
+    libro = X.carton_paja_tren(datos["tren"], body.convoy, body.fecha, O.cajas_en_orden(datos), {})
     enviado = enviar_n8n({"evento": "composicion", "correo": False, "asunto": "", "html": "", "archivos": [
         {"nombre": nombre, "b64": base64.b64encode(libro).decode()}]})
     log.info("composición del tren %s guardada: %s cajas (SharePoint: %s)", body.tren, len(datos["cajas"]), enviado)
@@ -393,6 +459,12 @@ def tren_asignar(body: Asignar):
     t, lista = _tren(odoo), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
+    if body.vacia:
+        _pr(O.marcar_vacia, odoo, t, lista, body.caja_movil)
+        log.info("tren %s: caja %s vacía", t["tren"], body.caja_movil)
+        return O.estado_tren(odoo, t, lista)
+    if not body.bulto_id:
+        raise AppError("Elige la carga.", 400, "sin_carga")
     bulto = _pr(O.asignar, odoo, t, lista, body.bulto_id, body.caja_movil)
     log.info("tren %s: %s → caja %s", t["tren"], bulto, body.caja_movil)
     lista = O.viajes(odoo)
@@ -409,11 +481,46 @@ def tren_quitar(body: Asignar):
     t = _tren(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
-    previo = next((v for v in O.viajes(odoo) if v["bulto_id"] == body.bulto_id), None)
-    _pr(O.quitar, odoo, body.bulto_id)
+    lista = O.viajes(odoo)
+    if body.vacia:
+        _pr(O.quitar_vacia, odoo, t, lista, body.caja_movil)
+        return O.estado_tren(odoo, t, lista)
+    previo = next((v for v in lista if v["bulto_id"] == body.bulto_id), None)
+    _pr(O.quitar, odoo, body.bulto_id, t, lista)
     if previo and previo.get("foto"):
         borrar_foto(previo["foto"])
     return O.estado_tren(odoo, t, O.viajes(odoo))
+
+
+@router.post("/tren/mover")
+def tren_mover(body: Mover):
+    """Almacén: sube o baja un vagón ya cargado (arriba = junto a la locomotora)."""
+    odoo = odoo_pr()
+    t = _tren(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.mover_vagon, odoo, t, body.vagon, body.hacia)
+    return O.estado_tren(odoo, t, O.viajes(odoo))
+
+
+@router.post("/tren/editar")
+def tren_editar(body: Editar):
+    """Almacén y oficina: corrige el nombre de una caja móvil o el número de su vagón."""
+    if not (body.nueva_caja.strip() or body.nuevo_vagon.strip()):
+        raise AppError("No has cambiado nada.", 400, "sin_cambios")
+    odoo = odoo_pr()
+    t, lista = _tren(odoo), O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    afectados = _pr(O.editar, odoo, t, lista, body.caja_movil, body.nueva_caja, body.nuevo_vagon)
+    log.info("tren %s: caja %s corregida (caja=%s vagón=%s)", t["tren"], body.caja_movil, body.nueva_caja, body.nuevo_vagon)
+    lista = O.viajes(odoo)
+    if body.nueva_caja.strip():   # la foto se llama «código Paper - caja móvil»: se renombra
+        for v in lista:
+            if v["bulto_id"] in afectados:
+                sincronizar_foto(odoo, v, lista=lista)
+        lista = O.viajes(odoo)
+    return O.estado_tren(odoo, t, lista)
 
 
 @router.post("/tren/enviar")
@@ -423,20 +530,25 @@ def tren_enviar():
     odoo = odoo_pr()
     t, lista = _tren(odoo), O.viajes(odoo)
     por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
-    archivos = [{"nombre": f"CARTON PAJA TREN {t['tren']}.xlsx",
-                 "b64": base64.b64encode(X.carton_paja_tren(t["tren"], t.get("convoy", ""), t["fecha"], t["cajas"], por_caja)).decode()},
+    cajas = O.cajas_en_orden(t)
+    archivos = [{"nombre": excel_tren(t),
+                 "b64": base64.b64encode(X.carton_paja_tren(t["tren"], t.get("convoy", ""), t["fecha"], cajas, por_caja)).decode()},
                 {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     stock = [v for v in lista if v["estado"] == "En stock"]
     fecha_es = html.escape("-".join(reversed(str(t["fecha"]).split("-"))))
-    cuerpo = (f"<p style='font:11pt Calibri,Arial'><b>Tren {int(t['tren'])}</b> (convoy {html.escape(str(t.get('convoy') or ''))}, "
+    del_tren = [por_caja[c["caja_movil"]] for c in cajas if c["caja_movil"] in por_caja]
+    cuerpo = (botones(del_tren + stock, t)
+              + f"<p style='{LETRA}'><b>Tren {int(t['tren'])}</b> (convoy {html.escape(str(t.get('convoy') or ''))}, "
               f"{fecha_es}): {len(por_caja)} cargas en {len(t['cajas'])} cajas.</p>"
-              + tabla_html(["Vagón", "Caja", "Código Paper", "Albarán", "Lugar", "Balas", "Peso kg"],
-                           [[c["vagon"], c["caja_movil"], v.get("codigo_paper"), v.get("albaran"), v.get("lugar"), v.get("bultos"),
-                             v.get("peso_kg")] for c in t["cajas"] if (v := por_caja.get(c["caja_movil"]))])
-              + f"<p style='font:11pt Calibri,Arial'><b>Quedan en stock para el siguiente tren: {len(stock)}</b></p>"
-              + tabla_html(["Fecha", "Código Paper", "Albarán", "Lugar"], [[v["fecha"], v["codigo_paper"], v["albaran"], v["lugar"]] for v in stock]))
+              + tabla_html(["Ord", "Vagón", "Caja", "Código Paper", "Albarán", "Lugar", "Balas", "Peso kg"],
+                           [["" if c["segunda"] else c["ord"], "" if c["segunda"] else c["vagon"], c["caja_movil"], v.get("codigo_paper"),
+                             tarea(v), v.get("lugar"), v.get("bultos"), v.get("peso_kg")] if (v := por_caja.get(c["caja_movil"]))
+                            else ["" if c["segunda"] else c["ord"], "" if c["segunda"] else c["vagon"], c["caja_movil"],
+                                  "CAJA VACÍA" if c["vacia"] else "sin asignar", "", "", "", ""] for c in cajas])
+              + f"<p style='{LETRA}'><b>Quedan en stock para el siguiente tren: {len(stock)}</b></p>"
+              + tabla_html(["Fecha", "Código Paper", "Albarán", "Lugar"], [[v["fecha"], v["codigo_paper"], tarea(v), v["lugar"]] for v in stock]))
     fotos = []
-    for c in t["cajas"]:
+    for c in cajas:
         v = por_caja.get(c["caja_movil"])
         f = leer_foto_o_nada(odoo, v) if v else None
         if f:
@@ -447,31 +559,58 @@ def tren_enviar():
                f"(también en SharePoint › Automatizacion › {R.carpeta_tren(t['tren'])}).</p>")
     enviado = False if s.dry_run else enviar_n8n({"evento": "tren", "asunto": f"PR SAICA · Tren {t['tren']} del {fecha_es} ({len(por_caja)} cargas)",
                                                   "html": cuerpo, "archivos": archivos, "fotos": fotos,
-                                                  "carpeta": R.carpeta_tren(t["tren"])})
+                                                  "carpeta": R.carpeta_tren(t["tren"]), "excel_tren": excel_tren(t)})
     log.info("tren %s enviado: %s cargas, %s en stock", t["tren"], len(por_caja), len(stock))
     return {"simulado": s.dry_run, "tren": t["tren"], "cargas": len(por_caja), "en_stock": len(stock), "enviado": enviado, "archivos": archivos}
 
 
+def dias_resumen(hoy: dt.date) -> tuple[dt.date, dt.date]:
+    """Días que cubre el correo de la mañana: ayer; el lunes, sábado y domingo."""
+    ayer = hoy - dt.timedelta(days=1)
+    return (hoy - dt.timedelta(days=2) if hoy.weekday() == 0 else ayer), ayer
+
+
+def _dias_es(desde: dt.date, hasta: dt.date) -> str:
+    return f"{hasta:%d/%m}" if desde == hasta else f"del {desde:%d/%m} al {hasta:%d/%m}"
+
+
 @router.get("/resumen")
-def resumen(enviar: bool = False):
-    """Para n8n por la mañana: novedades de las últimas 24 h, viajes con datos pendientes, stock y la Excel de registro."""
-    lista = O.viajes(odoo_pr())
-    ayer = (dt.date.today() - dt.timedelta(days=1)).isoformat()
-    nuevos = [v for v in lista if v["fecha"] >= ayer]
-    faltan = [v for v in lista if not (v["codigo_paper"] and v["peso_kg"] and v["bultos"])]
+def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\d{2})?$")):
+    """Para n8n por la mañana (lunes a sábado): llegadas a la nave, cargas en el tren, datos pendientes y stock."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    try:
+        t = O.tren_actual(odoo)
+    except AppError:
+        t = None
+    dia = dt.date.fromisoformat(hoy) if hoy else dt.datetime.now(R.MADRID).date()
+    desde, hasta = dias_resumen(dia)
+    en_rango = lambda f: bool(f) and desde.isoformat() <= f[:10] <= hasta.isoformat()
+    llegados = [v for v in lista if en_rango(v.get("registrado"))]
+    al_tren = [v for v in lista if v.get("tren") and v.get("caja_movil") and en_rango(v.get("fecha_tren"))]
+    pendientes = [v for v in lista if faltan(v)]
     stock = [v for v in lista if v["estado"] == "En stock"]
-    cuerpo = ("<p style='font:11pt Calibri,Arial'><b>Viajes de PR de SAICA · resumen</b></p>"
-              + "<h3 style='font:bold 11pt Calibri,Arial'>Viajes cargados desde ayer</h3>"
-              + tabla_html(["Fecha", "Pedido", "Albarán", "Lugar", "Tractora", "Transportista", "Peso kg"],
-                           [[v["fecha"], v["pedido"], v["albaran"], v["lugar"], v["tractora"], v["colaborador"], v["peso_kg"]] for v in nuevos])
-              + "<h3 style='font:bold 11pt Calibri,Arial'>Viajes con datos pendientes</h3>"
-              + tabla_html(["Fecha", "Albarán", "Lugar", "Falta"],
-                           [[v["fecha"], v["albaran"], v["lugar"], ", ".join(t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"),
-                                                                                         ("bultos", "balas")) if not v[k])] for v in faltan])
-              + f"<h3 style='font:bold 11pt Calibri,Arial'>En stock esperando tren: {len(stock)}</h3>"
-              + tabla_html(["Fecha", "Albarán", "Lugar"], [[v["fecha"], v["albaran"], v["lugar"]] for v in stock]))
+    dias = _dias_es(desde, hasta)
+    h3 = lambda texto: f"<h3 style='font:bold 12pt Calibri,Arial;color:#1F4E79;margin:18px 0 6px'>{html.escape(texto)}</h3>"
+    cuerpo = (f"<p style='{LETRA}'><b>Viajes de PR de SAICA · resumen del {dia:%d/%m/%Y}</b></p>"
+              + botones(llegados + al_tren + pendientes + stock, t)
+              + h3(f"Viajes que llegaron a stock de la nave ({dias}): {len(llegados)}")
+              + tabla_html(["Fecha carga", "Albarán (tarea)", "Código Paper", "Lugar", "Tractora", "Transportista", "Balas", "Peso kg"],
+                           [[v["fecha"], tarea(v), v.get("codigo_paper"), v["lugar"], v["tractora"], v["colaborador"], v.get("bultos"),
+                             v["peso_kg"]] for v in llegados])
+              + h3(f"Viajes que se cargaron en el tren ({dias}): {len(al_tren)}")
+              + tabla_html(["Tren", "Vagón", "Caja", "Albarán (tarea)", "Código Paper", "Lugar", "Peso kg"],
+                           [[v["tren"], v.get("vagon"), v["caja_movil"], tarea(v), v.get("codigo_paper"), v["lugar"], v["peso_kg"]]
+                            for v in al_tren])
+              + h3(f"Viajes con datos pendientes: {len(pendientes)}")
+              + tabla_html(["Fecha carga", "Albarán (tarea)", "Lugar", "Estado", "Falta"],
+                           [[v["fecha"], tarea(v), v["lugar"], v["estado"], faltan(v)] for v in pendientes])
+              + h3(f"Viajes que quedan en stock: {len(stock)}")
+              + tabla_html(["Fecha carga", "Albarán (tarea)", "Código Paper", "Lugar", "Balas", "Peso kg"],
+                           [[v["fecha"], tarea(v), v.get("codigo_paper"), v["lugar"], v.get("bultos"), v["peso_kg"]] for v in stock]))
     archivos = [{"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
-    datos = {"evento": "resumen", "asunto": f"PR SAICA · resumen {dt.date.today():%d/%m/%Y}", "html": cuerpo, "archivos": archivos}
+    datos = {"evento": "resumen", "asunto": f"PR SAICA · resumen {dia:%d/%m/%Y}", "html": cuerpo, "archivos": archivos,
+             "excel_tren": excel_tren(t)}
     if enviar:
         datos["enviado"] = enviar_n8n(datos)
     return {"para": destinatarios(), **datos}

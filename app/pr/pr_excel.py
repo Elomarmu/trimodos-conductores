@@ -79,10 +79,12 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     fila, cargadas, peso = 6, 0, 0
     for c in cajas:
         v = viajes_por_caja.get(c.get("caja_movil")) or {}
-        valores = ["“" if c.get("segunda") else c.get("orden"), _fecha(v.get("fecha")), v.get("tractora"), v.get("bultos"),
+        valores = ["“" if c.get("segunda") else c.get("ord", c.get("orden")), _fecha(v.get("fecha")), v.get("tractora"), v.get("bultos"),
                    v.get("peso_kg"), v.get("lugar"), v.get("codigo_paper"), v.get("albaran"),
                    "“" if c.get("segunda") else c.get("vagon"), c.get("caja_movil"), c.get("tara_kg"), v.get("tipo"),
                    v.get("bultos"), v.get("peso_kg")]
+        if not v and c.get("vacia"):
+            valores[5] = "CAJA VACÍA"
         valores += ["OK" if v else "" for _ in R.COMPROBACIONES]
         for col, val in enumerate(valores, start=1):
             celda = ws.cell(fila, col, val if val not in ("", None) else None)

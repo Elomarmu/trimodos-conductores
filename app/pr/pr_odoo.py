@@ -326,7 +326,7 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
     ls = odoo("sale.order.line", "search_read", [[["order_id", "in", list(pedidos)], ["tms_package_ids", "!=", False],
                                                   ["pickup_date", ">=", f"{desde} 00:00:00"]]],
               fields=["name", "order_id", "pickup_date", "tractor_id", "trailer_id", "vendor_id", "product_uom_qty",
-                      "equipment_id", "task_id", "tms_package_ids", "shipping_origin_id"], order="pickup_date, id")
+                      "equipment_id", "task_id", "tms_package_ids", "shipping_origin_id", "create_date"], order="pickup_date, id")
     ps = odoo("tms.package", "search_read", [[["id", "in", [i for l in ls for i in l["tms_package_ids"]]]]],
               fields=["name", "carrier_tracking_ref", "shipping_weight", "number_of_packages", "unload_note"])
     por_id = {p["id"]: p for p in ps}
@@ -336,7 +336,8 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
         o = R.leer_observaciones(p.get("unload_note"))
         origen = (l.get("shipping_origin_id") or [None])[0]
         punto = next((x for x in R.PUNTOS_CARGA if x.origen_id == origen), None)
-        res.append({"linea_id": l["id"], "pedido": l["order_id"][1], "tarea_id": (l.get("task_id") or [None])[0],
+        res.append({"linea_id": l["id"], "pedido": l["order_id"][1], "pedido_id": l["order_id"][0],
+                    "registrado": R.fecha_madrid(l.get("create_date")), "tarea_id": (l.get("task_id") or [None])[0],
                     "bulto": p.get("name"), "bulto_id": p.get("id"), "fecha": (l.get("pickup_date") or "")[:10],
                     "tractora": _placa(l.get("tractor_id")), "remolque": _placa(l.get("trailer_id")),
                     "colaborador": (l.get("vendor_id") or [None, ""])[1], "lugar": punto.nombre if punto else "",
@@ -405,16 +406,33 @@ def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[di
     if not pedido:
         raise ErrorPR("Todavía no hay ningún pedido de PR en Odoo: registra antes algún viaje.")
     datos = {"tren": int(tren), "convoy": convoy, "fecha": fecha, "pedido_id": pedido["id"],
-             "cajas": [{k: c.get(k) for k in ("orden", "vagon", "segunda", "caja_movil", "tara_kg")} for c in cajas]}
+             "cajas": [{k: c.get(k) for k in ("orden", "vagon", "segunda", "caja_movil", "tara_kg")} for c in cajas], "orden": []}
+    anterior = leer_tren(odoo, int(tren))
+    if anterior:   # se vuelve a cargar el mismo tren: se conserva el orden de carga de los vagones que siguen en él
+        vagones_nuevos = {c["vagon"] for c in datos["cajas"]}
+        datos["orden"] = [v for v in anterior.get("orden") or [] if v in vagones_nuevos]
+        cajas_nuevas = {c["caja_movil"] for c in datos["cajas"]}
+        datos["vacias"] = [c for c in anterior.get("vacias") or [] if c in cajas_nuevas]
+    escribir_tren(odoo, datos)
+    return datos
+
+
+def leer_tren(odoo, tren: int) -> dict | None:
+    adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=", f"PR_TREN_{int(tren)}.json"]]],
+               fields=["datas"], limit=1)
+    return json.loads(base64.b64decode(adj[0]["datas"]).decode()) if adj and adj[0].get("datas") else None
+
+
+def escribir_tren(odoo, datos: dict) -> None:
+    """Guarda el JSON del tren (composición + orden de carga de los vagones) en su adjunto del pedido de PR."""
     contenido = base64.b64encode(json.dumps(datos, ensure_ascii=False).encode()).decode()
-    nombre = f"PR_TREN_{int(tren)}.json"
+    nombre = f"PR_TREN_{int(datos['tren'])}.json"
     previo = odoo("ir.attachment", "search_read", [[["res_model", "=", "sale.order"], ["name", "=", nombre]]], fields=["id"], limit=1)
     if previo:
         odoo("ir.attachment", "write", [[previo[0]["id"]], {"datas": contenido}])
     else:
-        odoo("ir.attachment", "create", [{"name": nombre, "res_model": "sale.order", "res_id": pedido["id"], "datas": contenido,
+        odoo("ir.attachment", "create", [{"name": nombre, "res_model": "sale.order", "res_id": datos["pedido_id"], "datas": contenido,
                                           "mimetype": "application/json", "type": "binary"}])
-    return datos
 
 
 def composiciones_repetidas(odoo, tren: int, convoy: str, cajas: list[dict], ultimas: int = 40) -> list[str]:
@@ -450,12 +468,141 @@ def tren_actual(odoo) -> dict | None:
     return json.loads(base64.b64decode(adj[0]["datas"]).decode())
 
 
+# ---- orden del tren: arriba los vagones junto a la locomotora, abajo los de cola ------------------------------------
+# El almacén carga de atrás hacia delante: cada vagón que empieza a cargarse se pone ARRIBA de la lista; la segunda caja
+# de un vagón ya empezado se suma a su vagón sin moverlo. Después se puede reordenar (subir/bajar) a mano.
+
+def vagones(tren: dict) -> list[str]:
+    vistos = []
+    for c in tren["cajas"]:
+        if c["vagon"] not in vistos:
+            vistos.append(c["vagon"])
+    return vistos
+
+
+def orden_final(tren: dict) -> list[str]:
+    """Vagones en el orden del tren: primero los cargados en el orden de la lista; luego los que no llevan carga."""
+    todos = vagones(tren)
+    cargados = [v for v in tren.get("orden") or [] if v in todos]
+    return cargados + [v for v in todos if v not in cargados]
+
+
+def cajas_en_orden(tren: dict) -> list[dict]:
+    """Cajas en el orden del tren; las del mismo vagón siempre juntas. «ord» = posición del vagón; «segunda» = 2.ª caja;
+    «vacia» = el almacén ha dicho que esa caja va vacía."""
+    res, vacias = [], set(tren.get("vacias") or [])
+    for i, vagon in enumerate(orden_final(tren), start=1):
+        for j, c in enumerate(c for c in tren["cajas"] if c["vagon"] == vagon):
+            res.append(dict(c, ord=i, segunda=j > 0, vacia=c["caja_movil"] in vacias))
+    return res
+
+
+def _poner_arriba(tren: dict, vagon: str) -> None:
+    if vagon not in (tren.get("orden") or []):   # vagón que empieza a cargarse: arriba de la lista
+        tren["orden"] = [vagon] + list(tren.get("orden") or [])
+
+
+def _sacar_si_vacio(tren: dict, lista: list[dict], vagon: str, sin_bulto: int | None = None) -> None:
+    """El vagón sale de la lista si ya no lleva ninguna carga ni ninguna caja marcada como vacía."""
+    cajas = {c["caja_movil"] for c in tren["cajas"] if c["vagon"] == vagon}
+    cargas = [v for v in lista or [] if v.get("tren") == str(tren["tren"]) and v.get("caja_movil") in cajas
+              and v.get("bulto_id") != sin_bulto]
+    if not cargas and not cajas & set(tren.get("vacias") or []):
+        tren["orden"] = [v for v in tren.get("orden") or [] if v != vagon]
+
+
+def marcar_vacia(odoo, tren: dict, lista: list[dict], caja_movil: str) -> None:
+    """Almacén: esa caja va vacía. Ocupa su sitio en el orden del tren como si llevara carga."""
+    caja = next((c for c in tren["cajas"] if c["caja_movil"] == caja_movil), None)
+    if not caja:
+        raise ErrorPR(f"La caja {caja_movil} no está en el tren {tren['tren']}.")
+    ocupada = next((v for v in lista if v.get("tren") == str(tren["tren"]) and v.get("caja_movil") == caja_movil), None)
+    if ocupada:
+        raise ErrorPR(f"La caja {caja_movil} ya lleva la carga {ocupada.get('codigo_paper') or ocupada.get('albaran')}.")
+    vacias = list(tren.get("vacias") or [])
+    if caja_movil in vacias:
+        raise ErrorPR(f"La caja {caja_movil} ya está marcada como vacía.")
+    tren["vacias"] = vacias + [caja_movil]
+    _poner_arriba(tren, caja["vagon"])
+    escribir_tren(odoo, tren)
+
+
+def quitar_vacia(odoo, tren: dict, lista: list[dict], caja_movil: str) -> None:
+    if caja_movil not in (tren.get("vacias") or []):
+        raise ErrorPR(f"La caja {caja_movil} no está marcada como vacía.")
+    tren["vacias"] = [c for c in tren["vacias"] if c != caja_movil]
+    vagon = next(c["vagon"] for c in tren["cajas"] if c["caja_movil"] == caja_movil)
+    _sacar_si_vacio(tren, lista, vagon)
+    escribir_tren(odoo, tren)
+
+
 def estado_tren(odoo, tren: dict, lista: list[dict]) -> dict:
-    """Cajas del tren con la carga que lleva cada una, y cargas en stock."""
+    """Cajas del tren con la carga que lleva cada una, los vagones ya cargados en su orden, y cargas en stock."""
     por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(tren["tren"]) and v.get("caja_movil")}
-    cajas = [dict(c, carga=_carga(por_caja.get(c["caja_movil"]))) for c in tren["cajas"]]
+    cajas = [dict(c, carga=_carga(por_caja.get(c["caja_movil"]))) for c in cajas_en_orden(tren)]
+    cargados = [v for v in tren.get("orden") or [] if any(c["vagon"] == v and (c["carga"] or c["vacia"]) for c in cajas)]
+    grupos = [{"vagon": v, "cajas": [c for c in cajas if c["vagon"] == v]} for v in cargados]
     stock = [_carga(v) for v in lista if v["estado"] == "En stock"]
-    return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "cajas": cajas, "stock": stock}
+    return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "cajas": cajas, "grupos": grupos, "stock": stock}
+
+
+def mover_vagon(odoo, tren: dict, vagon: str, hacia: str) -> None:
+    """Sube o baja un vagón cargado en la lista (hacia la locomotora = «subir»)."""
+    orden = [v for v in tren.get("orden") or []]
+    if vagon not in orden:
+        raise ErrorPR("Ese vagón todavía no tiene ninguna caja asignada.")
+    i = orden.index(vagon)
+    j = i - 1 if hacia == "subir" else i + 1
+    if 0 <= j < len(orden):
+        orden[i], orden[j] = orden[j], orden[i]
+        tren["orden"] = orden
+        escribir_tren(odoo, tren)
+
+
+def editar(odoo, tren: dict, lista: list[dict], caja_movil: str, nueva_caja: str = "", nuevo_vagon: str = "") -> list[int]:
+    """Corrige el nombre de una caja móvil o el número de su vagón (se aplica a todas las cajas de ese vagón).
+    También lo cambia en las cargas ya asignadas. Devuelve los bultos afectados (para renombrar su foto)."""
+    caja = next((c for c in tren["cajas"] if c["caja_movil"] == caja_movil), None)
+    if not caja:
+        raise ErrorPR(f"La caja {caja_movil} no está en el tren {tren['tren']}.")
+    del_tren = [v for v in lista if v.get("tren") == str(tren["tren"]) and v.get("caja_movil")]
+    afectados: list[int] = []
+    nueva = R.matricula(nueva_caja)
+    if nueva and nueva != caja_movil:
+        if any(c["caja_movil"] == nueva for c in tren["cajas"]):
+            raise ErrorPR(f"La caja {nueva} ya está en este tren.")
+        caja["caja_movil"], caja["tara_kg"] = nueva, R.tara_caja(nueva) or caja.get("tara_kg")
+        tren["vacias"] = [nueva if c == caja_movil else c for c in tren.get("vacias") or []]
+        for v in del_tren:
+            if v["caja_movil"] == caja_movil:
+                _cambiar_obs(odoo, v["bulto_id"], {"caja_movil": nueva})
+                afectados.append(v["bulto_id"])
+    if nuevo_vagon:
+        cifras, ok = R.vagon_excel(nuevo_vagon)
+        if len(cifras) != 12:
+            raise ErrorPR("El número de vagón tiene que tener 12 cifras.")
+        if not ok:
+            raise ErrorPR(f"El vagón {cifras} no cuadra con su dígito de control (la última cifra). Revísalo.")
+        viejo = caja["vagon"]
+        if cifras != viejo:
+            if cifras in vagones(tren):
+                raise ErrorPR(f"El vagón {cifras} ya está en este tren.")
+            for c in tren["cajas"]:
+                if c["vagon"] == viejo:
+                    c["vagon"] = cifras
+            tren["orden"] = [cifras if v == viejo else v for v in tren.get("orden") or []]
+            for v in del_tren:
+                if v.get("vagon") == viejo:
+                    _cambiar_obs(odoo, v["bulto_id"], {"vagon": cifras})
+                    afectados.append(v["bulto_id"])
+    escribir_tren(odoo, tren)
+    return afectados
+
+
+def _cambiar_obs(odoo, bulto_id: int, datos: dict) -> None:
+    p = odoo("tms.package", "search_read", [[["id", "=", bulto_id]]], fields=["unload_note"])
+    if p:
+        odoo("tms.package", "write", [[bulto_id], {"unload_note": R.observaciones(datos, p[0].get("unload_note"))}])
 
 
 def _carga(v: dict | None) -> dict | None:
@@ -490,15 +637,25 @@ def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str)
     if len(mismas) > 1 and mismas[0] != bulto_id:
         quitar(odoo, bulto_id)
         raise ErrorPR(f"Otra persona acaba de cargar la caja {caja_movil}. Elige otra caja.")
+    if caja["vagon"] not in (tren.get("orden") or []) or caja_movil in (tren.get("vacias") or []):
+        _poner_arriba(tren, caja["vagon"])
+        tren["vacias"] = [c for c in tren.get("vacias") or [] if c != caja_movil]   # estaba como vacía: ya lleva carga
+        escribir_tren(odoo, tren)
     return p[0]["name"]
 
 
-def quitar(odoo, bulto_id: int) -> str:
-    """Deshace la asignación: la carga vuelve a stock."""
+def quitar(odoo, bulto_id: int, tren: dict | None = None, lista: list[dict] | None = None) -> str:
+    """Deshace la asignación: la carga vuelve a stock. Si su vagón se queda sin carga, sale de la lista de cargados."""
     p = odoo("tms.package", "search_read", [[["id", "=", bulto_id], ["partner_id", "=", R.CLIENTE_ID]]], fields=["name", "unload_note"])
     if not p:
         raise ErrorPR("No encuentro esa carga.")
+    vagon = R.leer_observaciones(p[0].get("unload_note")).get("vagon")
     odoo("tms.package", "write", [[bulto_id], {"unload_note": R.observaciones({}, p[0].get("unload_note"), quitar=CLAVES_TREN)}])
+    if tren and vagon and vagon in (tren.get("orden") or []):
+        antes = list(tren["orden"])
+        _sacar_si_vacio(tren, lista or [], vagon, sin_bulto=bulto_id)
+        if tren["orden"] != antes:
+            escribir_tren(odoo, tren)
     return p[0]["name"]
 
 
