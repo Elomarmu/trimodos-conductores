@@ -417,6 +417,11 @@ def excel_tren(tren: dict | None) -> str:
     return f"CARTON PAJA TREN {int(tren['tren'])}.xlsx" if tren else ""
 
 
+def ruta_excel_tren(tren: dict | None) -> str:
+    """La Excel del tren va dentro de su carpeta, junto a las fotos: «CARTON PAJA TREN N/CARTON PAJA TREN N.xlsx»."""
+    return f"{R.carpeta_tren(tren['tren'])}/{excel_tren(tren)}" if tren else ""
+
+
 @router.post("/tren/composicion")
 def tren_composicion(body: TrenIn):
     """Oficina: guarda la composición del tren (vagones, cajas, taras) para que el almacén asigne las cargas."""
@@ -434,7 +439,7 @@ def tren_composicion(body: TrenIn):
     nombre = f"CARTON PAJA TREN {datos['tren']}.xlsx"
     libro = X.carton_paja_tren(datos["tren"], body.convoy, body.fecha, O.cajas_en_orden(datos), {})
     enviado = enviar_n8n({"evento": "composicion", "correo": False, "asunto": "", "html": "", "archivos": [
-        {"nombre": nombre, "b64": base64.b64encode(libro).decode()}]})
+        {"nombre": nombre, "carpeta": R.carpeta_tren(datos["tren"]), "b64": base64.b64encode(libro).decode()}]})
     log.info("composición del tren %s guardada: %s cajas (SharePoint: %s)", body.tren, len(datos["cajas"]), enviado)
     return {"tren": datos["tren"], "cajas": len(datos["cajas"]), "excel": nombre, "enviado": enviado}
 
@@ -531,7 +536,7 @@ def tren_enviar():
     t, lista = _tren(odoo), O.viajes(odoo)
     por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
     cajas = O.cajas_en_orden(t)
-    archivos = [{"nombre": excel_tren(t),
+    archivos = [{"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]),
                  "b64": base64.b64encode(X.carton_paja_tren(t["tren"], t.get("convoy", ""), t["fecha"], cajas, por_caja)).decode()},
                 {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     stock = [v for v in lista if v["estado"] == "En stock"]
@@ -559,7 +564,7 @@ def tren_enviar():
                f"(también en SharePoint › Automatizacion › {R.carpeta_tren(t['tren'])}).</p>")
     enviado = False if s.dry_run else enviar_n8n({"evento": "tren", "asunto": f"PR SAICA · Tren {t['tren']} del {fecha_es} ({len(por_caja)} cargas)",
                                                   "html": cuerpo, "archivos": archivos, "fotos": fotos,
-                                                  "carpeta": R.carpeta_tren(t["tren"]), "excel_tren": excel_tren(t)})
+                                                  "carpeta": R.carpeta_tren(t["tren"]), "excel_tren": ruta_excel_tren(t)})
     log.info("tren %s enviado: %s cargas, %s en stock", t["tren"], len(por_caja), len(stock))
     return {"simulado": s.dry_run, "tren": t["tren"], "cargas": len(por_caja), "en_stock": len(stock), "enviado": enviado, "archivos": archivos}
 
@@ -610,7 +615,7 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
                            [[v["fecha"], tarea(v), v.get("codigo_paper"), v["lugar"], v.get("bultos"), v["peso_kg"]] for v in stock]))
     archivos = [{"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     datos = {"evento": "resumen", "asunto": f"PR SAICA · resumen {dia:%d/%m/%Y}", "html": cuerpo, "archivos": archivos,
-             "excel_tren": excel_tren(t)}
+             "excel_tren": ruta_excel_tren(t)}
     if enviar:
         datos["enviado"] = enviar_n8n(datos)
     return {"para": destinatarios(), **datos}

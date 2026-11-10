@@ -141,7 +141,7 @@ def test_correo_de_la_manana(monkeypatch):
     monkeypatch.setattr(A, "enlace_odoo", lambda m, i: f"https://odoo/web#id={i}&model={m}" if i else "")
     r = A.resumen(hoy="2026-11-10")
     h = r["html"]
-    assert r["excel_tren"] == "CARTON PAJA TREN 86.xlsx" and A.URL_EXCEL_TREN in h
+    assert r["excel_tren"] == "CARTON PAJA TREN 86/CARTON PAJA TREN 86.xlsx" and A.URL_EXCEL_TREN in h
     assert "Pedido S26099981" in h and "id=7&amp;model=sale.order" in h
     assert "llegaron a stock de la nave (09/11): 2" in h
     assert "cargaron en el tren (09/11): 1" in h          # fecha del tren 09/11

@@ -343,7 +343,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Un elemento por Excel que subir a SharePoint y uno para el correo (si lo lleva).\nconst cfg = $('Configuración').first().json;\nconst d = $('Datos (app o resumen)').first().json;\n// botón «Excel del tren»: enlace de SharePoint de la Excel (si no se encuentra, el botón se quita)\nconst enlace = ($input.first().json || {}).webUrl || '';\nconst html = enlace ? String(d.html || '').split('__URL_EXCEL_TREN__').join(enlace)\n  : String(d.html || '').replace(/<a [^>]*href='__URL_EXCEL_TREN__'[^>]*>.*?<\\/a>/g, '');\nconst archivos = d.archivos || [];\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = archivos.map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre, url: `${d.base}:/${encodeURIComponent(a.nombre)}:/content` },\n  binary: { archivo: { data: a.b64, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName: a.nombre } } }));\nif (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio,\n  mensaje: { subject: d.asunto || 'PR SAICA', body: { contentType: 'HTML', content: html },\n             toRecipients: para.map(a => ({ emailAddress: { address: a } })) } } });\nreturn salida;\n"
+        "jsCode": "// Un elemento por Excel que subir a SharePoint y uno para el correo (si lo lleva).\nconst cfg = $('Configuración').first().json;\nconst d = $('Datos (app o resumen)').first().json;\n// botón «Excel del tren»: enlace de SharePoint de la Excel (si no se encuentra, el botón se quita)\nconst enlace = ($input.first().json || {}).webUrl || '';\nconst html = enlace ? String(d.html || '').split('__URL_EXCEL_TREN__').join(enlace)\n  : String(d.html || '').replace(/<a [^>]*href='__URL_EXCEL_TREN__'[^>]*>.*?<\\/a>/g, '');\nconst archivos = d.archivos || [];\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = archivos.map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre, url: `${d.base}:/${[a.carpeta, a.nombre].filter(Boolean).map(encodeURIComponent).join('/')}:/content` },\n  binary: { archivo: { data: a.b64, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName: a.nombre } } }));\nif (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio,\n  mensaje: { subject: d.asunto || 'PR SAICA', body: { contentType: 'HTML', content: html },\n             toRecipients: para.map(a => ({ emailAddress: { address: a } })) } } });\nreturn salida;\n"
       },
       "id": "c5720d8d-72d1-417f-b027-fa34ad60764f",
       "name": "Preparar SharePoint y correo",
@@ -581,7 +581,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $json.base }}{{ $json.excel_tren ? ':/' + encodeURIComponent($json.excel_tren) + ':' : '' }}?$select=webUrl",
+        "url": "={{ $json.base }}{{ $json.excel_tren ? ':/' + String($json.excel_tren).split('/').map(encodeURIComponent).join('/') + ':' : '' }}?$select=webUrl",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "microsoftExcelOAuth2Api",
         "options": {}

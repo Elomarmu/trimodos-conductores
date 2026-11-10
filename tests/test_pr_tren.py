@@ -119,10 +119,15 @@ def test_excel_carton_paja_tren_siempre_ok():
 
 
 def test_excel_registro():
-    ws = _abrir(X.registro([dict(VIAJE, estado="Tren 86", tren="86", caja_movil="CRPU0910069"), STOCK]))
+    libro = openpyxl.load_workbook(io.BytesIO(X.registro([dict(VIAJE, estado="Tren 86", tren="86", caja_movil="CRPU0910069"), STOCK,
+                                                          dict(STOCK, bulto_id=13, estado="Tren 87", tren="87", caja_movil="X")])))
+    assert libro.sheetnames == ["STOCK EN NAVE", "HISTORICO TRENES"]
+    ws = libro["STOCK EN NAVE"]       # solo lo que hay en la nave
     cab = [c.value for c in ws[4]]
-    assert ws.cell(5, 2).value == "Tren 86" and ws.cell(6, 2).value == "En stock"
-    assert ws.cell(6, len(cab)).value == "Falta: peso, balas"
+    assert ws.cell(5, 2).value == "En stock" and ws.cell(6, 1).value is None and "Caja móvil" not in cab
+    assert ws.cell(5, len(cab)).value == "Falta: peso, balas"
+    h = libro["HISTORICO TRENES"]     # los cargados, el último tren arriba
+    assert [h.cell(5, 2).value, h.cell(6, 2).value, h.cell(7, 2).value] == ["Tren 87", "Tren 86", None]
 
 
 def test_libro_del_tren_con_hoja_composicion():

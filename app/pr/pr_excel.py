@@ -1,7 +1,7 @@
 """Las dos Excel de los viajes de PR (se generan desde Odoo; nadie escribe a mano en ellas).
 
 - CARTON PAJA TREN (una por tren): una fila por caja móvil, como la Excel de siempre, sin las columnas de stock.
-- REGISTRO VIAJES PR (acumulativa): una fila por viaje, con su estado («En stock» o «Tren N»).
+- REGISTRO VIAJES PR: hoja «STOCK EN NAVE» (pendiente de cargar) y hoja «HISTORICO TRENES» (ya cargados).
 """
 from __future__ import annotations
 
@@ -144,18 +144,30 @@ COLS_REG = [("fecha", "Fecha carga", 11), ("estado", "Estado", 11), ("albaran", 
 
 
 def registro(viajes: list[dict], generado: dt.datetime | None = None) -> bytes:
+    """Hoja «STOCK EN NAVE»: lo que hay en la nave pendiente de cargar en un tren (el stock real).
+    Hoja «HISTORICO TRENES»: los viajes que ya se cargaron, por tren."""
     wb = Workbook()
-    ws = wb.active
-    ws.title = "VIAJES PR"
-    ws["A1"] = "REGISTRO DE VIAJES DE PR · SAICA PAPER"
-    ws["A1"].font = Font(bold=True, size=14)
     stock = [v for v in viajes if v.get("estado") == "En stock"]
-    ws["A2"] = (f"Generado desde Odoo el {(generado or dt.datetime.now()):%d/%m/%Y %H:%M}. "
-                f"{len(viajes)} viajes · {len(stock)} en stock esperando tren. No escribir aquí: se rehace cada vez.")
+    cargados = sorted((v for v in viajes if v.get("estado") != "En stock"),
+                      key=lambda v: (-int(v["tren"]) if str(v.get("tren") or "").isdigit() else 0, v.get("vagon") or "", v.get("fecha") or ""))
+    cuando = f"{(generado or dt.datetime.now(R.MADRID)):%d/%m/%Y %H:%M}"
+    _hoja_registro(wb.active, "STOCK EN NAVE", "STOCK EN NAVE · VIAJES DE PR PENDIENTES DE CARGAR EN TREN · SAICA PAPER",
+                   f"Generado desde Odoo el {cuando}. {len(stock)} viajes en la nave esperando tren. No escribir aquí: se rehace cada vez.",
+                   stock, [c for c in COLS_REG if c[0] not in ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones")])
+    _hoja_registro(wb.create_sheet(), "HISTORICO TRENES", "HISTÓRICO · VIAJES DE PR CARGADOS EN TREN · SAICA PAPER",
+                   f"Generado desde Odoo el {cuando}. {len(cargados)} viajes cargados (el último tren arriba).", cargados, COLS_REG)
+    return _guardar(wb)
+
+
+def _hoja_registro(ws, titulo_hoja: str, titulo: str, nota: str, viajes: list[dict], cols: list[tuple]):
+    ws.title = titulo_hoja
+    ws["A1"] = titulo
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A2"] = nota
     ws["A2"].font = Font(italic=True, color="595959")
-    _cabecera(ws, 4, [t for _, t, _ in COLS_REG], [w for _, _, w in COLS_REG])
+    _cabecera(ws, 4, [t for _, t, _ in cols], [w for _, _, w in cols])
     for i, v in enumerate(viajes, start=5):
-        for col, (k, _, _) in enumerate(COLS_REG, start=1):
+        for col, (k, _, _) in enumerate(cols, start=1):
             val = v.get(k)
             if k in ("fecha", "fecha_tren"):
                 val = _fecha(val)
@@ -170,9 +182,8 @@ def registro(viajes: list[dict], generado: dt.datetime | None = None) -> bytes:
         ws.cell(i, 2).fill = AMARILLO if v.get("estado") == "En stock" else VERDE
         faltan = [t for k, t in (("codigo_paper", "código Paper"), ("peso_kg", "peso"), ("bultos", "balas")) if not v.get(k)]
         if faltan:
-            ws.cell(i, len(COLS_REG) + 1, "Falta: " + ", ".join(faltan)).font = Font(color="C00000", bold=True)
-    ws.cell(4, len(COLS_REG) + 1, "Avisos").font = Font(bold=True)
-    ws.column_dimensions[get_column_letter(len(COLS_REG) + 1)].width = 30
+            ws.cell(i, len(cols) + 1, "Falta: " + ", ".join(faltan)).font = Font(color="C00000", bold=True)
+    ws.cell(4, len(cols) + 1, "Avisos").font = Font(bold=True)
+    ws.column_dimensions[get_column_letter(len(cols) + 1)].width = 30
     ws.freeze_panes = "C5"
-    ws.auto_filter.ref = f"A4:{get_column_letter(len(COLS_REG))}{max(4, len(viajes) + 4)}"
-    return _guardar(wb)
+    ws.auto_filter.ref = f"A4:{get_column_letter(len(cols))}{max(4, len(viajes) + 4)}"
