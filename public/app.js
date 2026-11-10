@@ -38,7 +38,14 @@ function clearError() { $("err").hidden = true; }
 function busy(msg) { $("busy-msg").textContent = msg || "Un momento…"; $("busy").hidden = !msg; }
 
 // Código de acceso compartido: se pide una vez y se recuerda en este móvil.
-const CODE_KEY = "codigo-acceso";
+// Dos apps con el mismo código fuente: la de conductores («/») y la de oficina y almacén («/oficina/», con su propio código).
+const APP = document.documentElement.dataset.app === "oficina" ? "oficina" : "conductor";
+const aOficina = () => { if (APP === "conductor" && /^#(oficina|almacen)$/.test(location.hash)) location.replace("/oficina/" + location.hash); };
+aOficina();   // enlaces antiguos (…/#almacen, …/#oficina) → app de oficina y almacén
+window.addEventListener("hashchange", aOficina);
+const CODE_KEY = APP === "oficina" ? "codigo-oficina" : "codigo-acceso";
+const NO_ES_OFICINA = "Este es el código de los conductores. Para la app de oficina y almacén pide su código en la oficina.";
+async function rolDe(res) { try { return (await res.json()).rol || "conductor"; } catch { return "conductor"; } }
 function getCode() { try { return localStorage.getItem(CODE_KEY) || ""; } catch { return ""; } }
 function saveCode(v) { try { localStorage.setItem(CODE_KEY, v); } catch { /* sin almacenamiento: lo pedirá cada vez */ } }
 const authHeaders = (code = getCode()) => ({ "X-Codigo-Acceso": code });
@@ -79,6 +86,7 @@ $("access-form").addEventListener("submit", async (ev) => {
       const b = await res.json().catch(() => ({}));
       throw new Error(b.error || "Algo ha fallado. Inténtalo de nuevo.");
     }
+    if (APP === "oficina" && (await rolDe(res)) !== "oficina") throw new Error(NO_ES_OFICINA);
     saveCode(code);
     $("access").hidden = true;
     $("btn-scan").disabled = false; $("btn-pr").disabled = false;
@@ -554,6 +562,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
   window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
 }
 $("btn-scan").addEventListener("click", () => go("scan"));
+document.querySelectorAll(".solo-oficina").forEach((b) => { b.hidden = APP !== "oficina"; });
 (async () => {
   try {
     state.health = await api("/api/health");
@@ -562,7 +571,10 @@ $("btn-scan").addEventListener("click", () => go("scan"));
       const guardado = getCode();
       let ok = false, sinRed = false;
       if (guardado) {
-        try { ok = (await fetch("/api/login", { method: "POST", headers: authHeaders(guardado) })).ok; } catch { sinRed = true; }
+        try {
+          const res = await fetch("/api/login", { method: "POST", headers: authHeaders(guardado) });
+          ok = res.ok && (APP !== "oficina" || (await rolDe(res)) === "oficina");
+        } catch { sinRed = true; }
       }
       if (ok || sinRed) { $("btn-scan").disabled = false; $("btn-pr").disabled = false; }   // sin red no se puede comprobar: ya avisará al buscar
       else askCode();

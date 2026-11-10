@@ -43,7 +43,8 @@ from . import pr_odoo as O
 from . import pr_reglas as R
 
 log = logging.getLogger("pr")
-router = APIRouter(prefix="/api/pr", tags=["pr"])
+router = APIRouter(prefix="/api/pr", tags=["pr"])             # conductor: leer el albarán y registrar el viaje
+oficina = APIRouter(prefix="/api/pr", tags=["pr-oficina"])    # oficina y almacén (main.py exige su código)
 MAX_BYTES = 4_000_000  # Vercel admite cuerpos de 4,5 MB: el móvil reduce la foto antes de enviarla
 
 
@@ -244,7 +245,7 @@ def registrar(body: ViajeIn):
 
 # ---- oficina / almacén ----------------------------------------------------------------------------------------------
 
-@router.get("/buscar")
+@oficina.get("/buscar")
 def buscar(q: str = Query("", max_length=40)):
     p = O.buscar_viaje(odoo_pr(), q)
     if not p:
@@ -255,7 +256,7 @@ def buscar(q: str = Query("", max_length=40)):
             "documentos": O.documentos(odoo, [tarea]).get(tarea, {d: False for d in R.DOCUMENTOS})}
 
 
-@router.post("/actualizar")
+@oficina.post("/actualizar")
 def actualizar(body: Actualizar):
     s = get_settings()
     odoo = odoo_pr()
@@ -355,7 +356,7 @@ def borrar_foto(ruta: str) -> None:
         enviar_n8n({"evento": "foto_borrar", "correo": False, "carpeta": carpeta, "nombre": nombre})
 
 
-@router.get("/pendientes")
+@oficina.get("/pendientes")
 def pendientes():
     """Oficina: cargas a las que les falta algún dato o documento (foto del albarán, DI de residuos)."""
     lista = O.viajes(odoo_pr())
@@ -363,7 +364,7 @@ def pendientes():
                            | {"faltan": R.faltan(v)} for v in lista if R.faltan(v)]}
 
 
-@router.get("/viajes")
+@oficina.get("/viajes")
 def viajes(desde: str = Query("", max_length=10)):
     lista = O.viajes(odoo_pr(), desde or None)
     return {"viajes": lista, "siguiente_tren": O.siguiente_tren(lista)}
@@ -467,7 +468,7 @@ def ruta_excel_tren(tren: dict | None) -> str:
     return f"{R.carpeta_tren(tren['tren'])}/{excel_tren(tren)}" if tren else ""
 
 
-@router.post("/tren/composicion")
+@oficina.post("/tren/composicion")
 def tren_composicion(body: TrenIn):
     """Oficina: guarda la composición del tren (vagones, cajas, taras) para que el almacén asigne las cargas."""
     odoo = odoo_pr()
@@ -496,14 +497,14 @@ def _tren(odoo):
     return t
 
 
-@router.get("/tren/actual")
+@oficina.get("/tren/actual")
 def tren_actual():
     """Oficina y almacén: tren cargado, cajas con su carga y cargas en stock."""
     odoo = odoo_pr()
     return O.estado_tren(odoo, _tren(odoo), O.viajes(odoo))
 
 
-@router.post("/tren/asignar")
+@oficina.post("/tren/asignar")
 def tren_asignar(body: Asignar):
     odoo = odoo_pr()
     t, lista = _tren(odoo), O.viajes(odoo)
@@ -526,7 +527,7 @@ def tren_asignar(body: Asignar):
     return O.estado_tren(odoo, t, lista)
 
 
-@router.post("/tren/quitar")
+@oficina.post("/tren/quitar")
 def tren_quitar(body: Asignar):
     odoo = odoo_pr()
     t = _tren(odoo)
@@ -546,7 +547,7 @@ def tren_quitar(body: Asignar):
     return O.estado_tren(odoo, t, lista)
 
 
-@router.post("/tren/mover")
+@oficina.post("/tren/mover")
 def tren_mover(body: Mover):
     """Almacén: sube o baja un vagón ya cargado (arriba = junto a la locomotora)."""
     odoo = odoo_pr()
@@ -557,7 +558,7 @@ def tren_mover(body: Mover):
     return O.estado_tren(odoo, t, O.viajes(odoo))
 
 
-@router.post("/tren/editar")
+@oficina.post("/tren/editar")
 def tren_editar(body: Editar):
     """Almacén y oficina: corrige el nombre de una caja móvil o el número de su vagón."""
     if not (body.nueva_caja.strip() or body.nuevo_vagon.strip()):
@@ -579,7 +580,7 @@ def tren_editar(body: Editar):
     return O.estado_tren(odoo, t, lista)
 
 
-@router.post("/tren/enviar")
+@oficina.post("/tren/enviar")
 def tren_enviar():
     """Tren terminado: las dos Excel (descarga, SharePoint y correo por n8n)."""
     s = get_settings()
@@ -680,7 +681,7 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
     return {"para": destinatarios(), **datos}
 
 
-@router.post("/leer-tren")
+@oficina.post("/leer-tren")
 def leer_tren(body: Archivos):
     leido = _leer(L.leer_tren, [_bytes(a) for a in body.archivos])
     tren = R.limpiar_tren(leido)
@@ -716,7 +717,7 @@ class ConvoyBobinas(BaseModel):
     avisos: list[str] = Field(default_factory=list, max_length=100)
 
 
-@router.post("/bobinas/leer")
+@oficina.post("/bobinas/leer")
 def bobinas_leer(body: Archivos):
     """Oficina: capturas o fotos de «SAICA - Detalle convoy» → cajas con sus líneas y el total por clase."""
     d = B.limpiar(_leer(B.leer, [_bytes(a) for a in body.archivos]))
@@ -727,7 +728,7 @@ def bobinas_leer(body: Archivos):
     return {**d, "clases": clases, "por_tipo": B.por_tipo(clases), "total": sum(c["bobinas"] for c in clases)}
 
 
-@router.post("/bobinas/enviar")
+@oficina.post("/bobinas/enviar")
 def bobinas_enviar(body: ConvoyBobinas):
     """Oficina: la Excel de bobinas por clase se descarga en la app y se manda por correo a Sevilla (n8n)."""
     d = body.model_dump()

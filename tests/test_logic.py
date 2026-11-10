@@ -719,3 +719,32 @@ def test_el_umbral_de_peso_se_configura_por_entorno_y_se_envia_a_la_pantalla(mon
 def test_peso_aviso_kg_acepta_vacio_y_coma_decimal(monkeypatch, valor, esperado):
     monkeypatch.setenv("PESO_AVISO_KG", valor)
     assert get_settings().weight_warning_kg == esperado
+
+
+# --- dos apps: conductores («/») y oficina y almacén («/oficina/», con su propio código)
+def test_la_app_de_oficina_esta_al_dia_con_index():
+    import importlib.util
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("gen", raiz / "scripts" / "generar_oficina.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    assert (raiz / "public" / "oficina" / "index.html").read_text(encoding="utf-8") == gen.generar(), \
+        "Ejecuta python scripts/generar_oficina.py"
+
+
+def test_codigo_de_oficina(monkeypatch):
+    monkeypatch.setenv("APP_ACCESS_CODE", "codigo-conductor")
+    monkeypatch.setattr("app.main.FAIL_DELAY", 0)
+    c = _cliente()
+    cond, ofi = {"X-Codigo-Acceso": "codigo-conductor"}, {"X-Codigo-Acceso": "codigo-oficina"}
+    # sin código de oficina configurado, el general sirve para todo (como hasta ahora)
+    assert c.post("/api/login", headers=cond).json()["rol"] == "oficina"
+    monkeypatch.setenv("APP_OFICINA_CODE", "codigo-oficina")
+    assert c.post("/api/login", headers=cond).json()["rol"] == "conductor"
+    assert c.post("/api/login", headers=ofi).json()["rol"] == "oficina"
+    assert c.get("/api/pr/tren/actual", headers=cond).status_code == 403          # el conductor no entra en lo de oficina
+    assert c.get("/api/pr/pendientes", headers=cond).json()["codigo"] == "solo_oficina"
+    assert c.get("/api/pr/tren/actual", headers=ofi).status_code != 403
+    assert c.post("/api/resolve-qr", json={"order_name": "S2621473", "company": "transargi"}, headers=ofi).status_code == 200
+    assert c.post("/api/login", headers={"X-Codigo-Acceso": "otro"}).status_code == 401

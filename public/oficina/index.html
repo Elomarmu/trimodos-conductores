@@ -1,0 +1,314 @@
+<!doctype html>
+<!-- GENERADO con scripts/generar_oficina.py a partir de public/index.html: no lo edites a mano. -->
+<html lang="es" data-app="oficina">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Corrige mercancía, elementos, euro palets y peso de la orden de transporte.">
+<meta name="robots" content="noindex, nofollow">
+<!-- Vista previa al compartir el enlace (WhatsApp, Teams, correo...). Las imágenes necesitan dirección absoluta. -->
+<meta property="og:type" content="website">
+<meta property="og:locale" content="es_ES">
+<meta property="og:site_name" content="Grupo Trimodos">
+<meta property="og:title" content="Oficina y almacén - Trimodos">
+<meta property="og:description" content="Corrige mercancía, elementos, euro palets y peso de la orden de transporte.">
+<meta property="og:image" content="https://trimodos-conductores-pcsur-elo.vercel.app/img/compartir.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Grupo Trimodos - Modificación DECA">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Oficina y almacén - Trimodos">
+<meta name="twitter:image" content="https://trimodos-conductores-pcsur-elo.vercel.app/img/compartir.png">
+<link rel="manifest" href="/oficina/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Oficina Trimodos">
+<title>Oficina y almacén - Trimodos</title>
+<link rel="preload" href="/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header id="brandbar" class="brandbar"><img id="brand-logo" src="/img/trimodos.png" alt="Grupo Trimodos"></header>
+<div id="err" class="banner bad" role="alert" hidden></div>
+
+<!-- PANTALLA 1: menú -->
+<main id="s-menu" class="screen">
+  <h1 id="menu-titulo">Oficina y almacén</h1>
+  <button id="btn-scan" class="btn primary">DECA - Trimodos</button>
+  <button id="btn-pr" class="btn secondary">Carga de PR · foto del albarán</button>
+  <button id="btn-pr-oficina" class="btn secondary solo-oficina" hidden>Oficina · PR</button>
+  <button id="btn-pr-almacen" class="btn secondary solo-oficina" hidden>Almacén · PR</button>
+  <a id="btn-guia" class="btn ghost" href="/guia.html">Cómo se usa (guía)</a>
+  <p id="modo" class="hint" hidden></p>
+</main>
+
+<!-- PANTALLA 2: escáner -->
+<main id="s-scan" class="screen" hidden>
+  <h1>Escanea el código QR</h1>
+  <div class="scan-cam">
+    <div id="cam" class="cam"><video id="video" playsinline muted></video></div>
+    <p id="cam-msg" class="hint" aria-live="polite">Apunta al código QR de la orden.</p>
+    <button id="btn-test-qr" class="btn secondary" hidden>Usar QR de prueba</button>
+  </div>
+  <form id="order-form" class="manual" novalidate>
+    <h2>¿No se lee? Escribe el pedido</h2>
+    <div class="seg" role="radiogroup" aria-label="Empresa">
+      <button type="button" class="btn seg-btn" data-company="transargi" role="radio" aria-checked="false"><img src="/img/transargi.png" alt="TRANSARGI"></button>
+      <button type="button" class="btn seg-btn" data-company="stinsa" role="radio" aria-checked="false"><img src="/img/stinsa.png" alt="STINSA"></button>
+    </div>
+    <input id="order" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="S2621473" aria-label="Número de pedido">
+    <button id="btn-order" type="submit" class="btn primary">Buscar pedido</button>
+  </form>
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- PANTALLA 3: datos actuales y edición -->
+<main id="s-edit" class="screen" hidden>
+  <h1 id="edit-title">Orden</h1>
+  <div id="edit-banners"></div>
+  <div id="packages"></div>
+  <div class="actions">
+    <button id="btn-review" class="btn primary">Revisar cambios</button>
+    <button class="btn ghost" data-go="menu">Cancelar</button>
+  </div>
+</main>
+
+<!-- PANTALLA 4: resumen, confirmación y resultado -->
+<main id="s-review" class="screen" hidden>
+  <h1 id="review-title">Revisa los cambios</h1>
+  <div id="review-body"></div>
+  <div id="review-actions" class="actions">
+    <button id="btn-save" class="btn primary">Guardar cambios</button>
+    <button id="btn-back-edit" class="btn ghost">Volver y corregir</button>
+  </div>
+  <div id="done-actions" class="actions" hidden>
+    <button id="btn-retry" class="btn primary" hidden>Reintentar PDF</button>
+    <button id="btn-open" class="btn primary">Abrir PDF</button>
+    <button id="btn-download" class="btn secondary">Descargar PDF</button>
+    <button id="btn-share" class="btn secondary" hidden>Compartir</button>
+    <button class="btn ghost" data-go="menu">Volver al menú</button>
+  </div>
+</main>
+
+<!-- PR 1: foto del albarán -->
+<main id="s-pr-foto" class="screen" hidden>
+  <h1>Carga de PR</h1>
+  <p class="hint">Haz una foto al albarán entero, de frente y con luz. Se leen los datos solos y los revisas antes de guardar.</p>
+  <label class="btn primary huge" for="pr-camara">Hacer foto del albarán</label>
+  <input id="pr-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <label class="btn secondary" for="pr-archivo">Elegir foto o PDF</label>
+  <input id="pr-archivo" class="oculto" type="file" accept="image/*,application/pdf">
+  <button class="btn ghost pr-volver">Volver</button>
+</main>
+
+<!-- PR 2: revisar lo leído -->
+<main id="s-pr-revisar" class="screen" hidden>
+  <h1>Revisa los datos</h1>
+  <div id="pr-avisos" class="avisos"></div>
+  <form id="pr-form" class="pkg" novalidate>
+    <div class="field"><label for="pr-punto">Punto de carga</label><select id="pr-punto"></select></div>
+    <div class="row2">
+      <div class="field"><label for="pr-fecha">Fecha</label><input id="pr-fecha" type="date"></div>
+      <div class="field"><label for="pr-hora">Hora</label><input id="pr-hora" type="time"></div>
+    </div>
+    <div class="field"><label for="pr-albaran">Nº albarán</label><input id="pr-albaran" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <div class="row2">
+      <div class="field"><label for="pr-tractora">Tractora</label><input id="pr-tractora" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="pr-remolque">Remolque</label><input id="pr-remolque" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <p id="pr-colaborador" class="hint"></p>
+    <div class="row2">
+      <div class="field"><label for="pr-bultos">Balas</label><input id="pr-bultos" type="text" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pr-peso">Peso neto (kg)</label><input id="pr-peso" type="text" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="pr-paper">Código carga Paper</label><input id="pr-paper" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="S261104001499"></div>
+    <div class="field" id="pr-cont-campo"><label for="pr-contenedor">Contenedor</label><input id="pr-contenedor" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="NPWU4954328"></div>
+    <p class="hint">Lo que no venga en el albarán (peso, balas, código Paper) se puede dejar en blanco: la oficina lo completa después.</p>
+  </form>
+  <section id="pr-docs" class="docs" aria-label="Documentos"></section>
+  <div class="actions">
+    <button id="pr-guardar" class="btn primary">Guardar y generar la orden</button>
+    <button id="pr-otra-foto" class="btn ghost">Hacer otra foto</button>
+  </div>
+</main>
+
+<!-- PR 3: hecho -->
+<main id="s-pr-hecho" class="screen" hidden>
+  <h1 id="pr-hecho-titulo">Orden generada</h1>
+  <div id="pr-hecho-cuerpo" class="result"></div>
+  <div class="actions">
+    <button id="pr-abrir" class="btn primary">Abrir PDF</button>
+    <button id="pr-descargar" class="btn secondary">Descargar PDF</button>
+    <button id="pr-compartir" class="btn secondary" hidden>Compartir</button>
+    <button class="btn ghost pr-volver">Volver</button>
+  </div>
+</main>
+
+<!-- Oficina: menú -->
+<main id="s-pr-oficina" class="screen" hidden>
+  <h1>Oficina · viajes de PR</h1>
+  <button id="of-registrar" class="btn primary">Registrar un viaje (foto del albarán)</button>
+  <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
+  <button id="of-pendientes" class="btn secondary">Cargas con documentos o datos pendientes</button>
+  <button id="of-tren" class="btn secondary">Cargar la composición del tren</button>
+  <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
+  <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- Oficina: cargas con datos o documentos pendientes -->
+<main id="s-pr-pendientes" class="screen" hidden>
+  <h1>Cargas pendientes</h1>
+  <p class="hint">Cargas a las que les falta la foto del albarán, el DI de residuos, el código Paper, el peso o las balas.</p>
+  <p id="pend-cuenta" class="banner info"></p>
+  <div id="pend-lista" class="lista"></div>
+  <div class="actions">
+    <button id="pend-recargar" class="btn ghost">Actualizar</button>
+    <button class="btn ghost" data-go="pr-oficina">Volver</button>
+  </div>
+</main>
+
+<!-- Oficina: composición del tren -->
+<main id="s-pr-tren" class="screen" hidden>
+  <h1>Composición del tren</h1>
+  <div id="tren-paso1">
+    <p class="hint">Sube el listado de vagones y cajas móviles del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>
+    <label class="btn primary huge" for="tren-archivo">Subir el listado del tren</label>
+    <input id="tren-archivo" class="oculto" type="file" accept="application/pdf,image/*" multiple>
+  </div>
+  <div id="tren-paso2" hidden>
+    <div class="pkg">
+      <div class="row2">
+        <div class="field"><label for="tren-num">Nº de tren</label><input id="tren-num" type="text" inputmode="numeric" autocomplete="off"></div>
+        <div class="field"><label for="tren-convoy">Nº convoy</label><input id="tren-convoy" type="text" autocomplete="off"></div>
+      </div>
+      <div class="field"><label for="tren-fecha">Fecha</label><input id="tren-fecha" type="date"></div>
+    </div>
+    <div id="tren-avisos" class="avisos"></div>
+    <div id="tren-cajas" class="lista"></div>
+    <div class="actions">
+      <button id="tren-guardar" class="btn primary">Guardar la composición del tren</button>
+      <button id="tren-otra" class="btn ghost">Subir otro listado</button>
+    </div>
+  </div>
+  <div id="tren-hecho" hidden>
+    <div id="tren-hecho-cuerpo" class="result"></div>
+    <button id="tren-ir-asignar" class="btn primary">Asignar cargas a cajas</button>
+  </div>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
+</main>
+
+<!-- Oficina: bobinas de un convoy (pantalla «SAICA - Detalle convoy») -->
+<main id="s-pr-bobinas" class="screen" hidden>
+  <h1>Bobinas de un convoy</h1>
+  <div id="bob-paso1">
+    <p class="hint">Sube la captura (o una foto) de la pantalla «SAICA - Detalle convoy». Si el convoy no cabe en una pantalla, sube hasta 4 capturas.</p>
+    <label class="btn primary huge" for="bob-archivo">Subir la captura del convoy</label>
+    <input id="bob-archivo" class="oculto" type="file" accept="image/*,application/pdf" multiple>
+  </div>
+  <div id="bob-paso2" hidden>
+    <p id="bob-titulo" class="hint"></p>
+    <div id="bob-avisos" class="avisos"></div>
+    <div class="bob-scroll"><table id="bob-tabla" class="bob-tabla"></table></div>
+    <p id="bob-tipos" class="hint"></p>
+    <div class="actions">
+      <button id="bob-enviar" class="btn primary">Enviar la Excel a Sevilla</button>
+      <button id="bob-otra" class="btn ghost">Subir otra captura</button>
+    </div>
+    <div id="bob-hecho" class="lista"></div>
+  </div>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
+</main>
+
+<!-- Asignar cargas a cajas (almacén y oficina) -->
+<main id="s-pr-almacen" class="screen" hidden>
+  <h1>Cargar cajas móviles</h1>
+  <p id="alm-tren" class="banner info"></p>
+  <form id="alm-form" class="pkg" novalidate>
+    <div class="field"><label for="alm-caja">Caja móvil</label><select id="alm-caja"></select></div>
+    <div class="field"><label for="alm-carga">Carga</label><select id="alm-carga"></select></div>
+    <button type="submit" class="btn primary huge">Asignar</button>
+    <button type="button" id="alm-editar" class="btn ghost small">Modificar la caja elegida</button>
+  </form>
+  <p id="alm-cuenta" class="hint"></p>
+  <h2 id="alm-hechas-titulo">Ya cargadas</h2>
+  <p id="alm-orden-hint" class="hint">En el orden del tren: arriba los vagones junto a la locomotora. Cada vagón nuevo que cargas (también si va vacío) sube arriba; usa ▲ ▼ para cambiarlo.</p>
+  <div id="alm-hechas" class="lista"></div>
+  <div class="actions">
+    <button id="alm-recargar" class="btn ghost">Actualizar</button>
+    <button id="alm-enviar" class="btn secondary" hidden>Terminar el tren y enviar las Excel</button>
+  </div>
+  <div id="alm-descargas" class="actions"></div>
+  <button id="alm-volver" class="btn ghost">Volver</button>
+</main>
+
+<!-- Oficina: completar un viaje de PR -->
+<main id="s-pr-completar" class="screen" hidden>
+  <h1>Modificar una carga de PR</h1>
+  <label class="btn primary" for="pr-m-camara">Hacer foto del albarán</label>
+  <input id="pr-m-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <label class="btn secondary" for="pr-m-archivo">Elegir foto o PDF del albarán</label>
+  <input id="pr-m-archivo" class="oculto" type="file" accept="image/*,application/pdf">
+  <div id="pr-m-avisos" class="avisos"></div>
+  <form id="pr-buscar-form" class="manual" novalidate>
+    <label class="hint" for="pr-buscar">O búscala por nº de albarán, código Paper o bulto (PK…)</label>
+    <input id="pr-buscar" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <button type="submit" class="btn primary">Buscar</button>
+  </form>
+  <form id="pr-completar" class="pkg" hidden novalidate>
+    <h2 id="pr-completar-titulo"></h2>
+    <p id="pr-completar-datos" class="route"></p>
+    <div class="field"><label for="pr-c-paper">Código carga Paper</label><input id="pr-c-paper" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <div class="row2">
+      <div class="field"><label for="pr-c-bultos">Balas</label><input id="pr-c-bultos" type="text" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pr-c-peso">Peso neto (kg)</label><input id="pr-c-peso" type="text" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="pr-c-contenedor">Contenedor</label><input id="pr-c-contenedor" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <div id="pr-c-docs" class="docs"></div>
+    <button type="submit" class="btn primary">Guardar</button>
+  </form>
+  <div id="pr-completar-ok" class="banner info" hidden></div>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
+</main>
+
+<div id="confirm" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-q" hidden>
+  <div class="dialog">
+    <h2 id="confirm-q">¿Seguro?</h2>
+    <p id="confirm-txt">Se generará una nueva orden de transporte.</p>
+    <button id="btn-yes" class="btn ok huge">Sí, guardar</button>
+    <button id="btn-no" class="btn danger huge">No, volver</button>
+  </div>
+</div>
+
+<div id="access" class="overlay" role="dialog" aria-modal="true" aria-labelledby="access-q" hidden>
+  <form id="access-form" class="dialog">
+    <h2 id="access-q">Código de acceso</h2>
+    <p id="access-help">Es el código de oficina y almacén (no el de los conductores). Solo hace falta la primera vez.</p>
+    <input id="access-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Código de acceso">
+    <div id="access-err" class="banner bad" role="alert" hidden></div>
+    <button type="submit" class="btn primary huge">Entrar</button>
+  </form>
+</div>
+
+<div id="mma" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="mma-q" hidden>
+  <div class="dialog">
+    <h2 id="mma-q">Revisa el peso</h2>
+    <p>Es posible que el conjunto supere la MMA autorizada, confirme que es correcto el peso.</p>
+    <ul id="mma-list" class="mma-list"></ul>
+    <button id="btn-mma-si" class="btn ok huge">Sí, es correcto</button>
+    <button id="btn-mma-no" class="btn danger huge">No, corregir</button>
+  </div>
+</div>
+
+<div id="busy" class="overlay" hidden>
+  <div class="dialog" role="status" aria-live="polite"><h2 id="busy-msg">Un momento…</h2><div class="progress" aria-hidden="true"><span></span></div></div>
+</div>
+<script src="/app.js"></script>
+<script src="/pr.js"></script>
+</body>
+</html>

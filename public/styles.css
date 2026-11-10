@@ -83,7 +83,7 @@ body[data-screen="menu"] .brandbar img { max-height: 58px; max-width: 76%; }
 #edit-banners:empty { display: none; }
 
 /* ---- Visor: cuatro esquinas, el mismo dibujo en el botón del menú y sobre la cámara (color y tamaño en --c, --l, --w) ---- */
-#s-menu #btn-scan::before, .cam.live::after {
+.cam.live::after {
   background:
     linear-gradient(var(--c) 0 0) left top / var(--l) var(--w), linear-gradient(var(--c) 0 0) left top / var(--w) var(--l),
     linear-gradient(var(--c) 0 0) right top / var(--l) var(--w), linear-gradient(var(--c) 0 0) right top / var(--w) var(--l),
@@ -93,15 +93,9 @@ body[data-screen="menu"] .brandbar img { max-height: 58px; max-width: 76%; }
 }
 
 /* ---- Pantalla 1: menú ---- */
-#s-menu { justify-content: center; gap: 18px; }
-/* «DECA - Trimodos» mide ~8 veces el tamaño de letra: se reduce lo justo para que quepa en una línea en móviles estrechos. */
+#s-menu { justify-content: center; gap: 14px; }
+#s-menu .btn { font-size: 1.1rem; }
 #s-menu h1 { text-align: center; font-size: min(1.9rem, calc((100vw - 2 * var(--gutter)) / 8.2)); }
-#s-menu .lead { text-align: center; color: var(--muted); margin: -8px auto 6px; max-width: 30ch; }
-#s-menu #btn-scan { position: relative; min-height: min(40vh, 320px); flex-direction: column; gap: 18px; border-radius: var(--r-lg); padding: 32px; font-size: 1.4rem; }
-#s-menu #btn-scan::before { content: ""; position: absolute; inset: 16px; pointer-events: none; --c: rgba(0, 0, 0, .85); --l: 30px; --w: 5px; }
-#btn-scan .qr { width: 60px; height: 60px; display: block; }
-#btn-scan span { max-width: 13ch; text-wrap: balance; }
-#s-menu #btn-guia { min-height: 54px; font-size: 1rem; }   /* secundario: el botón grande sigue siendo uno solo */
 #s-menu #modo { text-align: center; }
 
 /* ---- Pantalla 2: escáner ---- */
@@ -214,7 +208,6 @@ input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-col
   .btn:hover:not(:disabled) { filter: brightness(1.08); }
   .btn:not(.primary):not(.ok):not(.danger):not([aria-checked="true"]):hover:not(:disabled) { background: var(--surface-hover); border-color: #8a8a8a; filter: none; }
   .btn.danger:hover:not(:disabled) { background: #2a0c0c; filter: none; }
-  #s-menu #btn-guia { min-height: 48px; }
 }
 
 /* Pantalla ancha: se aprovecha el espacio en columnas; los textos largos no pasan de ~75 caracteres por línea. */
@@ -227,7 +220,6 @@ input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-col
   body[data-screen="menu"] .brandbar img { max-height: 60px; }
   #s-menu { max-width: 520px; }
   #s-menu h1 { font-size: 2.2rem; }
-  #s-menu #btn-scan { min-height: 280px; }
 
   /* escáner: cámara a la izquierda, pedido escrito a mano a la derecha */
   #s-scan { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); column-gap: 32px; row-gap: 22px; align-items: start; }
@@ -269,7 +261,6 @@ select, input[type=date], input[type=time] {
   border: 1.5px solid var(--line-strong); background: #000; color: var(--fg); color-scheme: dark;
 }
 select:focus-visible, input[type=date]:focus-visible, input[type=time]:focus-visible { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 35%, transparent); }
-#s-menu #btn-pr { min-height: 64px; font-size: 1.1rem; }
 .row2 > * { min-width: 0; }                 /* los campos de fecha y hora no empujan la tarjeta */
 select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; display: block; }
 .lista { display: flex; flex-direction: column; gap: 8px; }

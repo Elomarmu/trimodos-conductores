@@ -680,6 +680,7 @@ $("bob-enviar").addEventListener("click", async () => {
 
 // Accesos directos: …/#almacen abre la asignación de cajas; …/#oficina el menú de oficina.
 function accesoDirecto() {
+  if (APP !== "oficina") return;
   if (location.hash === "#almacen") abrirAlmacen(false);
   else if (location.hash === "#oficina") go("pr-oficina");
 }

@@ -1,8 +1,8 @@
 // Service worker: solo guarda la "carcasa" de la app para que abra aunque no haya cobertura.
 // Los datos (/api/*) NUNCA se guardan en caché: siempre van a la red.
-const CACHE = "conductores-v27"; // súbelo (v2, v3…) cuando cambies archivos de la carcasa
+const CACHE = "conductores-v28"; // súbelo (v2, v3…) cuando cambies archivos de la carcasa
 const SHELL = [
-  "/", "/index.html", "/guia.html", "/styles.css", "/app.js", "/pr.js", "/manifest.webmanifest",
+  "/", "/index.html", "/oficina/", "/oficina/index.html", "/oficina/manifest.webmanifest", "/guia.html", "/styles.css", "/app.js", "/pr.js", "/manifest.webmanifest",
   "/vendor/jsQR.js", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png",
   "/img/trimodos.png", "/img/stinsa.png", "/img/transargi.png", "/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2",
 ];
@@ -27,6 +27,6 @@ self.addEventListener("fetch", (e) => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
         return res;
       })
-      .catch(() => caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || caches.match("/index.html"))),
+      .catch(() => caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || caches.match(url.pathname.startsWith("/oficina") ? "/oficina/index.html" : "/index.html"))),
   );
 });

@@ -36,20 +36,40 @@ MIN_CODE_LENGTH = 8
 FAIL_DELAY = 1.0  # segundos de espera tras un código incorrecto: frena los intentos al azar
 
 
+def _igual(a: str, b: str) -> bool:
+    return bool(b) and hmac.compare_digest(a.encode(), b.encode())
+
+
+def es_oficina(codigo: str) -> bool:
+    """¿Es el código de la app de oficina y almacén? Mientras no haya uno propio (APP_OFICINA_CODE), vale el general."""
+    s = get_settings()
+    return _igual(codigo, s.oficina_code) if len(s.oficina_code) >= MIN_CODE_LENGTH else (_igual(codigo, s.access_code) or not s.access_code)
+
+
 def require_access(x_codigo_acceso: str = Header("")):
-    """Código de acceso compartido. En modo real es obligatorio: sin él configurado, la API se niega a funcionar."""
+    """Código de acceso: el de los conductores (APP_ACCESS_CODE) o el de oficina y almacén (APP_OFICINA_CODE).
+    En modo real es obligatorio: sin él configurado, la API se niega a funcionar."""
     s = get_settings()
     if s.mode == "real" and len(s.access_code) < MIN_CODE_LENGTH:
         raise AppError("La app no está configurada. Avisa a la oficina.", 503, "sin_configurar")
     if not s.access_code:
         return  # solo posible en modo simulado
-    if not hmac.compare_digest(x_codigo_acceso.encode(), s.access_code.encode()):
+    if not (_igual(x_codigo_acceso, s.access_code) or (len(s.oficina_code) >= MIN_CODE_LENGTH and _igual(x_codigo_acceso, s.oficina_code))):
         log.warning("Código de acceso incorrecto")  # nunca se registra lo que se escribió
         time.sleep(FAIL_DELAY)
         raise AppError("Código de acceso incorrecto.", 401, "codigo_invalido")
 
 
+def require_oficina(x_codigo_acceso: str = Header("")):
+    """Funciones de oficina y almacén: solo con el código de oficina (el de los conductores no sirve)."""
+    if not es_oficina(x_codigo_acceso):
+        log.warning("Intento de usar una función de oficina sin su código")
+        time.sleep(FAIL_DELAY)
+        raise AppError("Esta función es de la app de oficina y almacén. Pide su código en la oficina.", 403, "solo_oficina")
+
+
 access = [Depends(require_access)]
+access_oficina = [Depends(require_access), Depends(require_oficina)]
 
 
 class ResolveBody(BaseModel):
@@ -89,8 +109,8 @@ async def unexpected_handler(request: Request, exc: Exception):
 
 
 @app.post("/api/login", dependencies=access)
-def login():
-    return {"ok": True}
+def login(x_codigo_acceso: str = Header("")):
+    return {"ok": True, "rol": "oficina" if es_oficina(x_codigo_acceso) else "conductor"}
 
 
 @app.get("/api/health")
@@ -163,7 +183,8 @@ app.include_router(argon_api.router)
 # Viajes de PR de SAICA PAPER (albarán → pedido mensual; tren → cajas móviles). Mismo código de acceso que la app.
 from .pr import pr_api  # noqa: E402
 
-app.include_router(pr_api.router, dependencies=access)
+app.include_router(pr_api.router, dependencies=access)             # conductor (y oficina): registrar un viaje
+app.include_router(pr_api.oficina, dependencies=access_oficina)    # oficina y almacén: solo con su código
 
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")

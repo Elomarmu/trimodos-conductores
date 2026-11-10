@@ -29,7 +29,7 @@
 <meta name="apple-mobile-web-app-title" content="DECA Trimodos">
 <title>Modificación DECA - Trimodos</title>
 <link rel="preload" href="/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <header id="brandbar" class="brandbar"><img id="brand-logo" src="/img/trimodos.png" alt="Grupo Trimodos"></header>
@@ -37,18 +37,12 @@
 
 <!-- PANTALLA 1: menú -->
 <main id="s-menu" class="screen">
-  <h1>DECA - Trimodos</h1>
-  <p class="lead">Corrige la mercancía, los bultos, los palets y el peso de la orden de transporte.</p>
-  <button id="btn-scan" class="btn primary huge">
-    <svg class="qr" viewBox="0 0 21 21" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" fill-rule="evenodd" d="M0 0h7v7H0zM1 1v5h5V1zM2 2h3v3H2zM14 0h7v7h-7zM15 1v5h5V1zM16 2h3v3h-3zM0 14h7v7H0zM1 15v5h5v-5zM2 16h3v3H2zM9 0h2v2H9zM9 4h3v2H9zM8 8h2v3H8zM12 8h2v2h-2zM0 9h2v2H0zM4 9h3v2H4zM16 9h2v2h-2zM19 9h2v3h-2zM10 12h3v2h-3zM14 12h3v2h-3zM9 15h2v2H9zM13 15h2v3h-2zM17 15h4v2h-4zM9 19h3v2H9zM16 18h2v3h-2zM19 19h2v2h-2z"/></svg>
-    <span>Escanear orden de transporte</span>
-  </button>
+  <h1 id="menu-titulo">Conductores</h1>
+  <button id="btn-scan" class="btn primary">DECA - Trimodos</button>
   <button id="btn-pr" class="btn secondary">Carga de PR · foto del albarán</button>
+  <button id="btn-pr-oficina" class="btn secondary solo-oficina" hidden>Oficina · PR</button>
+  <button id="btn-pr-almacen" class="btn secondary solo-oficina" hidden>Almacén · PR</button>
   <a id="btn-guia" class="btn ghost" href="/guia.html">Cómo se usa (guía)</a>
-  <div class="row2">
-    <button id="btn-pr-oficina" class="btn ghost small">Oficina · PR</button>
-    <button id="btn-pr-almacen" class="btn ghost small">Almacén · PR</button>
-  </div>
   <p id="modo" class="hint" hidden></p>
 </main>
 
@@ -313,7 +307,7 @@
 <div id="busy" class="overlay" hidden>
   <div class="dialog" role="status" aria-live="polite"><h2 id="busy-msg">Un momento…</h2><div class="progress" aria-hidden="true"><span></span></div></div>
 </div>
-<script src="app.js"></script>
-<script src="pr.js"></script>
+<script src="/app.js"></script>
+<script src="/pr.js"></script>
 </body>
 </html>
