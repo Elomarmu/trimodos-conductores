@@ -180,6 +180,10 @@ input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-col
 .dialog p { margin: 0; }
 .mma-list { margin: 0; padding-left: 1.2rem; font-size: 1.12rem; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
 /* Barra de espera (guardar e imprimir tarda unos segundos) */
+/* Loader de marca (public/trimodos-loader.js): marco blanco sobre fondo negro */
+:root { --tl-ink: #fff; --tl-splash-bg: #000; --tl-bg: rgba(0, 0, 0, .86); --tl-fg: #fff; }
+.busy-loader { width: 112px; height: 112px; align-self: center; margin: 4px 0 2px; }
+#busy .dialog { align-items: center; text-align: center; }
 .progress { height: 6px; border-radius: 3px; background: #2e2e2e; overflow: hidden; }
 .progress span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--brand); }
 @media (prefers-reduced-motion: no-preference) { .progress span { animation: progreso 1.3s ease-in-out infinite; } }

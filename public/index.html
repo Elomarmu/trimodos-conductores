@@ -32,6 +32,8 @@
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+<!-- Loader de marca: pantalla de inicio y capa de carga (ver public/trimodos-loader.js) -->
+<script src="/trimodos-loader.js"></script>
 <header id="brandbar" class="brandbar"><img id="brand-logo" src="/img/trimodos.png" alt="Grupo Trimodos"></header>
 <div id="err" class="banner bad" role="alert" hidden></div>
 
@@ -305,7 +307,7 @@
 </div>
 
 <div id="busy" class="overlay" hidden>
-  <div class="dialog" role="status" aria-live="polite"><h2 id="busy-msg">Un momento…</h2><div class="progress" aria-hidden="true"><span></span></div></div>
+  <div class="dialog" role="status" aria-live="polite"><div class="busy-loader" data-trimodos-loader></div><h2 id="busy-msg">Un momento…</h2></div>
 </div>
 <script src="/app.js"></script>
 <script src="/pr.js"></script>
