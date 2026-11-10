@@ -198,3 +198,16 @@ def test_el_registro_se_sube_al_asignar_y_quitar(monkeypatch):
         ("registro", False, "REGISTRO VIAJES PR.xlsx")] * 2
     monkeypatch.setattr(O, "viajes", lambda o, desde=None: (_ for _ in ()).throw(RuntimeError("sin Odoo")))
     A.subir_registro(odoo)   # nunca para el trabajo
+
+
+def test_correo_de_pedido_nuevo_con_enlace(monkeypatch):
+    enviados = []
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "enlace_odoo", lambda m, i: f"https://odoo/web#id={i}&model={m}&view_type=form" if i else "")
+    A.avisar("pedido_nuevo", {"pedido": "S26100001", "referencia": "PR DICIEMBRE"},
+             [("Pedido S26100001", A.enlace_odoo("sale.order", 77)), ("Primer viaje", A.enlace_odoo("project.task", None))])
+    h = enviados[0]["html"]
+    assert "href='https://odoo/web#id=77&amp;model=sale.order&amp;view_type=form'" in h and ">Pedido S26100001</a>" in h
+    assert "Primer viaje" not in h            # sin tarea no sale el botón
+    A.avisar("punto_nuevo", {"punto": "X", "albaran": "1", "fecha": "2026-11-10"})
+    assert "<a " not in enviados[1]["html"]

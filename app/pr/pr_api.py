@@ -122,10 +122,13 @@ def subir_registro(odoo, lista: list[dict] | None = None) -> None:
         log.exception("no se pudo poner al día REGISTRO VIAJES PR en SharePoint")
 
 
-def avisar(evento: str, datos: dict) -> None:
+def avisar(evento: str, datos: dict, enlaces: list[tuple[str, str]] = ()) -> None:
+    """Correo corto de aviso; «enlaces» = botones (texto, url) debajo del texto, p. ej. al pedido en Odoo."""
     e = {k: html.escape(str(v or "")) for k, v in datos.items()}
+    botones_html = "".join(boton(t, u) for t, u in enlaces)
     enviar_n8n({"evento": evento, "asunto": ASUNTOS[evento].format(**{k: v or "" for k, v in datos.items()}),
-                "html": f"<p style='font:11pt Calibri,Arial'>{TEXTOS[evento].format(**e)}</p>", "archivos": []})
+                "html": f"<p style='font:11pt Calibri,Arial'>{TEXTOS[evento].format(**e)}</p>"
+                        + (f"<p>{botones_html}</p>" if botones_html else ""), "archivos": []})
 
 
 # ---- modelos de entrada -----------------------------------------------------------------------------------------
@@ -228,7 +231,9 @@ def registrar(body: ViajeIn):
                 log.warning("no se pudo guardar %s en la tarea %s", R.DOCUMENTOS[doc][3], res["tarea_id"])
     res["faltan_docs"] = [] if res["duplicado"] else [R.DOCUMENTOS[d][3] for d in R.DOCUMENTOS if not res["documentos"].get(d)]
     if res.get("pedido_nuevo"):
-        avisar("pedido_nuevo", {"pedido": res["pedido"], "referencia": R.referencia_pedido(v["fecha"])})
+        avisar("pedido_nuevo", {"pedido": res["pedido"], "referencia": R.referencia_pedido(v["fecha"])},
+               [(f"Pedido {res['pedido']}", enlace_odoo("sale.order", res.get("pedido_id"))),
+                ("Primer viaje (orden de transporte)", enlace_odoo("project.task", res.get("tarea_id")))])
     from ..main import get_odoo  # nota en la tarea con el cliente general
     cli = get_odoo()
     if not res["duplicado"]:

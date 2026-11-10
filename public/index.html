@@ -306,10 +306,20 @@
   </div>
 </div>
 
+<div id="escaner" class="overlay escaner" role="dialog" aria-modal="true" aria-labelledby="esc-q" hidden>
+  <div class="escaner-caja">
+    <h2 id="esc-q">Encuadra el folio</h2>
+    <p id="esc-hint" class="hint"></p>
+    <div class="esc-lienzo"><canvas id="esc-canvas" aria-label="Foto del documento"></canvas></div>
+    <div id="esc-botones" class="esc-botones"></div>
+  </div>
+</div>
+
 <div id="busy" class="overlay" hidden>
   <div class="dialog" role="status" aria-live="polite"><div class="busy-loader" data-trimodos-loader></div><h2 id="busy-msg">Un momento…</h2></div>
 </div>
 <script src="/app.js"></script>
+<script src="/escaner.js"></script>
 <script src="/pr.js"></script>
 </body>
 </html>

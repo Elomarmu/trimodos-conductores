@@ -304,3 +304,11 @@ select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; disp
 .bob-tabla thead th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 600; }
 .bob-tabla tfoot td { font-weight: 700; border-bottom: 0; }
 @media (max-width: 480px) { .bob-tabla { font-size: .9rem; } .bob-tabla th, .bob-tabla td { padding: 6px 5px; } }
+
+/* ---- Escáner de documentos (encuadre del folio) ---- */
+.escaner { z-index: 45; align-items: stretch; padding: 12px; background: rgba(0, 0, 0, .96); overflow-y: auto; }
+.escaner-caja { width: 100%; max-width: 560px; margin: auto; display: flex; flex-direction: column; gap: 10px; }
+.escaner-caja h2, .escaner-caja .hint { text-align: center; color: #fff; }
+.esc-lienzo { display: flex; justify-content: center; width: 100%; }
+#esc-canvas { touch-action: none; border-radius: 6px; background: #111; max-width: 100%; }
+.esc-botones { display: flex; flex-direction: column; gap: 8px; }
