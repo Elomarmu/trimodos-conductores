@@ -617,3 +617,18 @@ def test_conciliar_freno_si_hay_que_anular_demasiado():
     r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
     assert not r["lineas_anuladas"] and any("demasiadas" in e for e in r["errores"])
     assert not any(str(v.get("name", "")).startswith("ANULADA") for v in o.lineas.values())
+
+
+def test_descarga_por_medios_del_cliente():
+    import argon_facturacion as F
+    import argon_odoo as AO
+    base = dict(contenedor="CARU 1", codigo_corto="1", referencia=None, chasis=None, iniciales=None, bloqueado=False,
+                cancelada=False, forzar=None, horas_espera=None, origen=None, llegada=None, reexpedicion=False, carga="CARGADO")
+    movs = [dict(base, fecha="2026-11-02", tipo="SITUACION", ubicacion="LA NEGRILLA", texto="NEGRILLA", celda="A1"),
+            dict(base, fecha="2026-11-03", tipo="DESCARGA", ubicacion="LA NEGRILLA", texto="DESCARGA ", celda="A2"),
+            dict(base, fecha="2026-11-05", tipo="DESCARGA", ubicacion="ACX", texto="DESCARGA ACX 3", celda="A3")]
+    d = [s for s in F.construir(movs) if s.servicio == "DESCARGA"]
+    nombres = [AO.linea_de(s, {})["name"] for s in d]
+    assert nombres[0].startswith("Descarga por medios del cliente ·") and "NEGRILLA" not in nombres[0]
+    assert nombres[1].startswith("Descarga por medios del cliente en ACX")
+    assert d[0].destino == "LA NEGRILLA"  # para la rotación y el histórico sigue contando dónde estaba
