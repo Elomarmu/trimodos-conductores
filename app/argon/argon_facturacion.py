@@ -70,6 +70,7 @@ class Servicio:
     celda: str | None = None          # celda de la hoja diaria donde está anotado
     ir: dict = field(default_factory=dict)  # dato que falta → celda de la Excel donde rellenarlo («'HOJA'!B5»)
     paradas: list = field(default_factory=list)  # tren: terminales por las que pasa sin «SL» [(sitio, fecha), …]
+    sitio_escrito: bool = True  # DESCARGA: False si la celda pone «DESCARGA» sin sitio (por medios del cliente)
 
 
 # ------------------------------------------------------------------ tablas de la Excel
@@ -355,6 +356,8 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                     nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
             elif t == "DESCARGA":
                 nuevo(m, "DESCARGA", None, m["ubicacion"])
+                # «DESCARGA» a secas: el cliente se lleva el contenedor por sus medios y no sabemos dónde descarga
+                res[-1].sitio_escrito = not re.fullmatch(r"DESCARGA\W*", L.norm(m["texto"] or "").replace("\xa0", " ").strip())
             # códigos pactados escritos en la celda (TRASVASE, PESAR…) se añaden en tarificar()
             if t not in ("SALIDA_TREN", "CIRCULANDO") and m["ubicacion"]:
                 ultimo_sitio = m["ubicacion"]
@@ -543,6 +546,8 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
             motivo = "cancelada"
         elif s.servicio == "CARRETERA":
             motivo = "la hace CVA y la cobra a Carburos"
+        elif s.servicio == "DESCARGA":
+            motivo = "descarga por medios del cliente"  # siempre línea de seguimiento: la descarga no la hacemos nosotros
         elif L.norm(cond.get("Tipo") or "").startswith("INFORMATIVO"):
             motivo = f"lo lleva {cond.get('Nombre') or s.conductor_codigo} y no lo facturamos nosotros"
         elif s.se_factura == "NO":
