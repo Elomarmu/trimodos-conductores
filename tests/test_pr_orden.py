@@ -181,3 +181,20 @@ def test_caja_vacia_tiene_su_sitio_en_el_orden():
     t = _cargar(odoo, 13, "CRPU0910069")
     O.quitar(odoo, 13, t, odoo.viajes())
     assert V1 in O.tren_actual(odoo)["orden"]
+
+
+def test_el_registro_se_sube_al_asignar_y_quitar(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    enviados = []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(A, "sincronizar_foto", lambda *a, **k: None)
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
+    A.tren_quitar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
+    assert [(d["evento"], d["correo"], d["archivos"][0]["nombre"]) for d in enviados] == [
+        ("registro", False, "REGISTRO VIAJES PR.xlsx")] * 2
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: (_ for _ in ()).throw(RuntimeError("sin Odoo")))
+    A.subir_registro(odoo)   # nunca para el trabajo

@@ -109,6 +109,17 @@ def enviar_n8n(datos: dict) -> bool:
         return False
 
 
+def subir_registro(odoo, lista: list[dict] | None = None) -> None:
+    """Rehace REGISTRO VIAJES PR.xlsx desde Odoo y lo sube a SharePoint › Automatizacion (n8n, sin correo).
+    Se llama cada vez que se da de alta o cambia una carga. Nunca para el trabajo."""
+    try:
+        lista = lista if lista is not None else O.viajes(odoo)
+        enviar_n8n({"evento": "registro", "correo": False, "asunto": "", "html": "", "archivos": [
+            {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]})
+    except Exception:
+        log.exception("no se pudo poner al día REGISTRO VIAJES PR en SharePoint")
+
+
 def avisar(evento: str, datos: dict) -> None:
     e = {k: html.escape(str(v or "")) for k, v in datos.items()}
     enviar_n8n({"evento": evento, "asunto": ASUNTOS[evento].format(**{k: v or "" for k, v in datos.items()}),
@@ -218,6 +229,8 @@ def registrar(body: ViajeIn):
         except Exception:  # la nota es informativa: nunca debe parar el viaje
             log.warning("no se pudo dejar la nota en la tarea %s", res["tarea_id"])
     imprimir(res.get("tarea_id"), res)
+    if not res["duplicado"]:
+        subir_registro(odoo)
     log.info("PR registrado tarea=%s bulto=%s duplicado=%s", res.get("tarea_id"), res.get("bulto"), res["duplicado"])
     return res
 
@@ -256,6 +269,7 @@ def actualizar(body: Actualizar):
     res = {"bulto": ps[0]["name"], "cambiado": hechos}
     if tarea and set(hechos) & {"código Paper", "peso", "balas", "contenedor"}:
         imprimir(tarea, res)
+    subir_registro(odoo)
     return res
 
 
@@ -477,6 +491,7 @@ def tren_asignar(body: Asignar):
     if viaje:
         sincronizar_foto(odoo, viaje, lista=lista)
         lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
     return O.estado_tren(odoo, t, lista)
 
 
@@ -494,7 +509,9 @@ def tren_quitar(body: Asignar):
     _pr(O.quitar, odoo, body.bulto_id, t, lista)
     if previo and previo.get("foto"):
         borrar_foto(previo["foto"])
-    return O.estado_tren(odoo, t, O.viajes(odoo))
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return O.estado_tren(odoo, t, lista)
 
 
 @router.post("/tren/mover")
@@ -525,6 +542,8 @@ def tren_editar(body: Editar):
             if v["bulto_id"] in afectados:
                 sincronizar_foto(odoo, v, lista=lista)
         lista = O.viajes(odoo)
+    if afectados:
+        subir_registro(odoo, lista)
     return O.estado_tren(odoo, t, lista)
 
 
