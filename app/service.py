@@ -96,13 +96,66 @@ def _package_view(p: dict) -> dict:
     }
 
 
-def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: str | None = None, company: str | None = None) -> dict:
+def _task_choices(odoo, settings: Settings, tasks: list[dict], order_name: str, company_id: int) -> dict:
+    package_ids = list(dict.fromkeys(
+        package_id for task in tasks for package_id in (task.get("tms_package_ids") or [])
+    ))
+    packages = {p["id"]: p for p in odoo.read_packages(package_ids)}
+    vehicle_ids = list(dict.fromkeys(
+        ref[0] for task in tasks for ref in (task.get("tractor_id"), task.get("trailer_id")) if ref
+    ))
+    vehicles = {v["id"]: _vehicle_view(v) for v in odoo.read_vehicles(vehicle_ids)}
+    choices = []
+    for task in tasks:
+        task_packages = [packages[pid] for pid in (task.get("tms_package_ids") or []) if pid in packages]
+        task_packages.sort(key=lambda p: p.get("pickup_date") or "")
+        date = next((p["pickup_date"] for p in task_packages if p.get("pickup_date")), None)
+        origin = next((p["shipping_origin_id"][1] for p in task_packages if p.get("shipping_origin_id")), "")
+        destination = next((p["shipping_destination_id"][1] for p in reversed(task_packages) if p.get("shipping_destination_id")), "")
+        editable, reason = is_editable(task, settings.editable_stages)
+        if not task_packages:
+            editable, reason = False, NO_PACKAGES_MSG
+
+        def plate(field: str) -> str:
+            ref = task.get(field)
+            if not ref:
+                return ""
+            vehicle = vehicles.get(ref[0])
+            return (vehicle and vehicle["matricula"]) or ref[1]
+
+        stage = task.get("stage_id") or [0, ""]
+        choices.append({
+            "id": task["id"],
+            "nombre": task.get("name") or f"Tarea {task['id']}",
+            "fecha_carga": date,
+            "origen": origin,
+            "destino": destination,
+            "tractora": plate("tractor_id"),
+            "remolque": plate("trailer_id"),
+            "etapa": stage[1],
+            "editable": editable,
+            "motivo_no_editable": reason,
+        })
+    choices.sort(key=lambda item: (item["fecha_carga"] is None, item["fecha_carga"] or "", item["nombre"].casefold()))
+    return {"seleccion_requerida": True, "pedido": order_name, "ordenes": choices}
+
+
+def resolve(
+    odoo,
+    settings: Settings,
+    qr_text: str | None = None,
+    order_name: str | None = None,
+    company: str | None = None,
+    selected_task_id: int | None = None,
+) -> dict:
     not_found = AppError("No encontramos esta orden. Revisa el número o avisa a la oficina.", 404, "no_encontrada")
     verified = False
     outdated = False
     order_label = None
 
     if qr_text:
+        if selected_task_id is not None:
+            raise AppError("No se puede elegir una tarea al abrir una orden por QR.", 400, "dato_invalido")
         qr = parse_qr(qr_text, _allowed_hosts(settings))
         att = odoo.read_attachment(qr.attachment_id)
         # Mismo mensaje si no existe o si el token no coincide: no damos pistas.
@@ -122,12 +175,24 @@ def resolve(odoo, settings: Settings, qr_text: str | None = None, order_name: st
         company_id = COMPANIES.get((company or "").strip().lower())
         if not company_id:
             raise AppError("Elige la empresa: TRANSARGI o STINSA.", 400, "falta_empresa")
-        tasks = odoo.find_transport_tasks(name, company_id)
+        tasks = [
+            item for item in odoo.find_transport_tasks(name, company_id)
+            if is_transport_task(item) and (item.get("company_id") or [None])[0] == company_id
+        ]
         if not tasks:
             raise not_found
-        task = tasks[0]  # la más reciente
+        if selected_task_id is not None:
+            task = next((item for item in tasks if item["id"] == selected_task_id), None)
+            if task is None:
+                raise AppError("La tarea elegida no pertenece a este pedido y empresa. Vuelve a buscar el pedido.", 400, "tarea_ajena")
+        elif len(tasks) > 1:
+            return _task_choices(odoo, settings, tasks, name, company_id)
+        else:
+            task = tasks[0]
         order_label = name
     else:
+        if selected_task_id is not None:
+            raise AppError("No se puede elegir una tarea sin pedido.", 400, "dato_invalido")
         raise AppError("Escanea el código o escribe el número de pedido.", 400, "faltan_datos")
 
     packages = odoo.read_packages(task.get("tms_package_ids") or [])
@@ -443,6 +508,7 @@ def update(
     lines = _describe(odoo, packages, changes, created_package_ids)
     if vehicle_lines:
         lines.insert(0, ("Vehículos de la orden", vehicle_lines))
+    lines.insert(0, ("Tarea", [task.get("name") or f"Tarea {task_id}"]))
 
     done = []
     try:

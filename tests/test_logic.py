@@ -74,6 +74,43 @@ def test_resolve_por_pedido():
     assert r["tarea"]["id"] == 204067 and r["tarea"]["pedido"] == "S2621473" and r["verificado_por_qr"] is False
 
 
+def test_pedido_con_varias_ordenes_pide_elegir_y_ordena_por_fecha():
+    r = service.resolve(MockOdoo(), get_settings(), order_name="S2621554", company="transargi")
+    assert r["seleccion_requerida"] is True and r["pedido"] == "S2621554"
+    assert [t["id"] for t in r["ordenes"]] == [300006, 300007]
+    assert r["ordenes"][0] == {
+        "id": 300006, "nombre": "ORDEN TAREA TEMPRANA", "fecha_carga": "2026-04-10 07:00:00",
+        "origen": "Almacén Norte", "destino": "Cliente Norte", "tractora": "0019LML",
+        "remolque": "R6006BCL", "etapa": "En desarrollo", "editable": True,
+        "motivo_no_editable": None,
+    }
+    assert r["ordenes"][1]["editable"] is False
+    assert "Hecho" in r["ordenes"][1]["motivo_no_editable"]
+
+
+def test_pedido_con_una_tarea_se_abre_sin_selector():
+    r = service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="transargi")
+    assert "seleccion_requerida" not in r and r["tarea"]["id"] == 204067
+
+
+@pytest.mark.parametrize("order_name,company,task_id", [
+    ("S2621473", "transargi", 300001),  # misma referencia, tarea de otra empresa
+    ("S2621473", "transargi", 300002),  # tarea de otro pedido
+])
+def test_servidor_rechaza_tarea_que_no_pertenece_al_pedido_y_empresa(order_name, company, task_id):
+    with pytest.raises(AppError) as e:
+        service.resolve(MockOdoo(), get_settings(), order_name=order_name, company=company, selected_task_id=task_id)
+    assert e.value.code == "tarea_ajena"
+
+
+def test_servidor_no_ofrece_tarea_con_empresa_distinta():
+    odoo = MockOdoo()
+    odoo.orders[("S2621473", 7)].append(300001)
+    with pytest.raises(AppError) as e:
+        service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi", selected_task_id=300001)
+    assert e.value.code == "tarea_ajena"
+
+
 def test_mismo_pedido_en_otra_empresa_da_otra_tarea():
     r = service.resolve(MockOdoo(), get_settings(), order_name="S2621473", company="stinsa")
     assert r["tarea"]["id"] == 300001
@@ -424,6 +461,7 @@ def test_update_publica_nota_con_antes_y_ahora_y_imprime_una_vez():
     assert odoo.prints == [204067] and len(odoo.notes) == 1
     note = odoo.notes[0][1]
     assert "Modificado desde la app de conductores" in note and "PK2627486" in note
+    assert "<b>Tarea</b>: S2621473" in note
     assert "Bultos: 12 → 20" in note and "Kilos: 8.450 kg → 9.000 kg" in note and "Mercancía: Cartón y papel → Bebidas" in note
     assert "sin QR" in note  # abierta por número de pedido
     assert out["adjunto_id"] == odoo.tasks[204067]["tms_transport_order_attachment_id"][0]

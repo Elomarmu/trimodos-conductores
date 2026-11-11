@@ -54,13 +54,27 @@ class MockOdoo:
                 "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": [900006, "Orden de transporte - S26099887 - 20261019152033.pdf"],
                 "write_date": "2026-10-19 15:20:33", "tractor_id": [6273, "0019LML"], "trailer_id": False,
             },
+            300006: {
+                "id": 300006, "name": "ORDEN TAREA TEMPRANA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [7, "En desarrollo"],
+                "is_transport_order": True, "tms_package_ids": [287104], "tms_transport_order_attachment_id": False,
+                "write_date": "2026-04-01 09:00:00", "tractor_id": [6273, "0019LML"], "trailer_id": [6272, "R6006BCL"],
+            },
+            300007: {
+                "id": 300007, "name": "ORDEN TAREA TARDIA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [5, "Hecho"],
+                "is_transport_order": True, "tms_package_ids": [287105], "tms_transport_order_attachment_id": False,
+                "write_date": "2026-04-02 09:00:00", "tractor_id": [6273, "0019LML"], "trailer_id": False,
+            },
         }
         self.vehicles = {
             6273: {"id": 6273, "license_plate": "0019LML", "display_name": "0019LML", "model_id": [364, "VARIOS/NACIONAL - tractor"], "vehicle_type": "tractor", "company_id": False},
             6272: {"id": 6272, "license_plate": "R6006BCL", "display_name": "R6006BCL", "model_id": [365, "VARIOS/NACIONAL - trailer"], "vehicle_type": "trailer", "company_id": False},
         }
         # (pedido, id de compañía) -> tareas: el mismo número puede existir en STINSA y en TRANSARGI
-        self.orders = {("S2621473", 7): [204067], ("S2621473", 1): [300001], ("S2600001", 7): [300002], ("S2621553", 7): [300003, 300004], ("S26099887", 1): [300005]}
+        self.orders = {
+            ("S2621473", 7): [204067], ("S2621473", 1): [300001],
+            ("S2600001", 7): [300002], ("S2621553", 7): [300003, 300004],
+            ("S26099887", 1): [300005], ("S2621554", 7): [300006, 300007],
+        }
         self.packages = {
             287102: {
                 "id": 287102, "name": "PK2627486", "carrier_tracking_ref": "REF-0042", "goods_id": [2, "Cartón y papel"],
@@ -75,6 +89,20 @@ class MockOdoo:
                 "shipping_origin_id": [11, "Almacén Zaragoza"], "shipping_destination_id": [13, "Centro logístico Madrid"],
                 "pickup_date": "2026-01-06 07:00:00", "forecast_unload_date": "2026-01-06 19:00:00", "state": "draft",
                 "write_date": "2026-01-05 10:15:00",
+            },
+            287104: {
+                "id": 287104, "name": "PK2627550", "carrier_tracking_ref": "REF-0050", "goods_id": [2, "Cartón y papel"],
+                "number_of_packages": 10, "euro_pallet_qty": 0, "shipping_weight": 8000.0,
+                "shipping_origin_id": [21, "Almacén Norte"], "shipping_destination_id": [22, "Cliente Norte"],
+                "pickup_date": "2026-04-10 07:00:00", "forecast_unload_date": "2026-04-10 16:00:00", "state": "draft",
+                "write_date": "2026-04-01 09:00:00",
+            },
+            287105: {
+                "id": 287105, "name": "PK2627551", "carrier_tracking_ref": "REF-0051", "goods_id": [3, "Bebidas"],
+                "number_of_packages": 8, "euro_pallet_qty": 0, "shipping_weight": 7000.0,
+                "shipping_origin_id": [23, "Almacén Sur"], "shipping_destination_id": [24, "Cliente Sur"],
+                "pickup_date": "2026-04-11 08:00:00", "forecast_unload_date": "2026-04-11 18:00:00", "state": "draft",
+                "write_date": "2026-04-02 09:00:00",
             },
         }
         self.attachments = {

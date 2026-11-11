@@ -81,6 +81,13 @@ body[data-screen="menu"] .brandbar img { max-height: 58px; max-width: 76%; }
 #err { position: sticky; top: 0; z-index: 30; border-radius: 0; border-width: 0 0 2px; padding: 14px var(--gutter); font-size: 1rem; }
 #edit-banners { display: flex; flex-direction: column; gap: 10px; }
 #edit-banners:empty { display: none; }
+#task-choices { display: flex; flex-direction: column; gap: 12px; }
+.task-choice { align-items: stretch; flex-direction: column; gap: 6px; text-align: left; }
+.task-choice-title { font-size: 1.12rem; }
+.task-choice-detail { font-size: .96rem; font-weight: 600; }
+.task-choice.no-editable { background: #1b1b1b; border-color: #555; color: #aaa; }
+.task-choice-reason { color: #ddd; font-size: .94rem; font-weight: 600; }
+.task-review-name { margin-bottom: 12px; font-weight: 700; }
 
 /* ---- Visor: cuatro esquinas, el mismo dibujo en el botón del menú y sobre la cámara (color y tamaño en --c, --l, --w) ---- */
 .cam.live::after {

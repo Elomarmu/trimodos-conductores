@@ -6,11 +6,11 @@
 ## 1. Qué es
 PWA móvil (HTML/JS sin framework + backend FastAPI) para que los conductores de Grupo Trimodos / TRANSARGI / STINSA corrijan **mercancía, bultos y kilos por lugar**, y **tractora/remolque por orden**, y descarguen la **nueva orden en PDF**. Los euro palets se muestran en solo lectura. Se integra con Odoo por JSON-RPC desde un backend intermedio: **el móvil nunca ve credenciales de Odoo**.
 
-Flujo (4 pantallas): menú → escáner QR (o número de pedido + empresa) → datos actuales y edición → resumen «Antes → Ahora» + «¿Seguro?» → PDF (abrir / descargar / compartir). Todo en español, botones grandes, tema oscuro de alto contraste, instalable en Android e iPhone.
+Flujo: menú → escáner QR (o número de pedido + empresa) → (si hay varias) «Elige tu orden» → datos actuales y edición → resumen «Antes → Ahora» + «¿Seguro?» → PDF (abrir / descargar / compartir). Todo en español, botones grandes, tema oscuro de alto contraste, instalable en Android e iPhone.
 
 ## 2. Estado (qué está hecho)
 Fases 1-5 completadas: lectura QR/pedido, pantallas, escritura + nota interna + impresión del PDF, PWA instalable (funciona sin cobertura), publicación en Vercel. Añadido después: franja de marca por empresa, guía dentro de la app, código de acceso compartido, soporte de Odoo 18, mercancía en blanco, aviso de peso por MMA, validación de tractora/remolque y creación diferida de mercancías.
-**Calidad:** `pytest -q`: 142 pasados, 27 omitidos; prueba de navegador (`scripts/prueba_navegador.py`) completa, incluidos vehículos y mercancía nueva. Las escrituras reales siguen requiriendo autorización antes de probarlas.
+**Calidad en `deca-tractora-remolque` (11/11/2026):** `pytest -q`: 187 pasados, 36 omitidos; `scripts.prueba_navegador`: correcto, incluida la selección entre varias órdenes.
 
 ## 3. Entornos y datos de referencia
 | | |
@@ -34,7 +34,7 @@ Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_id
 - En las comprobaciones de solo lectura v15 y v18 existen los campos, funciona `name_search`, el informe 412 está instalado y las credenciales de cada entorno abren sesión web. En v18 el usuario técnico tiene los permisos nuevos necesarios (escritura de tarea, creación de mercancía y lectura de flota). Aún conserva permisos sobrantes: `project.task.unlink`, `tms.package.create/unlink`, `tms.goods.write` y `sale.order.write`; solicitar a Tecnativa que los retire.
 - `tms.goods.name` es el único campo obligatorio por metadatos; `adr_id` es opcional. No se imprimió un PDF real porque Odoo crea un adjunto nuevo; el PDF de muestra simulado valida tractora y remolque.
 - **Peso:** no hay límite. Si el peso puesto supera `PESO_AVISO_KG` (27.000 por defecto) sale «Es posible que el conjunto supere la MMA autorizada, confirme que es correcto el peso» y, si confirma, pasa al resumen. 44.000 kg es la MMA del conjunto, **no** el peso de la mercancía (error corregido). El umbral vive solo en el servidor.
-- **Pedido escrito a mano:** hay que elegir empresa (el mismo número puede existir en STINSA y TRANSARGI).
+- **Pedido escrito a mano:** hay que elegir empresa (el mismo número puede existir en STINSA y TRANSARGI). Si hay varias órdenes de transporte, se muestra una lista por fecha de carga con nombre de tarea, ruta, vehículos y etapa; las no editables se ven en gris con el motivo. El servidor comprueba que la tarea elegida siga vinculada al pedido y a la empresa. El nombre de la tarea aparece en edición, resumen y nota interna.
 - Una tarea cuenta como orden de transporte si tiene `is_transport_order`, **o** una orden ya generada, **o** bultos.
 - **Orden sin bultos** (p. ej. contenedor/grupaje): se lee pero no se edita; mensaje «Ponte en contacto con tu responsable de tráfico».
 - Antes de escribir se revalida: sesión firmada, bultos de esa tarea, `write_date` de tarea y bultos, etapa y matrículas actuales en Odoo.
@@ -45,7 +45,7 @@ Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_id
 
 ## 5. Lecciones importantes (no redescubrir)
 - **Una clave API NO sirve para imprimir el PDF**: el informe exige sesión web y Odoo no admite claves API (ni Basic ni Bearer) ahí. Hace falta contraseña (`ODOO_WEB_PASSWORD`) y el usuario **sin verificación en dos pasos** (con 2FA devuelve `{uid: null}`). Mejora pendiente: pedir a Tecnativa un método público que genere la orden.
-- **El informe lee tractor y remolque** (`fleet.vehicle`): el usuario técnico necesita *Fleet / Administrator*; con solo *Officer* da **403**. Pedir a Tecnativa que lo lea con `sudo`.
+- **El informe lee tractor y remolque** (`fleet.vehicle`): necesita acceso de Fleet. En una consulta de solo lectura a Odoo v18 (11/11/2026), el usuario técnico pertenece a *Fleet / Administrator*, tiene permiso de lectura en `fleet.vehicle`, puede abrir sesión web y el informe está instalado. El error de PDF posterior a una prueba no tiene causa confirmada: los logs de runtime de Vercel no estaban disponibles desde este entorno. No pedir cambios a Tecnativa sin evidencia; si el log indica 403 pese al grupo Administrador, pedir que el informe `tms_reporting.tms_transportation_order` lea los vehículos con `sudo`.
 - **Odoo 18**: `project.task` no tiene `invoice_count` (ya no se usa); `message_post` escapa el HTML por RPC → se envía `body_is_html=True` solo en ≥ 18. Empresas y campos TMS iguales.
 - **Vercel**: no usar `rewrites` a `/api/index` (FastAPI se autodetecta y recibía la ruta reescrita → 404); desactivar *Vercel Authentication* (Settings → Deployment Protection); en Hobby solo despliega commits **cuyo autor está vinculado a la cuenta de GitHub**. Hobby es solo uso personal/no comercial → para conductores, Pro u otro alojamiento.
 - Guardar + imprimir tarda **4-6 s**. Cada guardado real crea un PDF y una nota que no se borran solos.

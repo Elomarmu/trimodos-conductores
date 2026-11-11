@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const LOGOS = { trimodos: "/img/trimodos.png", stinsa: "/img/stinsa.png", transargi: "/img/transargi.png" };
 const COMPANY_BY_ID = { 1: "stinsa", 7: "transargi" };
 const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
-const state = { data: null, edits: {}, vehicleEdits: {}, vehicleRequest: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, pdfLoading: null, health: {} };
+const state = { data: null, orderChoices: null, edits: {}, vehicleEdits: {}, vehicleRequest: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, pdfLoading: null, health: {} };
 
 // ---------- utilidades ----------
 function h(tag, attrs = {}, ...children) {
@@ -124,7 +124,7 @@ function show(name) {
 function go(name) {
   if (name === currentScreen) return show(name);
   if (name === "menu") {                      // volver al menú: se limpia la orden y el historial
-    state.data = null; state.edits = {}; state.vehicleEdits = {}; state.vehicleRequest = {}; pending = null; pendingVehicles = null; state.company = null; state.onConfirm = null; state.pdfName = null;
+    state.data = null; state.orderChoices = null; state.edits = {}; state.vehicleEdits = {}; state.vehicleRequest = {}; pending = null; pendingVehicles = null; state.company = null; state.onConfirm = null; state.pdfName = null;
     for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", "false");
     setBrand(null, "menu");
     history.replaceState({ s: "menu" }, "");
@@ -136,6 +136,7 @@ function go(name) {
 window.addEventListener("popstate", (e) => {
   let target = (e.state && e.state.s) || "menu";
   if (!state.data && (target === "edit" || target === "review")) target = "menu";
+  if (target === "choose" && !state.orderChoices) target = "scan";
   if (target === "review" && !pending) target = "edit";
   if (!$("confirm").hidden) closeConfirm();
   if (!$("mma").hidden) $("mma").hidden = true;
@@ -269,23 +270,63 @@ $("order-form").addEventListener("submit", (ev) => {
 $("btn-test-qr").addEventListener("click", () => { stopScan(); load({ qr_text: state.health.qr_prueba }); });
 
 async function load(req) {
+  if (req.task_id == null) state.orderChoices = null;
   clearError();
   busy("Buscando la orden…");
   try {
-    state.data = await post("/api/resolve-qr", req);
+    const result = await post("/api/resolve-qr", req);
     state.lastReq = req;
+    if (result.seleccion_requerida) {
+      state.data = null;
+      state.orderChoices = result;
+      renderTaskChoices();
+      go("choose");
+      return;
+    }
+    state.data = result;
     state.edits = {};
     state.vehicleEdits = {};
     state.vehicleRequest = {};
     renderEdit();
     go("edit");
   } catch (e) {
-    go("scan");
+    go(state.orderChoices ? "choose" : "scan");
     showError(e.message);
   } finally {
     busy(null);
   }
 }
+
+function taskDateLabel(value) {
+  if (!value) return "Fecha de carga sin indicar";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  return match ? `Carga: ${match[3]}/${match[2]}/${match[1]}${match[4] ? ` ${match[4]}` : ""}` : `Carga: ${value}`;
+}
+
+function renderTaskChoices() {
+  const result = state.orderChoices;
+  $("choose-order").textContent = `Pedido ${result.pedido}. Tiene varias órdenes de transporte; elige la correcta.`;
+  $("task-choices").replaceChildren(...result.ordenes.map((order) => {
+    const button = h("button", {
+      type: "button",
+      class: `btn huge task-choice${order.editable ? "" : " no-editable"}`,
+      onclick: () => load({ ...state.lastReq, task_id: order.id }),
+    },
+    h("span", { class: "task-choice-title" }, order.nombre),
+    h("span", { class: "task-choice-detail" }, taskDateLabel(order.fecha_carga)),
+    h("span", { class: "task-choice-detail" }, `${order.origen || "Origen sin indicar"} → ${order.destino || "destino sin indicar"}`),
+    h("span", { class: "task-choice-detail" }, `Tractora: ${order.tractora || "(en blanco)"} · Remolque: ${order.remolque || "(en blanco)"}`),
+    h("span", { class: "task-choice-detail" }, `Etapa: ${order.etapa || "sin etapa"}`),
+    !order.editable ? h("span", { class: "task-choice-reason" }, order.motivo_no_editable) : null);
+    return button;
+  }));
+}
+
+$("btn-choose-back").addEventListener("click", () => {
+  state.orderChoices = null;
+  state.data = null;
+  go("scan");
+});
 
 // ---------- pantalla 3: edición ----------
 function current(p) {
@@ -303,6 +344,7 @@ function renderEdit() {
   const d = state.data;
   setBrand(COMPANY_BY_ID[d.tarea.compania && d.tarea.compania.id] || null, "edit");
   $("edit-title").textContent = "Pedido " + (d.tarea.pedido || d.tarea.nombre);
+  $("edit-task-name").textContent = `Tarea: ${d.tarea.nombre}`;
   const banners = $("edit-banners");
   banners.replaceChildren();
   if (d.version_antigua) banners.append(h("div", { class: "banner warn" }, "Esta orden tiene una versión más nueva. Estos son los datos actuales."));
@@ -661,7 +703,10 @@ function mostrarResumen() {
       c.rows.map((r) => r.changed
         ? h("div", { class: "line changed" }, h("span", { class: "lbl" }, r.label), h("span", { class: "before" }, "Antes: " + r.before), h("span", { class: "after" }, "Ahora: " + r.after, r.nueva ? h("small", {}, " (mercancía nueva creada desde la app)") : null))
         : h("div", { class: "line same" }, h("span", { class: "lbl" }, r.label), h("span", { class: "val" }, r.after, h("small", {}, " (sin cambios)"))))));
-  $("review-body").replaceChildren(h("div", { class: "diffs" }, ...(pendingVehicles.changed ? [vehicleDiff] : []), ...packageDiffs));
+  $("review-body").replaceChildren(
+    h("p", { class: "hint task-review-name" }, `Tarea: ${state.data.tarea.nombre}`),
+    h("div", { class: "diffs" }, ...(pendingVehicles.changed ? [vehicleDiff] : []), ...packageDiffs),
+  );
   go("review");
 }
 $("btn-back-edit").addEventListener("click", () => go("edit"));

@@ -132,7 +132,52 @@ def main():
             comprobar(all(pg_oficina.is_visible(selector) for selector in ("#btn-scan", "#btn-pr-oficina", "#btn-pr-almacen", "#btn-guia"))
                       and pg_oficina.is_hidden("#btn-pr"),
                       "oficina muestra DECA, Oficina PR, Almacén PR y guía; oculta Carga de PR de conductores")
+            pg_oficina.click("#btn-scan")
+            pg_oficina.wait_for_selector("#s-scan:not([hidden])")
+            pg_oficina.fill("#order", "S2621554")
+            pg_oficina.click('[data-company="transargi"]')
+            pg_oficina.click("#btn-order")
+            pg_oficina.wait_for_selector("#s-choose:not([hidden])")
+            comprobar(pg_oficina.locator("#task-choices .task-choice").count() == 2,
+                      "la selección de varias órdenes también funciona en la app de oficina")
             ctx_oficina.close()
+
+            print("Pedido con varias órdenes")
+            ctx_multi = navegador.new_context(viewport={"width": 390, "height": 844})
+            pg_multi = ctx_multi.new_page()
+            pg_multi.add_init_script(f"localStorage.setItem('codigo-acceso', '{CODIGO}')")
+            pg_multi.add_init_script("Object.defineProperty(navigator, 'mediaDevices', {value: undefined})")
+            pg_multi.goto(BASE)
+            pg_multi.wait_for_selector("#modo:not([hidden])")
+            pg_multi.click("#btn-scan")
+            pg_multi.wait_for_selector("#s-scan:not([hidden])")
+            pg_multi.fill("#order", "S2621554")
+            pg_multi.click('[data-company="transargi"]')
+            pg_multi.click("#btn-order")
+            pg_multi.wait_for_selector("#s-choose:not([hidden])")
+            opciones = pg_multi.locator("#task-choices .task-choice")
+            comprobar(opciones.count() == 2, "si el pedido tiene dos órdenes, pide elegir en vez de abrir una a ciegas")
+            comprobar("ORDEN TAREA TEMPRANA" in opciones.nth(0).inner_text()
+                      and "10/04/2026" in opciones.nth(0).inner_text()
+                      and "Almacén Norte → Cliente Norte" in opciones.nth(0).inner_text(),
+                      "la lista muestra la tarea, fecha y ruta ordenadas por fecha")
+            comprobar("Tractora: 0019LML" in opciones.nth(0).inner_text()
+                      and "Remolque: R6006BCL" in opciones.nth(0).inner_text(),
+                      "la lista muestra la tractora y el remolque actuales")
+            comprobar("Hecho" in opciones.nth(1).inner_text()
+                      and "Solo se puede modificar" in opciones.nth(1).inner_text()
+                      and "no-editable" in opciones.nth(1).get_attribute("class"),
+                      "la orden no editable aparece gris con el motivo")
+            opciones.nth(0).click()
+            pg_multi.wait_for_selector("#s-edit:not([hidden])")
+            comprobar(pg_multi.inner_text("#edit-task-name") == "Tarea: ORDEN TAREA TEMPRANA",
+                      "la pantalla de edición identifica la tarea elegida")
+            pg_multi.fill("#elementos-287104", "11")
+            pg_multi.click("#btn-review")
+            pg_multi.wait_for_selector("#s-review:not([hidden])")
+            comprobar("Tarea: ORDEN TAREA TEMPRANA" in pg_multi.inner_text("#review-body"),
+                      "el resumen Antes → Ahora identifica la tarea")
+            ctx_multi.close()
 
             print("Escáner con cámara simulada")
             pg.click("#btn-scan")

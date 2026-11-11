@@ -77,6 +77,7 @@ class ResolveBody(BaseModel):
     qr_text: str | None = None
     order_name: str | None = None
     company: str | None = None  # "stinsa" o "transargi" (obligatoria con order_name)
+    task_id: int | None = None  # tarea elegida en la lista de órdenes del pedido
 
 
 class Cambio(BaseModel):
@@ -146,8 +147,14 @@ def health():
 
 @app.post("/api/resolve-qr", dependencies=access)
 def resolve_qr(body: ResolveBody):
-    result = service.resolve(get_odoo(), get_settings(), qr_text=body.qr_text, order_name=body.order_name, company=body.company)
-    log.info("resolve tarea=%s via=%s", result["tarea"]["id"], "qr" if body.qr_text else "pedido")
+    result = service.resolve(
+        get_odoo(), get_settings(), qr_text=body.qr_text, order_name=body.order_name,
+        company=body.company, selected_task_id=body.task_id,
+    )
+    if result.get("seleccion_requerida"):
+        log.info("resolve pedido=%s tareas=%s: se requiere selección", result["pedido"], len(result["ordenes"]))
+    else:
+        log.info("resolve tarea=%s via=%s", result["tarea"]["id"], "qr" if body.qr_text else "pedido")
     return result
 
 

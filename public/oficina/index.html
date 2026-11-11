@@ -70,9 +70,18 @@
   <button class="btn ghost" data-go="menu">Volver al menú</button>
 </main>
 
+<!-- Selección de una orden de transporte cuando el pedido tiene varias tareas -->
+<main id="s-choose" class="screen" hidden>
+  <h1>Elige tu orden</h1>
+  <p id="choose-order" class="hint"></p>
+  <div id="task-choices"></div>
+  <button id="btn-choose-back" class="btn ghost">Volver a buscar</button>
+</main>
+
 <!-- PANTALLA 3: datos actuales y edición -->
 <main id="s-edit" class="screen" hidden>
   <h1 id="edit-title">Orden</h1>
+  <p id="edit-task-name" class="hint"></p>
   <div id="edit-banners"></div>
   <div id="vehicles"></div>
   <div id="packages"></div>
