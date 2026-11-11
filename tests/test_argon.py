@@ -632,3 +632,19 @@ def test_descarga_por_medios_del_cliente():
     assert nombres[0].startswith("Descarga por medios del cliente ·") and "NEGRILLA" not in nombres[0]
     assert nombres[1].startswith("Descarga por medios del cliente en ACX")
     assert d[0].destino == "LA NEGRILLA"  # para la rotación y el histórico sigue contando dónde estaba
+
+
+def test_conciliar_sin_tiempo_deja_el_resto_para_la_siguiente_llamada():
+    o = OdooFalso()
+    E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    lid = _primera_de_pago(o)
+    precio = o.lineas[lid]["price_unit"]
+    o.lineas[lid]["price_unit"] = precio + 50
+    rot = E.preparar(__import__("argon_facturacion").calcular(EXCEL, dt.date(2026, 8, 16), hoy=dt.date.today()), dt.date(2026, 10, 15))
+    previos = o("sale.order", "search_read", [[["origin", "=like", "ARGON|%"]]])
+    eq = dict(o.eq)
+    res = {"lineas_corregidas": [], "lineas_anuladas": [], "cambios_facturados": [], "errores": [], "restantes": 0}
+    E.conciliar(o, rot, previos, eq, CFG, True, res, set(), dt.date(2026, 10, 15), t0=0.0, limite_s=1.0)  # ya sin tiempo
+    assert res["restantes"] == 1 and not res["lineas_corregidas"] and o.lineas[lid]["price_unit"] == precio + 50
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert o.lineas[lid]["price_unit"] == precio and len(r["lineas_corregidas"]) == 1

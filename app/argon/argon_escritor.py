@@ -161,7 +161,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             res["errores"].append(f"{cont}: {e}")
     if not res["restantes"] and time.time() - t0 <= limite_s:
         try:
-            conciliar(odoo, rotaciones, previos, eq, cfg, real, res, protegidos or set(), desde)
+            conciliar(odoo, rotaciones, previos, eq, cfg, real, res, protegidos or set(), desde, t0, limite_s)
         except Exception as e:
             res["errores"].append(f"Revisión de lo ya pasado a Odoo: {e}")
     res["llamadas_odoo"] = getattr(odoo, "llamadas", 0)
@@ -199,7 +199,7 @@ def _txt(campo, v):
 
 
 def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: bool, res: dict,
-              protegidos: set, desde: dt.date):
+              protegidos: set, desde: dt.date, t0: float | None = None, limite_s: float = 1e9):
     """Lo ya pasado a Odoo y aún no facturado se mantiene igual que la Excel:
     - si una celda pasada cambia (precio, proveedor, destino, conductor…), se corrige la línea;
     - si un servicio ya no está en la Excel, su línea se anula (cantidad 0 y «ANULADA» delante: Odoo no deja borrar
@@ -274,15 +274,28 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
         cambios = {oid: c for oid, c in cambios.items() if c}
     if not real:
         return
+    hechos = set()
     for oid, cmds in cambios.items():
+        if t0 is not None and time.time() - t0 > limite_s + 8:
+            # sin tiempo en esta llamada: lo que falta se corrige en la siguiente (n8n vuelve a llamar) o mañana
+            res["restantes"] = max(res.get("restantes") or 0, 1)
+            break
         try:
-            odoo("sale.order", "write", [[oid], {"order_line": cmds}])
-        except Exception as e:  # pedido bloqueado: se desbloquea, se corrige y se vuelve a bloquear
-            if "bloque" not in str(e).lower() and "lock" not in str(e).lower():
-                raise
-            odoo("sale.order", "action_unlock", [[oid]])
-            odoo("sale.order", "write", [[oid], {"order_line": cmds}])
-            odoo("sale.order", "action_lock", [[oid]])
+            try:
+                odoo("sale.order", "write", [[oid], {"order_line": cmds}])
+            except Exception as e:  # pedido bloqueado: se desbloquea, se corrige y se vuelve a bloquear
+                if "bloque" not in str(e).lower() and "lock" not in str(e).lower():
+                    raise
+                odoo("sale.order", "action_unlock", [[oid]])
+                odoo("sale.order", "write", [[oid], {"order_line": cmds}])
+                odoo("sale.order", "action_lock", [[oid]])
+            hechos.add(oid)
+        except Exception as e:
+            res["errores"].append(f"No se ha podido corregir el pedido {pedidos.get(oid, {}).get('name', oid)}: {e}")
+    # en el correo solo lo que de verdad se ha cambiado en esta llamada
+    nombres = {pedidos[o]["name"] for o in hechos if o in pedidos}
+    res["lineas_corregidas"] = [x for x in res["lineas_corregidas"] if x["pedido"] in nombres]
+    res["lineas_anuladas"] = [x for x in res["lineas_anuladas"] if x["pedido"] in nombres]
 
 
 def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0,
