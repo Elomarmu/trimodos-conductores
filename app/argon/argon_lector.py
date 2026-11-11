@@ -158,7 +158,7 @@ RE_CANCEL = re.compile(r"\b(CANCELAD[OA]|ANULAD[OA])\b")
 # Reexpedición (coge otro tren en esa terminal): REX, (REX), -REX, REEX, REEXP… Al normalizar se escribe «REX».
 RE_REEX = re.compile(r"(?<![A-Z])RE?EXP?(?![A-Z])")
 # «LLAG/ SL LLAGOSTA», «MORROT/SL MORROT 944944», «MORROT/SL 927108»: llega a un sitio y el mismo día sale en tren
-RE_LLEGA_SALE = re.compile(r"^(.+?)\s*/\s*(SL\b.*)$")
+RE_LLEGA_SALE = re.compile(r"^(.+?)\s*[/\-\u2013]\s*(SL\b.*)$")  # «LLAG/ SL LLAGOSTA», «GENT MBA - SL AMBERES»
 
 
 def llega_y_sale(texto: str, alias: dict) -> tuple[str | None, str]:
@@ -329,6 +329,18 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
                 continue
             llegada, texto_int = llega_y_sale(str(celda.value), alias)
             tipo, ubic, hora, ref, chasis, origen, ini, carga, bloq, avisos = interpretar(texto_int, celda, tema, alias)
+            if llegada and interpretar(str(celda.value), celda, tema, alias)[0] != "SALIDA_TREN" and \
+                    (relleno := (celda.fill.fgColor if celda.fill and celda.fill.fill_type == "solid" else None)) is not None \
+                    and color_rgb(relleno, tema) in AMARILLO_CARGA:
+                # «GENT MBA - SL AMBERES» en una celda de carga: carga en GENT MBA y ese mismo día sale en tren de
+                # AMBERES, cargado (aunque la letra no esté en verde)
+                estados.append(Estado(
+                    fecha=f.isoformat(), contenedor=k.matricula, codigo_corto=k.codigo_corto,
+                    texto=str(celda.value).strip(), tipo="CARGA", ubicacion=llegada, hora=None, referencia=None,
+                    chasis=None, origen=None, iniciales=None, horas_espera=None, carga="CARGADO", bloqueado=False,
+                    cancelada=marcas(celda.value)[0], forzar=marcas(celda.value)[1], comentario=None,
+                    celda=celda.coordinate, avisos=[], reexpedicion=False, llegada=None))
+                llegada, carga = None, "CARGADO"
             if llegada and llegada not in conocidas and ubic and llegada.replace(" ", "") in ubic.replace(" ", ""):
                 llegada = ubic  # «LLAG/ SL LLAGOSTA»: LLAG es la abreviatura de la misma terminal de salida
             if ubic and alias and ubic not in conocidas and not bloq:  # en rojo el texto es el motivo, no un sitio
