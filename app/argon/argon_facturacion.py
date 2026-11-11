@@ -118,8 +118,8 @@ def leer_tablas(ruta) -> dict:
     ids_ubic, tipos = {}, {}
     ubicaciones = _filas(wb, "UBICACIONES")
     for f in ubicaciones:
-        if f.get("Ubicación normalizada") and f.get("Tipo"):
-            tipos[L.norm(f["Ubicación normalizada"])] = L.norm(f["Tipo"])
+        if f.get("Ubicación normalizada"):  # también las que no tienen tipo: así se sabe que el sitio es conocido
+            tipos[L.norm(f["Ubicación normalizada"])] = L.norm(f["Tipo"]) if f.get("Tipo") else ""
         if f.get("Ubicación normalizada") and _int(f.get("ID en Odoo")):
             ids_ubic[L.norm(f["Ubicación normalizada"])] = _int(f["ID en Odoo"])
     productos = {}

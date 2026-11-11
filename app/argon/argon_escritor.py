@@ -62,7 +62,7 @@ class Odoo:
         return self._rpc("object", "execute_kw", [self.db, self.uid, self.clave, modelo, metodo, args, kw])
 
 
-def preparar(servicios: list[F.Servicio], desde: dt.date) -> dict[str, list[F.Servicio]]:
+def preparar(servicios: list[F.Servicio], desde: dt.date, solo_con_pago: bool = True) -> dict[str, list[F.Servicio]]:
     """Rotaciones con algo que facturar → sus servicios desde la fecha de inicio (pago + informativos)."""
     por_rot = defaultdict(list)
     for s in servicios:
@@ -71,7 +71,7 @@ def preparar(servicios: list[F.Servicio], desde: dt.date) -> dict[str, list[F.Se
         if s.estado == "LISTO PARA ODOO" or (s.estado == "INFORMATIVO" and s.producto_id):
             por_rot[s.rotacion].append(s)
     return {r: sorted(l, key=lambda x: (x.fecha, x.id_servicio)) for r, l in por_rot.items()
-            if any(x.estado == "LISTO PARA ODOO" for x in l)}
+            if not solo_con_pago or any(x.estado == "LISTO PARA ODOO" for x in l)}
 
 
 def enlace(odoo, pedido_id):
@@ -83,7 +83,7 @@ def clave_linea(product_id, fecha, equipo_id):
 
 
 def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20.0, protegidos: set | None = None,
-             desde: dt.date = dt.date(2026, 10, 15)) -> dict:
+             desde: dt.date = dt.date(2026, 10, 15), esperadas: dict | None = None) -> dict:
     t0 = time.time()
     res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "lineas_ya_estaban": 0,
            "lineas_corregidas": [], "lineas_anuladas": [], "cambios_facturados": [],
@@ -161,7 +161,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             res["errores"].append(f"{cont}: {e}")
     if not res["restantes"] and time.time() - t0 <= limite_s:
         try:
-            conciliar(odoo, rotaciones, previos, eq, cfg, real, res, protegidos or set(), desde, t0, limite_s)
+            conciliar(odoo, esperadas or rotaciones, previos, eq, cfg, real, res, protegidos or set(), desde, t0, limite_s)
         except Exception as e:
             res["errores"].append(f"Revisión de lo ya pasado a Odoo: {e}")
     res["llamadas_odoo"] = getattr(odoo, "llamadas", 0)
@@ -175,7 +175,7 @@ CAMPOS = {"name": "descripción", "product_uom_qty": "cantidad", "price_unit": "
           "forecast_unload_date": "fecha de llegada", "analytic_distribution": "analítica",
           "tractor_id": "tractora", "trailer_id": "remolque", "driver_id": "conductor"}
 ANULADA = "ANULADA · "
-MAX_ANULAR = 10  # más de esto (o del 20 % de las líneas) en una noche: no se anula nada y se avisa
+MAX_ANULAR = 5  # más de esto (o del 10 % de las líneas) en una noche: no se anula nada y se avisa
 
 
 def _norm(campo, v):
@@ -215,6 +215,11 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
     lineas = odoo("sale.order.line", "search_read", [[["id", "in", ids]]],
                   fields=["order_id", "product_id", "pickup_date", "equipment_id", "qty_invoiced", "create_uid",
                           *CAMPOS])
+    # todos los contenedores de las líneas (no solo los de las rotaciones de hoy): para protegerlos y nombrarlos
+    eq = dict(eq)
+    for l in lineas:
+        if l.get("equipment_id"):
+            eq.setdefault(l["equipment_id"][1], l["equipment_id"][0])
     # lo que la Excel dice hoy: clave (producto, fecha, contenedor) → valores de la línea
     esperadas = defaultdict(list)
     for rot, servs in rotaciones.items():
@@ -263,7 +268,7 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
     # freno de seguridad: si de golpe hubiera que anular muchas líneas, algo raro pasa (Excel a medio editar, hoja
     # movida…). No se anula nada y se avisa en el correo.
     revisadas = sum(1 for l in lineas if l["product_id"] and str(l["pickup_date"] or "")[:10] >= desde.isoformat())
-    if len(res["lineas_anuladas"]) > max(MAX_ANULAR, revisadas * 0.2):
+    if len(res["lineas_anuladas"]) > max(MAX_ANULAR, revisadas * 0.1):
         n = len(res["lineas_anuladas"])
         res["errores"].append(f"Habría que anular {n} líneas de {revisadas}: son demasiadas y no se ha anulado ninguna. "
                               "Revisad si la Excel está bien (filas borradas o movidas) y escribidme.")
@@ -326,7 +331,8 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
         while d0 <= d1:
             protegidos.add((de_r[0].contenedor, d0.isoformat()))
             d0 += dt.timedelta(days=1)
-    res = escribir(odoo, rot, cfg, real, limite_s, protegidos, desde)
+    # para revisar lo ya pasado a Odoo cuenta todo lo que sale de la Excel, también las rotaciones solo informativas
+    res = escribir(odoo, rot, cfg, real, limite_s, protegidos, desde, preparar(servicios, desde, solo_con_pago=False))
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
     hace7 = (hoy - dt.timedelta(days=7)).isoformat()
