@@ -144,7 +144,7 @@ def test_correo_de_la_manana(monkeypatch):
     assert r["excel_tren"] == "CARTON PAJA TREN 86/CARTON PAJA TREN 86.xlsx" and A.URL_EXCEL_TREN in h
     assert "Pedido S26099981" in h and "id=7&amp;model=sale.order" in h
     assert "llegaron a stock de la nave (09/11): 2" in h
-    assert "cargaron en el tren (09/11): 1" in h          # fecha del tren 09/11
+    assert "Viajes cargados en el tren 86 (convoy 90107) · cargando: 1" in h   # todas las del tren, sin mirar fechas
     assert "quedan en stock: 3" in h
     assert "id=111&amp;model=project.task" in h and ">592611000006</a>" in h
     assert "<script" not in h
@@ -195,7 +195,7 @@ def test_el_registro_se_sube_al_asignar_y_quitar(monkeypatch):
     A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
     A.tren_quitar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
     assert [(d["evento"], d["correo"], d["archivos"][0]["nombre"]) for d in enviados] == [
-        ("registro", False, "REGISTRO VIAJES PR.xlsx")] * 2
+        ("composicion", False, "CARTON PAJA TREN 86.xlsx"), ("registro", False, "REGISTRO VIAJES PR.xlsx")] * 2
     monkeypatch.setattr(O, "viajes", lambda o, desde=None: (_ for _ in ()).throw(RuntimeError("sin Odoo")))
     A.subir_registro(odoo)   # nunca para el trabajo
 
@@ -229,3 +229,37 @@ def test_convoy_de_salida():
     assert e["convoy"] == "90107" and e["convoy_salida"] == "91234"
     ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "91234", "2026-11-09", O.cajas_en_orden(t), {}, "90107")))
     assert ws["TREN 86"]["Q2"].value == "91234" and "de entrada: 90107" in ws["COMPOSICION"]["A2"].value
+
+
+
+def test_tren_terminado_bloqueado_hasta_modificar(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(A, "sincronizar_foto", lambda *a, **k: None)
+    monkeypatch.setattr(A, "leer_foto_o_nada", lambda *a, **k: None)
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: True)
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
+    A.tren_enviar()
+    assert O.estado_tren(odoo, O.tren_actual(odoo), odoo.viajes())["terminado"]
+    with pytest.raises(A.AppError, match="está terminado"):
+        A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="CTEA25000377"))
+    with pytest.raises(A.AppError, match="está terminado"):
+        A.tren_mover(A.Mover(vagon=V1, hacia="bajar"))
+    e = A.tren_reabrir()                                   # «Modificar el tren»
+    assert not e["terminado"]
+    A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="CTEA25000377"))
+
+
+def test_no_se_carga_otra_composicion_con_el_tren_abierto(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    monkeypatch.setenv("ODOO_MODE", "mock")
+    monkeypatch.setenv("APP_ACCESS_CODE", "")
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    r = TestClient(app).post("/api/pr/tren/composicion", json={"tren": 87, "convoy": "1", "fecha": "2026-11-12", "cajas": CAJAS})
+    assert r.status_code == 409 and r.json()["codigo"] == "tren_abierto" and "El tren 86 todavía no está terminado" in r.json()["error"]

@@ -18,14 +18,23 @@ $("of-tren").addEventListener("click", () => {
 
 // Tren cargado ahora: el nº de convoy de entrada (el del listado) no es el de salida; la oficina lo pone o lo corrige aquí.
 async function pintarTrenActual() {
-  $("tren-actual").hidden = true; $("tren-actual-ok").hidden = true;
+  $("tren-actual").hidden = true; $("tren-actual-ok").hidden = true; $("tren-bloqueado").hidden = true; $("tren-subir").hidden = false;
   try {
     const e = await api("/api/pr/tren/actual");
-    $("tren-actual-txt").textContent = `Tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` · convoy de entrada ${e.convoy}` : "") + ".";
+    $("tren-actual-txt").textContent = `Tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` · convoy de entrada ${e.convoy}` : "") +
+      (e.terminado ? ". TERMINADO." : ". Cargándose.");
     $("tren-salida").value = e.convoy_salida || "";
+    $("tren-salida-campos").hidden = e.terminado;
+    $("tren-actual-fin").hidden = !e.terminado;
     $("tren-actual").hidden = false;
+    // Para cargar otro tren, el actual tiene que estar terminado
+    $("tren-bloqueado").hidden = e.terminado;
+    $("tren-subir").hidden = !e.terminado;
+    $("tren-bloqueado-txt").textContent = `Para cargar la composición de otro tren, antes hay que terminar el tren ${e.tren}.`;
   } catch { /* todavía no hay ningún tren */ }
 }
+$("tren-ir-terminar").addEventListener("click", () => abrirAlmacen(true));
+$("tren-ir-modificar").addEventListener("click", () => abrirAlmacen(true));
 $("tren-actual").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   clearError();
@@ -498,7 +507,7 @@ function completarDesde(p) {
 
 async function abrirAlmacen(desdeOficina) {
   alm.oficina = desdeOficina;
-  $("alm-enviar").hidden = !desdeOficina;
+  $("alm-enviar").hidden = true;   // lo decide pintarAlmacen (solo oficina y con el tren sin terminar)
   $("alm-descargas").replaceChildren();
   go("pr-almacen");
   await cargarAlmacen();
@@ -516,9 +525,15 @@ async function cargarAlmacen() {
 
 function pintarAlmacen(e) {
   alm.estado = e;
-  $("alm-form").hidden = false;
+  const fin = !!e.terminado;   // tren terminado: solo se mira; la oficina puede «Modificar el tren»
+  $("alm-form").hidden = fin;
+  $("alm-cerrar").hidden = true;
+  $("alm-enviar").hidden = !alm.oficina || fin;
+  $("alm-reabrir").hidden = !alm.oficina || !fin;
   const convoy = e.convoy_salida || e.convoy;
-  $("alm-tren").textContent = `Está cargado el tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (convoy ? ` (convoy ${convoy})` : "") + ".";
+  $("alm-tren").textContent = (fin ? `El tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (convoy ? ` (convoy ${convoy})` : "") +
+      " está TERMINADO: las Excel ya se enviaron." + (alm.oficina ? "" : " Espera a que la oficina cargue la composición del siguiente tren.")
+    : `Está cargado el tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (convoy ? ` (convoy ${convoy})` : "") + ".");
   const libres = e.cajas.filter((c) => !c.carga && !c.vacia), llenas = e.cajas.filter((c) => c.carga || c.vacia);
   $("alm-caja").replaceChildren(h("option", { value: "" }, libres.length ? "— Elige la caja —" : "— No quedan cajas libres —"),
     ...libres.map((c) => h("option", { value: c.caja_movil }, textoCaja(c))));
@@ -535,7 +550,7 @@ function pintarAlmacen(e) {
   $("alm-hechas").replaceChildren(...grupos.map((g, i) => h("div", { class: "vagon" },
     h("div", { class: "vagon-cab" },
       h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`),
-      h("span", { class: "vagon-mover" },
+      fin ? null : h("span", { class: "vagon-mover" },
         h("button", { type: "button", class: "btn ghost mini", title: "Subir (hacia la locomotora)", "aria-label": `Subir el vagón ${g.vagon}`,
           disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
         h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
@@ -544,7 +559,7 @@ function pintarAlmacen(e) {
       h("span", {}, h("b", {}, c.caja_movil), h("br"),
         c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
           : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía")),
-      h("span", { class: "vagon-mover" },
+      fin ? null : h("span", { class: "vagon-mover" },
         h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
         c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null))))));
 }
@@ -630,6 +645,13 @@ $("alm-enviar").addEventListener("click", () => {
   $("alm-cerrar").scrollIntoView({ block: "center" });
 });
 $("alm-cerrar-no").addEventListener("click", () => { $("alm-cerrar").hidden = true; });
+// Oficina: un tren terminado se puede volver a abrir para corregirlo (hasta que se cargue la composición del siguiente).
+$("alm-reabrir").addEventListener("click", async () => {
+  clearError();
+  busy("Abriendo el tren…");
+  try { const r = await post("/api/pr/tren/reabrir", {}); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+  catch (e) { showError(e.message); } finally { busy(null); }
+});
 $("alm-cerrar").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   clearError();
@@ -659,6 +681,7 @@ async function enviarTren() {
         document.body.append(link); link.click(); link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       } }, "Descargar " + a.nombre)));
+    if (!r.simulado) { try { pintarAlmacen(await api("/api/pr/tren/actual")); } catch { /* se ve al recargar */ } }
   } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
 }
 

@@ -155,7 +155,7 @@ def test_api_composicion_repetida_pide_confirmar(monkeypatch):
     from app.main import app
     from app.pr import pr_api as A
     odoo = OdooTren()
-    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    O.terminar(odoo, O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS), "2026-11-09T20:00")
     monkeypatch.setenv("ODOO_MODE", "mock")
     monkeypatch.setenv("APP_ACCESS_CODE", "")
     monkeypatch.setenv("DRY_RUN", "true")

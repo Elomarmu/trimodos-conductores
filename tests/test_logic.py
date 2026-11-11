@@ -431,6 +431,10 @@ def test_todas_las_rutas_api_exigen_codigo_salvo_health():
     for r in rutas:
         if r.path.startswith("/api/argon/"):
             continue  # proceso ARGON: lo llama n8n con su propia clave (ARGON_CLAVE); se comprueba abajo
+        if r.path == "/api/pr/resumen":   # resumen de la mañana: n8n con su clave (X-Clave) u oficina con su código
+            from app.pr.pr_api import require_n8n
+            assert require_n8n in [d.call for d in r.dependant.dependencies]
+            continue
         protegida = require_access in [d.call for d in r.dependant.dependencies]
         assert protegida == (r.path != "/api/health"), r.path
 
@@ -751,3 +755,19 @@ def test_codigo_de_oficina(monkeypatch):
     assert c.get("/api/pr/tren/actual", headers=ofi).status_code != 403
     assert c.post("/api/resolve-qr", json={"order_name": "S2621473", "company": "transargi"}, headers=ofi).status_code == 200
     assert c.post("/api/login", headers={"X-Codigo-Acceso": "otro"}).status_code == 401
+
+
+
+def test_resumen_solo_con_la_clave_de_n8n_o_el_codigo_de_oficina(monkeypatch):
+    from app.pr import pr_api as A
+    monkeypatch.setenv("APP_ACCESS_CODE", "codigo-conductor")
+    monkeypatch.setenv("APP_OFICINA_CODE", "codigo-oficina")
+    monkeypatch.setenv("PR_AVISOS_CLAVE", "clave-del-flujo")
+    monkeypatch.setattr("app.main.FAIL_DELAY", 0)
+    A.require_n8n(enviar=True, x_clave="clave-del-flujo", x_codigo_acceso="")                        # n8n
+    A.require_n8n(enviar=True, x_clave="", x_codigo_acceso="codigo-oficina")                 # oficina
+    A.require_n8n(enviar=False, x_clave="", x_codigo_acceso="codigo-conductor")              # puente: leer sí...
+    with pytest.raises(AppError):
+        A.require_n8n(enviar=True, x_clave="", x_codigo_acceso="codigo-conductor")           # ...enviar el correo no
+    with pytest.raises(AppError):
+        A.require_n8n(enviar=False, x_clave="otra", x_codigo_acceso="")

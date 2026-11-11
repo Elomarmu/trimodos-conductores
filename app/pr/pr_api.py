@@ -28,10 +28,11 @@ import binascii
 import datetime as dt
 import html
 import logging
+import hmac
 import os
 
 import httpx
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
@@ -45,6 +46,7 @@ from . import pr_reglas as R
 log = logging.getLogger("pr")
 router = APIRouter(prefix="/api/pr", tags=["pr"])             # conductor: leer el albarán y registrar el viaje
 oficina = APIRouter(prefix="/api/pr", tags=["pr-oficina"])    # oficina y almacén (main.py exige su código)
+n8n = APIRouter(prefix="/api/pr", tags=["pr-n8n"])           # n8n: resumen de la mañana (con la clave del flujo)
 MAX_BYTES = 4_000_000  # Vercel admite cuerpos de 4,5 MB: el móvil reduce la foto antes de enviarla
 
 
@@ -479,6 +481,10 @@ def tren_composicion(body: TrenIn):
     """Oficina: guarda la composición del tren (vagones, cajas, taras) para que el almacén asigne las cargas."""
     odoo = odoo_pr()
     cajas = [c.model_dump() for c in body.cajas]
+    actual = O.tren_actual(odoo)
+    if actual and int(actual["tren"]) != int(body.tren) and not actual.get("terminado"):
+        raise AppError(f"El tren {actual['tren']} todavía no está terminado. Termínalo antes de cargar otra composición "
+                       "(Oficina · PR › Asignar cargas a cajas › «Terminar el tren y enviar las Excel»).", 409, "tren_abierto")
     if not body.confirmado:
         repetida = O.composiciones_repetidas(odoo, body.tren, body.convoy, cajas)
         if repetida:   # la app lo enseña y pide volver a confirmar
@@ -508,24 +514,34 @@ class Salida(BaseModel):
 def tren_salida(body: Salida):
     """Oficina: nº de convoy de salida del tren (no es el mismo que el de entrada del listado)."""
     odoo = odoo_pr()
-    t, lista = _tren(odoo), O.viajes(odoo)
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
     afectados = _pr(O.cambiar_salida, odoo, t, lista, body.convoy_salida)
     lista = O.viajes(odoo) if afectados else lista
-    por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
-    subir_excel_tren(t, por_caja)
-    if afectados:
-        subir_registro(odoo, lista)
+    poner_al_dia(odoo, t, lista, registro=bool(afectados))
     log.info("tren %s: convoy de salida %s (%s cargas)", t["tren"], body.convoy_salida, len(afectados))
     return O.estado_tren(odoo, t, lista)
 
 
-def _tren(odoo):
+def _tren(odoo, abierto: bool = False):
     t = O.tren_actual(odoo)
     if not t:
         raise AppError("La oficina todavía no ha cargado ningún tren.", 404, "sin_tren")
+    if abierto:
+        _pr(O.abierto, t)
     return t
+
+
+def poner_al_dia(odoo, t: dict, lista: list[dict], registro: bool = True) -> None:
+    """Tras cada cambio en el tren: la Excel del tren (y la de registro) se sustituyen en SharePoint. Nunca para el trabajo."""
+    try:
+        por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
+        subir_excel_tren(t, por_caja)
+    except Exception:
+        log.exception("no se pudo poner al día la Excel del tren %s", t.get("tren"))
+    if registro:
+        subir_registro(odoo, lista)
 
 
 @oficina.get("/tren/actual")
@@ -538,12 +554,13 @@ def tren_actual():
 @oficina.post("/tren/asignar")
 def tren_asignar(body: Asignar):
     odoo = odoo_pr()
-    t, lista = _tren(odoo), O.viajes(odoo)
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
     if body.vacia:
         _pr(O.marcar_vacia, odoo, t, lista, body.caja_movil)
         log.info("tren %s: caja %s vacía", t["tren"], body.caja_movil)
+        poner_al_dia(odoo, t, lista, registro=False)
         return O.estado_tren(odoo, t, lista)
     if not body.bulto_id:
         raise AppError("Elige la carga.", 400, "sin_carga")
@@ -554,19 +571,20 @@ def tren_asignar(body: Asignar):
     if viaje:
         sincronizar_foto(odoo, viaje, lista=lista)
         lista = O.viajes(odoo)
-    subir_registro(odoo, lista)
+    poner_al_dia(odoo, t, lista)
     return O.estado_tren(odoo, t, lista)
 
 
 @oficina.post("/tren/quitar")
 def tren_quitar(body: Asignar):
     odoo = odoo_pr()
-    t = _tren(odoo)
+    t = _tren(odoo, abierto=True)
     if get_settings().dry_run:
         return {"simulado": True}
     lista = O.viajes(odoo)
     if body.vacia:
         _pr(O.quitar_vacia, odoo, t, lista, body.caja_movil)
+        poner_al_dia(odoo, t, lista, registro=False)
         return O.estado_tren(odoo, t, lista)
     previo = next((v for v in lista if v["bulto_id"] == body.bulto_id), None)
     _pr(O.quitar, odoo, body.bulto_id, t, lista)
@@ -574,7 +592,7 @@ def tren_quitar(body: Asignar):
         if previo and previo.get(clave):
             borrar_foto(previo[clave])
     lista = O.viajes(odoo)
-    subir_registro(odoo, lista)
+    poner_al_dia(odoo, t, lista)
     return O.estado_tren(odoo, t, lista)
 
 
@@ -582,11 +600,13 @@ def tren_quitar(body: Asignar):
 def tren_mover(body: Mover):
     """Almacén: sube o baja un vagón ya cargado (arriba = junto a la locomotora)."""
     odoo = odoo_pr()
-    t = _tren(odoo)
+    t = _tren(odoo, abierto=True)
     if get_settings().dry_run:
         return {"simulado": True}
     _pr(O.mover_vagon, odoo, t, body.vagon, body.hacia)
-    return O.estado_tren(odoo, t, O.viajes(odoo))
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista, registro=False)
+    return O.estado_tren(odoo, t, lista)
 
 
 @oficina.post("/tren/editar")
@@ -595,7 +615,7 @@ def tren_editar(body: Editar):
     if not (body.nueva_caja.strip() or body.nuevo_vagon.strip()):
         raise AppError("No has cambiado nada.", 400, "sin_cambios")
     odoo = odoo_pr()
-    t, lista = _tren(odoo), O.viajes(odoo)
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
     afectados = _pr(O.editar, odoo, t, lista, body.caja_movil, body.nueva_caja, body.nuevo_vagon)
@@ -606,9 +626,20 @@ def tren_editar(body: Editar):
             if v["bulto_id"] in afectados:
                 sincronizar_foto(odoo, v, lista=lista)
         lista = O.viajes(odoo)
-    if afectados:
-        subir_registro(odoo, lista)
+    poner_al_dia(odoo, t, lista, registro=bool(afectados))
     return O.estado_tren(odoo, t, lista)
+
+
+@oficina.post("/tren/reabrir")
+def tren_reabrir():
+    """Oficina: «Modificar el tren» terminado (hasta que se cargue la composición del siguiente)."""
+    odoo = odoo_pr()
+    t = _tren(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    O.reabrir(odoo, t)
+    log.info("tren %s reabierto para modificarlo", t["tren"])
+    return O.estado_tren(odoo, t, O.viajes(odoo))
 
 
 @oficina.post("/tren/enviar")
@@ -657,7 +688,9 @@ def tren_enviar():
     enviado = False if s.dry_run else enviar_n8n({"evento": "tren", "asunto": f"PR SAICA · Tren {t['tren']} del {fecha_es} ({len(por_caja)} cargas)",
                                                   "html": cuerpo, "archivos": archivos, "fotos": fotos,
                                                   "carpeta": R.carpeta_tren(t["tren"]), "excel_tren": ruta_excel_tren(t)})
-    log.info("tren %s enviado: %s cargas, %s en stock", t["tren"], len(por_caja), len(stock))
+    if not s.dry_run:
+        O.terminar(odoo, t, dt.datetime.now(R.MADRID).isoformat(timespec="minutes"))
+    log.info("tren %s enviado y terminado: %s cargas, %s en stock", t["tren"], len(por_caja), len(stock))
     return {"simulado": s.dry_run, "tren": t["tren"], "cargas": len(por_caja), "en_stock": len(stock), "enviado": enviado, "archivos": archivos}
 
 
@@ -671,7 +704,24 @@ def _dias_es(desde: dt.date, hasta: dt.date) -> str:
     return f"{hasta:%d/%m}" if desde == hasta else f"del {desde:%d/%m} al {hasta:%d/%m}"
 
 
-@router.get("/resumen")
+def require_n8n(enviar: bool = False, x_clave: str = Header(""), x_codigo_acceso: str = Header("")):
+    """El resumen de la mañana lo pide n8n con la clave secreta del flujo (X-Clave = PR_AVISOS_CLAVE), o la oficina con su código.
+    PUENTE mientras n8n no mande X-Clave: con el código general se puede leer, pero nunca enviar el correo."""
+    s = get_settings()
+    clave = os.environ.get("PR_AVISOS_CLAVE", "")
+    if len(clave) >= 8 and hmac.compare_digest(x_clave.encode(), clave.encode()):
+        return
+    if len(s.oficina_code) >= 8 and hmac.compare_digest(x_codigo_acceso.encode(), s.oficina_code.encode()):
+        return
+    if not enviar and s.access_code and hmac.compare_digest(x_codigo_acceso.encode(), s.access_code.encode()):
+        log.warning("resumen pedido con el código general: n8n tiene que mandar la cabecera X-Clave")
+        return
+    if s.mode != "real" and not s.access_code:
+        return   # simulado sin código
+    raise AppError("No autorizado.", 401, "codigo_invalido")
+
+
+@n8n.get("/resumen", dependencies=[Depends(require_n8n)])
 def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\d{2})?$")):
     """Para n8n por la mañana (lunes a sábado): llegadas a la nave, cargas en el tren, datos pendientes y stock."""
     odoo = odoo_pr()
@@ -684,7 +734,13 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
     desde, hasta = dias_resumen(dia)
     en_rango = lambda f: bool(f) and desde.isoformat() <= f[:10] <= hasta.isoformat()
     llegados = [v for v in lista if en_rango(v.get("registrado"))]
-    al_tren = [v for v in lista if v.get("tren") and v.get("caja_movil") and en_rango(v.get("fecha_tren"))]
+    # Todas las cargas del tren actual, en el orden del tren (da igual cuándo llegaron a la nave o se cargaron)
+    al_tren = []
+    if t:
+        por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
+        al_tren = [por_caja[c["caja_movil"]] for c in O.cajas_en_orden(t) if c["caja_movil"] in por_caja]
+    titulo_tren = (f"Viajes cargados en el tren {int(t['tren'])}" + (f" (convoy {O.convoy_tren(t)})" if O.convoy_tren(t) else "")
+                   + (" · terminado" if t.get("terminado") else " · cargando") if t else "Viajes cargados en el tren")
     pendientes = [v for v in lista if faltan(v)]
     stock = [v for v in lista if v["estado"] == "En stock"]
     dias = _dias_es(desde, hasta)
@@ -695,7 +751,7 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
               + tabla_html(["Fecha carga", "Albarán (tarea)", "Código Paper", "Lugar", "Tractora", "Transportista", "Balas", "Peso kg"],
                            [[v["fecha"], tarea(v), v.get("codigo_paper"), v["lugar"], v["tractora"], v["colaborador"], v.get("bultos"),
                              v["peso_kg"]] for v in llegados])
-              + h3(f"Viajes que se cargaron en el tren ({dias}): {len(al_tren)}")
+              + h3(f"{titulo_tren}: {len(al_tren)}")
               + tabla_html(["Tren", "Vagón", "Caja", "Albarán (tarea)", "Código Paper", "Lugar", "Peso kg"],
                            [[v["tren"], v.get("vagon"), v["caja_movil"], tarea(v), v.get("codigo_paper"), v["lugar"], v["peso_kg"]]
                             for v in al_tren])

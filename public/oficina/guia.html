@@ -36,7 +36,7 @@
 <li>Cada viaje es <strong>una línea del pedido del mes</strong> («PR NOVIEMBRE», «PR DICIEMBRE»…) del cliente SAICA PAPER, con su orden de transporte (tarea) y su bulto. El pedido del mes <strong>se crea solo</strong> con el primer viaje del mes y llega un correo con el enlace.</li>
 <li>Cada carga necesita <strong>dos documentos para el cliente</strong>: la <strong>foto del albarán</strong> y el <strong>DI de residuos</strong>. Pueden ser fotos o PDF.</li>
 <li>Si un albarán trae un <strong>punto de carga que no está dado de alta</strong>, el viaje no se guarda y llega un correo para darlo de alta.</li>
-<li><strong>Correo de cada mañana</strong> (lunes a sábado): viajes que llegaron ayer a la nave (el lunes, los del sábado y el domingo), los que se cargaron en el tren, los que tienen datos o documentos pendientes y los que quedan en stock. Lleva botones al pedido y a la Excel del tren, y cada albarán enlaza con su orden de transporte en Odoo.</li>
+<li><strong>Correo de cada mañana</strong> (lunes a sábado): viajes que llegaron ayer a la nave (el lunes, los del sábado y el domingo), todas las cargas del tren actual (en el orden del tren, lleguen cuando lleguen), los que tienen datos o documentos pendientes y los que quedan en stock. Lleva botones al pedido y a la Excel del tren, y cada albarán enlaza con su orden de transporte en Odoo.</li>
 </ul>
 <h2>Foto de documentos: encuadre y escaneo</h2>
 <p>Cada vez que hagas una foto a un albarán o a un DI:</p>
@@ -82,8 +82,12 @@
 <ul>
 <li>El <strong>nº de convoy de salida no es el mismo que el de entrada</strong>. Cuando lo sepas, escríbelo en <strong>«Nº convoy de salida»</strong> y pulsa <strong>«Guardar el convoy de salida»</strong>.</li>
 <li>Se cambia en la Excel del tren, en las cargas ya asignadas y en el correo del tren. Si te equivocas, escríbelo otra vez y guarda.</li>
+<li>Si el tren está <strong>terminado</strong>, sale «TERMINADO» y el botón <strong>«Modificar el tren»</strong> para volver a abrirlo.</li>
 </ul>
 <p>Para un <strong>tren nuevo</strong>:</p>
+<ul>
+<li><strong>Solo se puede cargar si el tren actual está terminado.</strong> Si no lo está, la app lo avisa y ofrece <strong>«Ir a terminar el tren»</strong>.</li>
+</ul>
 <ol>
 <li>Pulsa <strong>«Subir el listado del tren»</strong>. Puedes subir el PDF de Captrain o fotos de la primera y la última hoja.</li>
 <li>La app lee los vagones y las cajas móviles. Revisa:<ul>
@@ -107,6 +111,8 @@
 </ol>
 <h2>Almacén · PR: cargar las cajas móviles</h2>
 <p>Arriba pone <strong>«Está cargado el tren N de fecha DD-MM-AAAA»</strong>. Comprueba que es el tren que estáis cargando. Si no lo es, la oficina tiene que cargar su composición.</p>
+<p>Se entra desde <strong>«Almacén · PR»</strong> (menú principal). La oficina también puede asignar cargas desde <strong>Oficina · PR › «Asignar cargas a cajas»</strong>: es la misma pantalla, pero con los botones de terminar y modificar el tren.</p>
+<p>Cada cambio (asignar, quitar, mover o corregir) pone al día <strong>la Excel del tren y la de registro en SharePoint</strong> en ese momento.</p>
 <h3>Asignar una carga a una caja</h3>
 <ol>
 <li>En <strong>«Caja móvil»</strong> elige la caja. Salen como «caja - vagón», y solo las que están libres.</li>
@@ -131,8 +137,8 @@
 </li>
 <li><strong>Quitar</strong>: la carga vuelve a stock. En una caja marcada como vacía, quita esa marca.</li>
 </ul>
-<h3>Terminar el tren</h3>
-<p>Cuando esté todo cargado, pulsa <strong>«Terminar el tren y enviar las Excel»</strong>. La app enseña el <strong>nº de convoy de salida</strong> (si todavía no se había puesto, el de entrada):</p>
+<h3>Terminar el tren (solo la oficina)</h3>
+<p>Se hace desde <strong>Oficina · PR › «Asignar cargas a cajas»</strong>. Cuando esté todo cargado, pulsa <strong>«Terminar el tren y enviar las Excel»</strong>. La app enseña el <strong>nº de convoy de salida</strong> (si todavía no se había puesto, el de entrada):</p>
 <ul>
 <li>Si es correcto, pulsa <strong>«Confirmar y enviar»</strong>.</li>
 <li>Si no lo es, <strong>escribe el bueno</strong> y pulsa «Confirmar y enviar»: se guarda en el tren y en sus cargas antes de enviar.</li>
@@ -143,6 +149,7 @@
 <li>se guardan en SharePoint;</li>
 <li>se envía un correo con las Excel y <strong>todas las fotos de albaranes y DI</strong>. Si falta algún documento, el correo lo indica.</li>
 </ul>
+<p>Después el tren queda <strong>TERMINADO</strong>: el almacén lo ve, pero ya no puede cambiarlo. Si hay que corregir algo, la oficina pulsa <strong>«Modificar el tren»</strong>, hace el cambio y vuelve a pulsar «Terminar el tren y enviar las Excel». Esto se puede hacer hasta que se cargue la composición del siguiente tren.</p>
 <h2>Dónde queda todo en SharePoint (Automatizacion)</h2>
 <ul>
 <li><strong>Carpeta «CARTON PAJA TREN N»</strong> (una por tren):<ul>

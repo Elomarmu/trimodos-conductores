@@ -181,15 +181,25 @@
   <form id="tren-actual" class="pkg" hidden novalidate>
     <h2>Tren cargado ahora</h2>
     <p id="tren-actual-txt"></p>
-    <div class="field"><label for="tren-salida">Nº convoy de salida</label>
-      <input id="tren-salida" type="text" autocomplete="off" placeholder="El de salida (no es el mismo que el de entrada)"></div>
-    <button type="submit" class="btn secondary">Guardar el convoy de salida</button>
+    <div id="tren-salida-campos">
+      <div class="field"><label for="tren-salida">Nº convoy de salida</label>
+        <input id="tren-salida" type="text" autocomplete="off" placeholder="El de salida (no es el mismo que el de entrada)"></div>
+      <button type="submit" class="btn secondary">Guardar el convoy de salida</button>
+    </div>
     <p id="tren-actual-ok" class="banner info" hidden></p>
+    <div id="tren-actual-fin" hidden>
+      <p class="hint">Para cambiar algo de este tren (cargas, cajas o convoy de salida), ábrelo con «Modificar el tren».</p>
+      <button type="button" id="tren-ir-modificar" class="btn secondary">Modificar el tren</button>
+    </div>
   </form>
   <div id="tren-paso1">
     <h2>Tren nuevo</h2>
     <p class="hint">Sube el listado de vagones y cajas móviles del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>
-    <label class="btn primary huge" for="tren-archivo">Subir el listado del tren</label>
+    <div id="tren-bloqueado" class="banner warn" hidden>
+      <p id="tren-bloqueado-txt"></p>
+      <button type="button" id="tren-ir-terminar" class="btn secondary">Ir a terminar el tren</button>
+    </div>
+    <label id="tren-subir" class="btn primary huge" for="tren-archivo">Subir el listado del tren</label>
     <input id="tren-archivo" class="oculto" type="file" accept="application/pdf,image/*" multiple>
   </div>
   <div id="tren-paso2" hidden>
@@ -255,6 +265,7 @@
   <div class="actions">
     <button id="alm-recargar" class="btn ghost">Actualizar</button>
     <button id="alm-enviar" class="btn secondary" hidden>Terminar el tren y enviar las Excel</button>
+    <button id="alm-reabrir" class="btn secondary" hidden>Modificar el tren</button>
     <form id="alm-cerrar" class="editar-caja" hidden novalidate>
       <h2>Cerrar el tren</h2>
       <p id="alm-cerrar-txt"></p>

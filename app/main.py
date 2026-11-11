@@ -185,6 +185,7 @@ from .pr import pr_api  # noqa: E402
 
 app.include_router(pr_api.router, dependencies=access)             # conductor (y oficina): registrar un viaje
 app.include_router(pr_api.oficina, dependencies=access_oficina)    # oficina y almacén: solo con su código
+app.include_router(pr_api.n8n)                                     # resumen de la mañana: clave del flujo de n8n (X-Clave)
 
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")

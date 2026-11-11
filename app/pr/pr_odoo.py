@@ -581,7 +581,24 @@ def estado_tren(odoo, tren: dict, lista: list[dict]) -> dict:
     grupos = [{"vagon": v, "cajas": [c for c in cajas if c["vagon"] == v]} for v in cargados]
     stock = [_carga(v) for v in lista if v["estado"] == "En stock"]
     return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "convoy_salida": tren.get("convoy_salida") or "",
+            "terminado": bool(tren.get("terminado")), "terminado_en": tren.get("terminado_en") or "",
             "cajas": cajas, "grupos": grupos, "stock": stock}
+
+
+def abierto(tren: dict) -> None:
+    """Un tren terminado no se toca hasta que la oficina pulse «Modificar el tren» (o cargue la composición del siguiente)."""
+    if tren.get("terminado"):
+        raise ErrorPR(f"El tren {tren['tren']} está terminado. Para cambiarlo, la oficina tiene que pulsar «Modificar el tren».")
+
+
+def terminar(odoo, tren: dict, cuando: str) -> None:
+    tren["terminado"], tren["terminado_en"] = True, cuando
+    escribir_tren(odoo, tren)
+
+
+def reabrir(odoo, tren: dict) -> None:
+    tren["terminado"] = False
+    escribir_tren(odoo, tren)
 
 
 def mover_vagon(odoo, tren: dict, vagon: str, hacia: str) -> None:
