@@ -497,6 +497,18 @@ def test_fallo_al_imprimir_deja_datos_guardados_y_permite_reintentar():
     assert odoo2.prints == [204067] and out["pdf_url"]
 
 
+def test_fallo_al_imprimir_por_mantenimiento_anade_la_causa_al_aviso():
+    class Falla:
+        def print_order(self, *args):
+            raise AppError("El sistema está en mantenimiento.", 503, "odoo_mantenimiento")
+
+    with pytest.raises(AppError) as error:
+        service._print(Falla(), {"id": 204067, "company_id": [7]})
+    assert error.value.code == "pdf_fallo"
+    assert "Los cambios se han guardado" in error.value.message
+    assert "(el sistema está en mantenimiento)" in error.value.message
+
+
 def test_fallo_al_guardar_no_imprime():
     class Falla(MockOdoo):
         def write_package(self, *a):
@@ -628,6 +640,43 @@ def test_cliente_real_pdf_exige_token(monkeypatch):
     assert c.get_pdf(555, "") is None
 
 
+@pytest.mark.parametrize("response", [
+    httpx.Response(503, json={"error": "temporarily unavailable"}),
+    httpx.Response(200, text="<html><title>En mantenimiento</title></html>", headers={"content-type": "text/html"}),
+])
+def test_cliente_clasifica_respuestas_de_mantenimiento(monkeypatch, response):
+    c, _ = _real_client(monkeypatch)
+    c._http = httpx.Client(transport=httpx.MockTransport(lambda request: response))
+    with pytest.raises(AppError) as error:
+        c._rpc("common", "version", [])
+    assert error.value.code == "odoo_mantenimiento"
+    assert error.value.message == "El sistema está en mantenimiento. Inténtalo de nuevo en unos minutos."
+
+
+def test_cliente_clasifica_timeout_como_odoo_no_responde(monkeypatch):
+    c, _ = _real_client(monkeypatch)
+
+    def timeout(request):
+        raise httpx.ConnectTimeout("connection timed out", request=request)
+
+    c._http = httpx.Client(transport=httpx.MockTransport(timeout))
+    with pytest.raises(AppError) as error:
+        c._rpc("common", "version", [])
+    assert error.value.code == "odoo_no_responde"
+    assert error.value.message == "El sistema no responde ahora mismo. Inténtalo de nuevo en unos minutos."
+
+
+def test_cliente_clasifica_login_fallido_sin_registrar_credenciales(monkeypatch, caplog):
+    c, _ = _real_client(monkeypatch)
+    response = httpx.Response(200, json={"error": {"data": {"name": "AccessDenied", "message": "bad credentials"}}})
+    c._http = httpx.Client(transport=httpx.MockTransport(lambda request: response))
+    with pytest.raises(AppError) as error:
+        c._login()
+    assert error.value.code == "odoo_acceso"
+    assert error.value.message == "Hay un problema de acceso al sistema. Avisa a la oficina."
+    assert "bad credentials" not in caplog.text and c.s.odoo_password not in caplog.text
+
+
 # --- código de acceso compartido
 @pytest.fixture
 def con_codigo(monkeypatch):
@@ -699,6 +748,32 @@ def test_health_muestra_solo_el_servidor_odoo(monkeypatch):
 def test_health_odoo_nulo_si_url_vacia(monkeypatch):
     monkeypatch.setenv("ODOO_URL", "")
     assert _cliente().get("/api/health").json()["odoo"] is None
+
+
+def test_health_solo_consulta_odoo_si_se_pide(monkeypatch):
+    monkeypatch.setenv("ODOO_MODE", "real")
+    monkeypatch.setenv("SECRET_KEY", "clave-de-prueba")
+
+    class Probe:
+        calls = 0
+        result = "mantenimiento"
+
+        def probe(self, timeout):
+            self.calls += 1
+            assert timeout == 2.0
+            return self.result
+
+    probe = Probe()
+    monkeypatch.setattr("app.main.get_odoo", lambda: probe)
+    client = _cliente()
+    without_probe = client.get("/api/health").json()
+    assert "odoo_estado" not in without_probe and probe.calls == 0
+    with_probe = client.get("/api/health?odoo=1").json()
+    assert with_probe["odoo_estado"] == "mantenimiento" and probe.calls == 1
+    for state in ("ok", "mantenimiento", "no_responde", "acceso"):
+        probe.result = state
+        assert client.get("/api/health?odoo=1").json()["odoo_estado"] == state
+    assert "clave-de-prueba" not in str(with_probe)
 
 
 def test_sin_codigo_en_modo_simulado_no_se_pide():

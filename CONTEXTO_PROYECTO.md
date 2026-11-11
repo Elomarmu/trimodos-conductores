@@ -10,7 +10,7 @@ Flujo: menú → escáner QR (o número de pedido + empresa) → (si hay varias)
 
 ## 2. Estado (qué está hecho)
 Fases 1-5 completadas: lectura QR/pedido, pantallas, escritura + nota interna + impresión del PDF, PWA instalable (funciona sin cobertura), publicación en Vercel. Añadido después: franja de marca por empresa, guía dentro de la app, código de acceso compartido, soporte de Odoo 18, mercancía en blanco, aviso de peso por MMA, validación de tractora/remolque y creación diferida de mercancías.
-**Calidad en `deca-tractora-remolque` (11/11/2026):** `pytest -q`: 187 pasados, 36 omitidos; `scripts.prueba_navegador`: correcto, incluida la selección entre varias órdenes.
+**Calidad en `deca-tractora-remolque`:** `pytest -q`: 193 pasados, 36 omitidos; `scripts.prueba_navegador`: correcto, incluida la selección de órdenes, los avisos de falta de cobertura y la conservación del borrador al reintentar.
 
 ## 3. Entornos y datos de referencia
 | | |
@@ -38,6 +38,8 @@ Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_id
 - Una tarea cuenta como orden de transporte si tiene `is_transport_order`, **o** una orden ya generada, **o** bultos.
 - **Orden sin bultos** (p. ej. contenedor/grupaje): se lee pero no se edita; mensaje «Ponte en contacto con tu responsable de tráfico».
 - Antes de escribir se revalida: sesión firmada, bultos de esa tarea, `write_date` de tarea y bultos, etapa y matrículas actuales en Odoo.
+- Los errores de Odoo se distinguen como mantenimiento (`odoo_mantenimiento`), sin respuesta (`odoo_no_responde`) o acceso técnico (`odoo_acceso`); el móvil detecta aparte la falta de cobertura. Los errores presentan «Reintentar» y conservan el borrador. Si la conexión se pierde al guardar, primero se vuelve a leer la tarea y no se repite automáticamente una escritura de resultado incierto. Tras guardar sin poder imprimir, se ofrece «Reintentar PDF» y se conserva la causa de mantenimiento en el mensaje.
+- `/api/health` no conecta a Odoo salvo con `?odoo=1`; entonces añade `odoo_estado` (`ok`, `mantenimiento`, `no_responde` o `acceso`) con una sonda de 2 segundos. El campo `odoo` solo contiene el hostname configurado.
 - Cada guardado deja una **nota interna** en la tarea («Modificado desde la app de conductores», antes → ahora, incluidos vehículos y mercancía nueva). Se conserva esa cabecera para n8n; «Preparar aviso» usa el cuerpo completo de la nota y no requiere cambio.
 - El usuario técnico necesita lectura de `fleet.vehicle`, escritura de `tractor_id`/`trailer_id` en `project.task` y creación de `tms.goods` con `name`. No imprimir un PDF real para validar el cambio sin permiso: imprimir crea un adjunto nuevo.
 - La app de oficina y almacén vive en `/oficina/`; `scripts/generar_oficina.py` la genera desde `public/index.html` y debe ejecutarse tras cambiar la carcasa. Usa `APP_OFICINA_CODE` si está configurado (mínimo 8 caracteres); si no, comparte `APP_ACCESS_CODE`. No modificar ni añadir a git el JSON local de n8n sin permiso.
@@ -88,3 +90,4 @@ ENV_FILE=.env.odoo18 .venv/bin/python -X utf8 -m scripts.comprobar_compatibilida
 4. Alojamiento definitivo para conductores (Vercel Pro, servidor propio o Tecnativa).
 5. PIN por conductor (identificación y trazabilidad).
 6. Opcional: nombre del usuario técnico más claro en las notas («Agente Claude» hoy); ampliar a órdenes sin `tms.package` si hiciera falta.
+7. El comportamiento de errores de Odoo y la sonda opcional de `/api/health` están cubiertos por pruebas simuladas; no se escriben datos ni se imprimen PDFs reales durante esas pruebas.

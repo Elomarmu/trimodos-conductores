@@ -66,8 +66,11 @@ En la pantalla principal tienes tres botones:
 | Carga de PR: «Este albarán ya estaba guardado» | Ese viaje ya se dio de alta (por ti o por la oficina). No hace falta repetirlo. |
 | Carga de PR: el punto de carga no está dado de alta y el viaje no se guarda | El lugar de carga no está dado de alta. La oficina ya ha recibido un aviso: llama para confirmar. |
 | Carga de PR: «Falta: DI de residuos» | El viaje está guardado, pero sin DI. Entrega el DI en la oficina. |
-| «No hay conexión. Inténtalo de nuevo» | Busca cobertura y vuelve a pulsar el botón. No se ha guardado nada. |
-| «Los cambios se han guardado, pero no se ha podido generar la nueva orden» | Pulsa **«Reintentar PDF»**. Si sigue fallando, llama a la oficina: los datos ya están guardados. |
+| «El sistema está en mantenimiento. Inténtalo de nuevo en unos minutos.» | Odoo está en mantenimiento. Pulsa **«Reintentar»** más tarde; lo que hayas escrito en la pantalla de edición se conserva. |
+| «El sistema no responde ahora mismo. Inténtalo de nuevo en unos minutos.» | Hay un problema temporal al conectar con Odoo. Pulsa **«Reintentar»**. |
+| «Hay un problema de acceso al sistema. Avisa a la oficina.» | La conexión de la app con Odoo necesita que la revise la oficina. |
+| «No hay conexión. Busca cobertura y vuelve a intentarlo.» | Busca cobertura y pulsa **«Reintentar»**. Si estabas guardando, la app comprobará primero los datos actuales para no repetir el guardado. |
+| «Los cambios se han guardado, pero no se ha podido generar la nueva orden» | Los datos ya están guardados. Pulsa **«Reintentar PDF»**; si el aviso añade «el sistema está en mantenimiento», espera unos minutos. Si sigue fallando, llama a la oficina. |
 
 ## Consejos
 

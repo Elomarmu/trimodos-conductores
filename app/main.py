@@ -130,7 +130,7 @@ def login(x_codigo_acceso: str = Header("")):
 
 
 @app.get("/api/health")
-def health():
+def health(odoo: bool = Query(False)):
     s = get_settings()
     odoo_host = urlsplit(s.odoo_url).hostname if s.odoo_url else None
     info = {
@@ -142,6 +142,8 @@ def health():
     }
     if s.mode != "real":  # ayuda para probar sin QR físico
         info["qr_prueba"] = "https://www.stinsa.com/web/content/900002?access_token=11111111-aaaa-bbbb-cccc-000000000001&download=true"
+    if odoo:
+        info["odoo_estado"] = get_odoo().probe(timeout=2.0) if s.mode == "real" else "no_responde"
     return info
 
 

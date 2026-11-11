@@ -5,6 +5,7 @@ creación de mercancías solo con name; message_post SOLO en project.task e impr
 """
 import json
 import logging
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -33,6 +34,46 @@ PACKAGE_WRITABLE_FIELDS = frozenset({"goods_id", "number_of_packages", "shipping
 EDITABLE_FIELDS = PACKAGE_WRITABLE_FIELDS
 TASK_WRITABLE_FIELDS = frozenset({"tractor_id", "trailer_id"})
 REPORT_NAME = "tms_reporting.tms_transportation_order"
+MAINTENANCE_MESSAGE = "El sistema está en mantenimiento. Inténtalo de nuevo en unos minutos."
+NO_RESPONSE_MESSAGE = "El sistema no responde ahora mismo. Inténtalo de nuevo en unos minutos."
+ACCESS_MESSAGE = "Hay un problema de acceso al sistema. Avisa a la oficina."
+
+
+def _is_html_response(response: httpx.Response) -> bool:
+    content_type = response.headers.get("content-type", "").lower()
+    prefix = response.content[:2048].lstrip().lower()
+    return "text/html" in content_type or prefix.startswith((b"<!doctype html", b"<html")) or b"<html" in prefix
+
+
+def _has_maintenance_marker(response: httpx.Response) -> bool:
+    body = response.content[:8192].lower()
+    return any(marker in body for marker in (b"maintenance", b"mantenimiento", b"under maintenance", b"en mantenimiento"))
+
+
+def _check_upstream_response(
+    response: httpx.Response,
+    operation: str,
+    *,
+    authentication: bool = False,
+    html_is_unexpected: bool = True,
+) -> None:
+    status = response.status_code
+    content_type = response.headers.get("content-type", "unknown").split(";", 1)[0][:80]
+    is_html = _is_html_response(response)
+    if status in (502, 503, 504) or _has_maintenance_marker(response) or (is_html and html_is_unexpected):
+        log.warning("Odoo maintenance operation=%s status=%s content_type=%s", operation, status, content_type)
+        raise AppError(MAINTENANCE_MESSAGE, 503, "odoo_mantenimiento")
+    if authentication and status in (401, 403):
+        log.warning("Odoo technical login rejected operation=%s status=%s", operation, status)
+        raise AppError(ACCESS_MESSAGE, 502, "odoo_acceso")
+    if status >= 400:
+        log.warning("Odoo HTTP error operation=%s status=%s content_type=%s", operation, status, content_type)
+        raise AppError("El sistema no ha podido responder. Inténtalo de nuevo.", 502, "odoo_error")
+
+
+def _network_error(operation: str, error: httpx.HTTPError) -> AppError:
+    log.warning("Odoo request failed operation=%s exception=%s", operation, type(error).__name__)
+    return AppError(NO_RESPONSE_MESSAGE, 503, "odoo_no_responde")
 
 # (modelo, método) permitidos. Todo lo demás se rechaza antes de salir hacia Odoo.
 ALLOWED_CALLS = {
@@ -78,15 +119,28 @@ class OdooClient:
         self._major_cache: int | None = None
 
     # ---- bajo nivel (privado) -------------------------------------------------
-    def _rpc(self, service: str, method: str, args: list):
+    def _rpc(self, service: str, method: str, args: list, timeout: float | None = None):
         payload = {"jsonrpc": "2.0", "method": "call", "params": {"service": service, "method": method, "args": args}, "id": 1}
         try:
-            r = self._http.post(f"{self.s.odoo_url}/jsonrpc", json=payload)
-            r.raise_for_status()
+            options = {"timeout": timeout} if timeout is not None else {}
+            r = self._http.post(f"{self.s.odoo_url}/jsonrpc", json=payload, **options)
+        except httpx.HTTPError as e:
+            raise _network_error("jsonrpc", e) from e
+        _check_upstream_response(r, "jsonrpc", authentication=service == "common" and method == "authenticate")
+        try:
             data = r.json()
-        except httpx.HTTPError:
-            raise AppError("No hay conexión con el sistema. Inténtalo de nuevo.", 503, "sin_conexion")
+        except ValueError as e:
+            log.warning("Odoo invalid response operation=jsonrpc status=%s content_type=%s",
+                        r.status_code, r.headers.get("content-type", "unknown").split(";", 1)[0][:80])
+            raise AppError("El sistema no ha podido responder. Inténtalo de nuevo.", 502, "odoo_error") from e
         if "error" in data:
+            error = data["error"]
+            error_type = error.get("data", {}).get("name", "jsonrpc_error") if isinstance(error, dict) else "jsonrpc_error"
+            if service == "common" and method == "authenticate":
+                host = urlsplit(self.s.odoo_url).hostname or "sin-configurar"
+                log.warning("Odoo technical login rejected host=%s reason=credentials_or_2fa", host)
+                raise AppError(ACCESS_MESSAGE, 502, "odoo_acceso")
+            log.warning("Odoo JSON-RPC error service=%s method=%s type=%s", service, method, str(error_type)[:120])
             raise AppError("El sistema no ha podido responder. Inténtalo de nuevo.", 502, "odoo_error")
         return data["result"]
 
@@ -94,9 +148,34 @@ class OdooClient:
         if self._uid is None:
             uid = self._rpc("common", "authenticate", [self.s.odoo_db, self.s.odoo_user, self.s.odoo_password, {}])
             if not uid:
-                raise AppError("El sistema no ha aceptado el acceso. Avisa a la oficina.", 502, "login_odoo")
+                host = urlsplit(self.s.odoo_url).hostname or "sin-configurar"
+                log.warning("Odoo technical login rejected host=%s reason=credentials_or_2fa", host)
+                raise AppError(ACCESS_MESSAGE, 502, "odoo_acceso")
             self._uid = uid
         return self._uid
+
+    def probe(self, timeout: float = 2.0) -> str:
+        """Comprobación de solo lectura y acotada: conecta y valida el acceso técnico."""
+        host = urlsplit(self.s.odoo_url).hostname or "sin-configurar"
+        if not self.s.odoo_url:
+            log.warning("Odoo health check failed host=%s reason=url_not_configured", host)
+            return "no_responde"
+        try:
+            uid = self._rpc(
+                "common", "authenticate",
+                [self.s.odoo_db, self.s.odoo_user, self.s.odoo_password, {}],
+                timeout=timeout,
+            )
+        except AppError as e:
+            return {
+                "odoo_mantenimiento": "mantenimiento",
+                "odoo_no_responde": "no_responde",
+                "odoo_acceso": "acceso",
+            }.get(e.code, "no_responde")
+        if not uid:
+            log.warning("Odoo health check login rejected host=%s reason=credentials_or_2fa", host)
+            return "acceso"
+        return "ok"
 
     def _call(self, model: str, method: str, args: list, kwargs: dict | None = None):
         if (model, method) not in ALLOWED_CALLS:
@@ -208,30 +287,40 @@ class OdooClient:
 
     def print_order(self, task_id: int, company_id: int) -> dict:
         """Imprime la orden de transporte (Odoo crea un adjunto nuevo en la tarea) y devuelve ese adjunto."""
-        fail = AppError("No se ha podido generar la orden de transporte. Inténtalo de nuevo.", 502, "pdf_fallo")
         try:
             r = self._http.post(f"{self.s.odoo_url}/web/session/authenticate", json={
                 "jsonrpc": "2.0", "method": "call",
                 "params": {"db": self.s.odoo_db, "login": self.s.odoo_user, "password": self.s.odoo_web_password}})
+        except httpx.HTTPError as e:
+            raise _network_error("web_authenticate", e) from e
+        _check_upstream_response(r, "web_authenticate", authentication=True)
+        try:
             res = r.json().get("result") or {}
-            if not res.get("uid"):
-                log.warning("print_order tarea=%s: la sesión web no se abrió (¿contraseña web, 2FA o clave API en lugar de contraseña?)", task_id)
-                raise fail
+        except ValueError as e:
+            log.warning("Odoo invalid response operation=web_authenticate status=%s content_type=%s",
+                        r.status_code, r.headers.get("content-type", "unknown").split(";", 1)[0][:80])
+            raise AppError("El sistema no ha podido responder. Inténtalo de nuevo.", 502, "odoo_error") from e
+        if not res.get("uid"):
+            host = urlsplit(self.s.odoo_url).hostname or "sin-configurar"
+            log.warning("Odoo sesión web no se abrió host=%s task=%s reason=credentials_or_2fa", host, task_id)
+            raise AppError(ACCESS_MESSAGE, 502, "odoo_acceso")
+        try:
             r = self._http.get(f"{self.s.odoo_url}/report/pdf/{REPORT_NAME}/{int(task_id)}",
                                params={"context": json.dumps({"allowed_company_ids": [int(company_id)]})}, timeout=90)
         except httpx.HTTPError as e:
-            log.warning("print_order tarea=%s: error de red (%s)", task_id, type(e).__name__)
-            raise fail
+            raise _network_error("report_pdf", e) from e
+        if r.status_code in (502, 503, 504) or _has_maintenance_marker(r):
+            _check_upstream_response(r, "report_pdf", html_is_unexpected=False)
         if r.status_code != 200 or not r.content.startswith(b"%PDF"):
             log.warning("print_order tarea=%s: el informe devolvió HTTP %s (%s); 403 = el usuario no tiene permiso para imprimirlo",
                         task_id, r.status_code, r.headers.get("content-type"))
-            raise fail
+            raise AppError("El sistema no ha podido responder. Inténtalo de nuevo.", 502, "pdf_fallo")
         task = self.read_task(task_id)
         att_ref = task and task.get("tms_transport_order_attachment_id")
         att = att_ref and self.read_attachment(att_ref[0])
         if not att:
             log.warning("print_order tarea=%s: se imprimió pero la tarea no tiene orden de transporte nueva", task_id)
-            raise fail
+            raise AppError("El sistema no ha podido responder. Inténtalo de nuevo.", 502, "odoo_error")
         return att
 
     def check_web_login(self) -> bool:
@@ -251,8 +340,10 @@ class OdooClient:
         try:
             r = self._anon.get(f"{self.s.odoo_url}/web/content/{int(attachment_id)}",
                                params={"access_token": token, "download": "true"})
-        except httpx.HTTPError:
-            raise AppError("No hay conexión. Inténtalo de nuevo.", 503, "sin_conexion")
+        except httpx.HTTPError as e:
+            raise _network_error("pdf_download", e) from e
+        if r.status_code in (502, 503, 504) or _has_maintenance_marker(r):
+            _check_upstream_response(r, "pdf_download", html_is_unexpected=False)
         return r.content if r.status_code == 200 and r.content.startswith(b"%PDF") else None
 
     def goods_name(self, goods_id: int) -> str | None:

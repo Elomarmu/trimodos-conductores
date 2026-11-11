@@ -28,13 +28,19 @@ function parseNum(text) {
   return t === "" || !/^\d*\.?\d+$/.test(t) ? NaN : Number(t);
 }
 
-function showError(msg) {
+function showError(msg, retry) {
   const e = $("err");
-  e.textContent = msg;
+  e.replaceChildren(document.createTextNode(msg));
+  if (retry) {
+    e.append(h("button", {
+      type: "button", class: "btn primary huge retry-action",
+      onclick: () => { clearError(); retry(); },
+    }, "Reintentar"));
+  }
   e.hidden = false;
   window.scrollTo({ top: 0 });
 }
-function clearError() { $("err").hidden = true; }
+function clearError() { $("err").hidden = true; $("err").replaceChildren(); }
 function busy(msg) { $("busy-msg").textContent = msg || "Un momento…"; $("busy").hidden = !msg; }
 
 // Código de acceso compartido: se pide una vez y se recuerda en este móvil.
@@ -51,17 +57,25 @@ function saveCode(v) { try { localStorage.setItem(CODE_KEY, v); } catch { /* sin
 const authHeaders = (code = getCode()) => ({ "X-Codigo-Acceso": code });
 
 async function api(path, options = {}) {
+  if (navigator.onLine === false) {
+    const error = new Error("No hay conexión. Busca cobertura y vuelve a intentarlo.");
+    error.code = "sin_cobertura";
+    throw error;
+  }
   let res;
   try {
     res = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...authHeaders() } });
   } catch {
-    throw new Error("No hay conexión. Inténtalo de nuevo.");
+    const error = new Error("No hay conexión. Busca cobertura y vuelve a intentarlo.");
+    error.code = "sin_cobertura";
+    throw error;
   }
   let body = null;
   try { body = await res.json(); } catch { /* PDF u otra cosa */ }
   if (!res.ok) {
     const e = new Error((body && body.error) || "Algo ha fallado. Inténtalo de nuevo.");
     e.code = body && body.codigo;
+    e.fromServer = true;
     if (e.code === "codigo_invalido") askCode("El código de acceso ya no es válido. Pídelo en la oficina.");
     throw e;
   }
@@ -79,9 +93,14 @@ $("access-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const code = $("access-code").value.trim();
   if (!code) return;
-  $("access-err").hidden = true;
+  const errorBox = $("access-err");
+  errorBox.hidden = true;
+  errorBox.replaceChildren();
   try {
-    const res = await fetch("/api/login", { method: "POST", headers: authHeaders(code) });
+    if (navigator.onLine === false) throw new Error("No hay conexión. Busca cobertura y vuelve a intentarlo.");
+    let res;
+    try { res = await fetch("/api/login", { method: "POST", headers: authHeaders(code) }); }
+    catch { throw new Error("No hay conexión. Busca cobertura y vuelve a intentarlo."); }
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
       throw new Error(b.error || "Algo ha fallado. Inténtalo de nuevo.");
@@ -92,8 +111,15 @@ $("access-form").addEventListener("submit", async (ev) => {
     $("btn-scan").disabled = false; $("btn-pr").disabled = false;
     window.dispatchEvent(new Event("codigo-ok"));   // p. ej. el almacén entró por su enlace antes de poner el código
   } catch (e) {
-    $("access-err").textContent = e instanceof TypeError ? "No hay conexión. Inténtalo de nuevo." : e.message;
-    $("access-err").hidden = false;
+    const message = e instanceof TypeError ? "No hay conexión. Busca cobertura y vuelve a intentarlo." : e.message;
+    errorBox.append(document.createTextNode(message));
+    if (message === "No hay conexión. Busca cobertura y vuelve a intentarlo.") {
+      errorBox.append(h("button", {
+        type: "button", class: "btn primary huge retry-action",
+        onclick: () => $("access-form").requestSubmit(),
+      }, "Reintentar"));
+    }
+    errorBox.hidden = false;
   }
 });
 const post = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
@@ -269,7 +295,7 @@ $("order-form").addEventListener("submit", (ev) => {
 });
 $("btn-test-qr").addEventListener("click", () => { stopScan(); load({ qr_text: state.health.qr_prueba }); });
 
-async function load(req) {
+async function load(req, draft = null) {
   if (req.task_id == null) state.orderChoices = null;
   clearError();
   busy("Buscando la orden…");
@@ -281,7 +307,7 @@ async function load(req) {
       state.orderChoices = result;
       renderTaskChoices();
       go("choose");
-      return;
+      return true;
     }
     state.data = result;
     state.edits = {};
@@ -289,12 +315,62 @@ async function load(req) {
     state.vehicleRequest = {};
     renderEdit();
     go("edit");
+    if (draft) restoreDraft(draft);
+    return true;
   } catch (e) {
-    go(state.orderChoices ? "choose" : "scan");
-    showError(e.message);
+    if (draft && state.data) go("edit");
+    else go(state.orderChoices ? "choose" : "scan");
+    showError(e.message, () => load(req, draft));
+    return false;
   } finally {
     busy(null);
   }
+}
+
+function captureDraft() {
+  const packages = state.data.bultos.map((p) => ({
+    id: p.id,
+    goodsText: $(`g-${p.id}`).value,
+    goodsEdit: state.edits[p.id] && state.edits[p.id].goods,
+    elements: $(`elementos-${p.id}`).value,
+    weight: $(`peso-${p.id}`).value,
+  }));
+  const vehicles = Object.fromEntries(["tractora", "remolque"].map((role) => [
+    role,
+    { value: $(`vehicle-${role}`).value, edit: state.vehicleEdits[role] ? { ...state.vehicleEdits[role] } : null },
+  ]));
+  return { packages, vehicles };
+}
+
+function restoreDraft(draft) {
+  for (const saved of draft.packages) {
+    const goodsInput = $(`g-${saved.id}`);
+    const elementsInput = $(`elementos-${saved.id}`);
+    const weightInput = $(`peso-${saved.id}`);
+    if (!goodsInput || !elementsInput || !weightInput) continue;
+    goodsInput.value = saved.goodsText;
+    if (saved.goodsEdit !== undefined) {
+      (state.edits[saved.id] ||= {}).goods = saved.goodsEdit;
+      if (saved.goodsEdit === PENDING) goodsInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    elementsInput.value = saved.elements;
+    setEdit(state.data.bultos.find((p) => p.id === saved.id), "elementos", parseNum(saved.elements));
+    weightInput.value = saved.weight;
+    setEdit(state.data.bultos.find((p) => p.id === saved.id), "peso", parseNum(saved.weight));
+  }
+  for (const role of ["tractora", "remolque"]) {
+    const saved = draft.vehicles[role];
+    if (!saved?.edit) continue;
+    const input = $(`vehicle-${role}`);
+    input.value = saved.value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.blur();
+  }
+  markChanged();
+}
+
+function retrySaveAfterUncertainOutcome() {
+  return load(state.lastReq, captureDraft());
 }
 
 function taskDateLabel(value) {
@@ -448,6 +524,7 @@ async function checkVehicle(role, type, input, status, sugg) {
       state.vehicleEdits[role] = { plate, vehicle: null, confirmedMismatch: false, status: "error" };
       status.textContent = e.message;
       status.className = "vehicle-status bad";
+      showError(e.message, () => checkVehicle(role, type, input, status, sugg));
     }
   }
 }
@@ -495,27 +572,28 @@ function packageCard(p, index) {
   const goodsInput = h("input", { type: "text", id: `g-${p.id}`, value: current(p).goods?.name || "", autocomplete: "off", disabled: ro });
   const sugg = h("div", { class: "sugg" });
   let timer = null;
+  const searchGoods = async () => {
+    const q = goodsInput.value.trim();
+    if (q.length < 2) return sugg.replaceChildren();
+    try {
+      const r = await api("/api/goods?q=" + encodeURIComponent(q));
+      const options = [];
+      if (r.resultados.length) options.push(h("p", { class: "hint" }, "¿Es alguna de estas?"));
+      options.push(...r.resultados.map((g) => h("button", { type: "button", class: "btn", onclick: () => selectGoods(p, goodsInput, sugg, g) }, g.name)));
+      if (r.crear_nombre) options.push(h("button", {
+        type: "button", class: "btn secondary",
+        onclick: () => confirmNewGoods(p, goodsInput, sugg, r.crear_nombre, r.resultados),
+      }, `➕ Crear mercancía nueva: "${r.crear_nombre}"`));
+      if (!options.length) options.push(h("p", { class: "hint" }, "No hay mercancías parecidas."));
+      sugg.replaceChildren(...options);
+    } catch (e) { showError(e.message, searchGoods); }
+  };
   goodsInput.addEventListener("input", () => {
     clearTimeout(timer);
     // texto vacío = mercancía en blanco (vale); con texto, no vale hasta que elija de la lista
     setEdit(p, "goods", goodsInput.value.trim() === "" ? null : PENDING);
     markChanged();
-    timer = setTimeout(async () => {
-      const q = goodsInput.value.trim();
-      if (q.length < 2) return sugg.replaceChildren();
-      try {
-        const r = await api("/api/goods?q=" + encodeURIComponent(q));
-        const options = [];
-        if (r.resultados.length) options.push(h("p", { class: "hint" }, "¿Es alguna de estas?"));
-        options.push(...r.resultados.map((g) => h("button", { type: "button", class: "btn", onclick: () => selectGoods(p, goodsInput, sugg, g) }, g.name)));
-        if (r.crear_nombre) options.push(h("button", {
-          type: "button", class: "btn secondary",
-          onclick: () => confirmNewGoods(p, goodsInput, sugg, r.crear_nombre, r.resultados),
-        }, `➕ Crear mercancía nueva: "${r.crear_nombre}"`));
-        if (!options.length) options.push(h("p", { class: "hint" }, "No hay mercancías parecidas."));
-        sugg.replaceChildren(...options);
-      } catch (e) { showError(e.message); }
-    }, 300);
+    timer = setTimeout(searchGoods, 300);
   });
   const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Antes: " + (p.mercancia?.name || "(en blanco)")));
 
@@ -739,10 +817,14 @@ async function save() {
     renderDone(r);
   } catch (e) {
     if (e.code === "datos_cambiados") {
-      await load(state.lastReq);
-      showError(e.message);
+      const refreshed = await load(state.lastReq, captureDraft());
+      if (refreshed) showError(e.message);
     } else if (e.code === "pdf_fallo") {
       renderPdfFailed(e.message);   // los datos ya están guardados: solo falta el PDF
+    } else if (["odoo_mantenimiento", "odoo_no_responde", "sin_cobertura"].includes(e.code)) {
+      showError(e.message, retrySaveAfterUncertainOutcome);
+    } else if (e.code === "odoo_acceso") {
+      showError(e.message, () => save());
     } else showError(e.message);
   } finally { busy(null); }
 }
@@ -764,7 +846,7 @@ $("btn-retry").addEventListener("click", async () => {
     const r = await post("/api/reprint", { task_id: state.data.tarea.id, sesion: state.data.sesion });
     $("btn-retry").hidden = true;
     renderDone({ ...r, bultos_modificados: pending.length, vehiculos_modificados: pendingVehicles.changed ? 1 : 0 });
-  } catch (e) { showError(e.message); } finally { busy(null); }
+  } catch (e) { showError(e.message, () => $("btn-retry").click()); } finally { busy(null); }
 });
 
 const CHECK_SVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M11 25 l9 9 l18 -19" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -794,9 +876,28 @@ function renderDone(r) {
 function loadPdf() {
   if (!state.pdfLoading) {
     const url = state.pdfUrl;
-    state.pdfLoading = fetch(url, { headers: authHeaders() })
-      .catch(() => { throw new Error("No hay conexión. Inténtalo de nuevo."); })
-      .then((res) => { if (!res.ok) throw new Error("No se ha podido descargar el PDF. Inténtalo de nuevo."); return res.blob(); })
+    state.pdfLoading = (async () => {
+      if (navigator.onLine === false) {
+        const error = new Error("No hay conexión. Busca cobertura y vuelve a intentarlo.");
+        error.code = "sin_cobertura";
+        throw error;
+      }
+      let res;
+      try { res = await fetch(url, { headers: authHeaders() }); }
+      catch {
+        const error = new Error("No hay conexión. Busca cobertura y vuelve a intentarlo.");
+        error.code = "sin_cobertura";
+        throw error;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const error = new Error(body?.error || "No se ha podido descargar el PDF. Inténtalo de nuevo.");
+        error.code = body?.codigo;
+        error.fromServer = true;
+        throw error;
+      }
+      return res.blob();
+    })()
       .then((b) => { if (state.pdfUrl === url) state.pdfBlob = b; return b; })
       .catch((e) => { if (state.pdfUrl === url) state.pdfLoading = null; throw e; });
   }
@@ -806,11 +907,11 @@ const pdfName = () => state.pdfName || `orden-${(state.data.tarea.pedido || stat
 function pdfAction(fn) {
   clearError();
   const run = (b) => {   // se llama sin esperas intermedias: abrir y compartir ocurren dentro del toque
-    try { const r = fn(b); if (r && r.catch) r.catch((e) => showError(e.message)); } catch (e) { showError(e.message); }
+    try { const r = fn(b); if (r && r.catch) r.catch((e) => showError(e.message, () => pdfAction(fn))); } catch (e) { showError(e.message); }
   };
   if (state.pdfBlob) { run(state.pdfBlob); return; }   // ya descargado: se usa dentro del mismo toque
   busy("Preparando el PDF…");
-  loadPdf().finally(() => busy(null)).then(run, (e) => showError(e.message));
+  loadPdf().finally(() => busy(null)).then(run, (e) => showError(e.message, () => pdfAction(fn)));
 }
 function pdfObjectUrl(b) {
   const u = URL.createObjectURL(b);
@@ -863,5 +964,5 @@ document.querySelectorAll(".solo-conductor").forEach((b) => { b.hidden = APP ===
       $("modo").textContent = "Modo de prueba (datos simulados)";
       $("btn-test-qr").hidden = false;
     }
-  } catch { /* sin conexión: se avisará al buscar */ }
+  } catch (e) { showError(e.message, () => window.location.reload()); }
 })();

@@ -550,8 +550,11 @@ def reprint(odoo, settings: Settings, sesion: str, task_id: int) -> dict:
 def _print(odoo, task: dict) -> dict:
     try:
         att = odoo.print_order(task["id"], task["company_id"][0])
-    except AppError:
-        raise AppError("Los cambios se han guardado, pero no se ha podido generar la nueva orden. Pulsa «Reintentar PDF».", 502, "pdf_fallo")
+    except AppError as e:
+        message = "Los cambios se han guardado, pero no se ha podido generar la nueva orden. Pulsa «Reintentar PDF»."
+        if e.code == "odoo_mantenimiento":
+            message += " (el sistema está en mantenimiento)"
+        raise AppError(message, 502, "pdf_fallo") from e
     except Exception:
         log.exception("Fallo al imprimir la tarea %s", task["id"])
         raise AppError("Los cambios se han guardado, pero no se ha podido generar la nueva orden. Pulsa «Reintentar PDF».", 502, "pdf_fallo")

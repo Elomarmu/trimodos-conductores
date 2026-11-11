@@ -79,6 +79,7 @@ body[data-screen="menu"] .brandbar img { max-height: 58px; max-width: 76%; }
 .banner.warn { border-color: var(--warn); background: #1f1a00; }
 .banner.info { border-color: var(--info); background: #04161f; }
 #err { position: sticky; top: 0; z-index: 30; border-radius: 0; border-width: 0 0 2px; padding: 14px var(--gutter); font-size: 1rem; }
+.retry-action { display: block; width: 100%; margin-top: 12px; }
 #edit-banners { display: flex; flex-direction: column; gap: 10px; }
 #edit-banners:empty { display: none; }
 #task-choices { display: flex; flex-direction: column; gap: 12px; }
