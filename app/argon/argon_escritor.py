@@ -314,8 +314,18 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
     servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo), hoy=hoy)
     rot = preparar(servicios, desde)
     # días de cada contenedor con algún servicio sin datos: sus líneas de Odoo no se anulan mientras tanto
-    protegidos = {(s.contenedor, s.fecha) for s in servicios
-                  if s.fecha >= desde.isoformat() and s.estado not in ("LISTO PARA ODOO", "INFORMATIVO")}
+    # si a una rotación le falta algún dato (tren sin tarifa, destino raro…), no se anula nada de esa rotación hasta
+    # que se complete: el cálculo de esos días puede estar a medias
+    pendientes_rot = {s.rotacion for s in servicios if s.rotacion and s.fecha >= desde.isoformat()
+                      and s.estado not in ("LISTO PARA ODOO", "INFORMATIVO")}
+    protegidos = set()
+    for r in pendientes_rot:
+        de_r = [s for s in servicios if s.rotacion == r]
+        d0 = dt.date.fromisoformat(min(s.fecha for s in de_r))
+        d1 = dt.date.fromisoformat(max(s.fecha_fin or s.fecha for s in de_r))
+        while d0 <= d1:
+            protegidos.add((de_r[0].contenedor, d0.isoformat()))
+            d0 += dt.timedelta(days=1)
     res = escribir(odoo, rot, cfg, real, limite_s, protegidos, desde)
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
