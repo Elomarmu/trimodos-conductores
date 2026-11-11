@@ -228,7 +228,7 @@ def test_convoy_de_salida():
     e = O.estado_tren(odoo, t, odoo.viajes())
     assert e["convoy"] == "90107" and e["convoy_salida"] == "91234"
     ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "91234", "2026-11-09", O.cajas_en_orden(t), {}, "90107")))
-    assert ws["TREN 86"]["Q2"].value == "91234" and "de entrada: 90107" in ws["COMPOSICION"]["A2"].value
+    assert ws["TREN 86"]["Q2"].value == "91234" and "de entrada: 90107" in ws["COMPOSICION"]["D2"].value
 
 
 

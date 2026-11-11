@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import io
 
@@ -12,6 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from . import marca as M
 from . import pr_reglas as R
 
 AZUL = PatternFill("solid", fgColor="1F4E79")
@@ -38,15 +40,41 @@ def _guardar(wb: Workbook) -> bytes:
     return b.getvalue()
 
 
-def _cabecera(ws, fila: int, titulos: list[str], anchos: list[int]):
+def _cabecera(ws, fila: int, titulos: list[str], anchos: list[int], relleno: PatternFill = AZUL):
     for c, (t, w) in enumerate(zip(titulos, anchos), start=1):
         celda = ws.cell(fila, c, t)
-        celda.fill, celda.font, celda.alignment, celda.border = AZUL, BLANCO_NEGRITA, CENTRO, BORDE
+        celda.fill, celda.font, celda.alignment, celda.border = relleno, BLANCO_NEGRITA, CENTRO, BORDE
         ws.column_dimensions[get_column_letter(c)].width = w
     ws.row_dimensions[fila].height = 32
 
 
-# ---- CARTON PAJA TREN ---------------------------------------------------------------------------------------------
+# ---- CARTON PAJA TREN (con la imagen de STINSA) -------------------------------------------------------------------
+
+TEAL = PatternFill("solid", fgColor=M.TEAL)
+TEAL_CLARO = PatternFill("solid", fgColor=M.TEAL_CLARO)
+LINEA_TEAL = Border(bottom=Side(style="medium", color=M.TEAL))
+
+
+def _logo(ws, celda: str, alto_px: int = 46):
+    """Logotipo de STINSA (si Pillow no está, la Excel sale igual, sin logo)."""
+    try:
+        from openpyxl.drawing.image import Image as Imagen
+        img = Imagen(io.BytesIO(base64.b64decode("".join(M.LOGO_PNG_B64))))
+    except Exception:
+        return
+    img.width, img.height = round(img.width * alto_px / img.height), alto_px
+    ws.add_image(img, celda)
+
+
+def _membrete(ws, titulo: str, ultima_col: int):
+    """Franja de arriba: logo a la izquierda, título en verde STINSA y una línea verde debajo."""
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 20
+    _logo(ws, "A1")
+    ws["D1"] = titulo
+    ws["D1"].font = Font(bold=True, size=16, color=M.TEAL_OSCURO)
+    for col in range(1, ultima_col + 1):
+        ws.cell(3, col).border = LINEA_TEAL
 
 COLS_TREN = ["ord", "Fecha", "Matrícula", "Balas", "Peso", "Lugar de carga", "ORDEN", "Nº Viaje", "Vagón", "Caja móvil",
              "Tara C.Movil", "Tipo", "Balas", "Neto C.Movil", "Observaciones", "Dist. balas", "Lonas", "Puertas", "Precinto"]
@@ -61,23 +89,25 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     wb = Workbook()
     ws = wb.active
     ws.title = f"TREN {tren}"
-    ws["A1"] = f"CARTON PAJA · TREN {tren}"
-    ws["A1"].font = Font(bold=True, size=16)
+    _membrete(ws, f"CARTON PAJA · TREN {tren}", len(COLS_TREN))
     ws["H1"], ws["J1"] = "PUESTO A DISPOSICION", "HORA INICIO"
     ws["H2"], ws["J2"] = "finalizacion estimada", "HORA SALIDA"
     ws["O1"], ws["Q1"] = "TREN", tren
     ws["O2"], ws["Q2"] = "Nº Convoy", convoy   # el de salida (si no se sabe todavía, el de entrada)
     ws["O3"], ws["Q3"] = "Fecha", _fecha(fecha)
     ws["Q3"].number_format = "DD/MM/YYYY"
+    for f in (1, 2, 3):   # nº de tren, convoy y fecha: ocupan dos columnas para que la fecha quepa
+        ws.merge_cells(start_row=f, start_column=17, end_row=f, end_column=18)
+        ws.cell(f, 17).alignment = Alignment(horizontal="center", vertical="center")
     for c in ("H1", "J1", "H2", "J2", "O1", "O2", "O3"):
-        ws[c].font = Font(bold=True)
-    ws["Q1"].font = Font(bold=True, size=14)
-    ws["B3"] = "Mercancía recogida"
-    ws["B3"].font = Font(bold=True, italic=True)
+        ws[c].font = Font(bold=True, color=M.TEAL_OSCURO)
+    ws["Q1"].font = Font(bold=True, size=14, color=M.TEAL_OSCURO)
+    ws["D2"] = "Mercancía recogida"
+    ws["D2"].font = Font(bold=True, italic=True, color="595959")
     ws.merge_cells("P4:S4")
     ws["P4"] = "COMPROBACIONES"
-    ws["P4"].fill, ws["P4"].font, ws["P4"].alignment = GRIS, Font(bold=True), CENTRO
-    _cabecera(ws, 5, COLS_TREN, ANCHOS_TREN)
+    ws["P4"].fill, ws["P4"].font, ws["P4"].alignment = TEAL_CLARO, Font(bold=True, color=M.TEAL_OSCURO), CENTRO
+    _cabecera(ws, 5, COLS_TREN, ANCHOS_TREN, TEAL)
     fila, cargadas, peso = 6, 0, 0
     for c in cajas:
         v = viajes_por_caja.get(c.get("caja_movil")) or {}
@@ -109,10 +139,11 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
         fila += 1
     fila += 1
     ws.cell(fila, 1, f"Cajas: {len(cajas)} · cargadas: {cargadas} · vacías: {len(cajas) - cargadas} · peso neto: {peso:,.0f} kg"
-            .replace(",", ".")).font = Font(bold=True)
+            .replace(",", ".")).font = Font(bold=True, color=M.TEAL_OSCURO)
     ws.freeze_panes = "A6"
     ws.page_setup.orientation = "landscape"
-    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True   # al imprimir, todo el ancho en una hoja
+    ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
     hoja_composicion(wb, tren, convoy, fecha, cajas, convoy_entrada)
     return _guardar(wb)
 
@@ -122,11 +153,11 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
 def hoja_composicion(wb: Workbook, tren: int, convoy: str, fecha: str, cajas: list[dict], convoy_entrada: str = ""):
     """Hoja «COMPOSICION» del libro CARTON PAJA TREN: vagones, cajas y taras tal como los cargó la oficina."""
     ws = wb.create_sheet("COMPOSICION")
-    ws["A1"] = f"COMPOSICIÓN DEL TREN {tren}"
-    ws["A1"].font = Font(bold=True, size=14)
+    _membrete(ws, f"COMPOSICIÓN DEL TREN {tren}", 6)
+    ws.column_dimensions["E"].width = ws.column_dimensions["F"].width = 14
     entrada = f" (de entrada: {convoy_entrada})" if convoy_entrada and convoy_entrada != convoy else ""
-    ws["A2"] = f"Nº convoy de salida: {convoy or '—'}{entrada} · Fecha: {'-'.join(reversed((fecha or '').split('-')))} · {len(cajas)} cajas"
-    _cabecera(ws, 4, ["Orden", "Vagón", "Caja móvil", "Tara C.Movil"], [8, 16, 16, 13])
+    ws["D2"] = f"Nº convoy de salida: {convoy or '—'}{entrada} · Fecha: {'-'.join(reversed((fecha or '').split('-')))} · {len(cajas)} cajas"
+    _cabecera(ws, 4, ["Orden", "Vagón", "Caja móvil", "Tara C.Movil"], [8, 16, 16, 13], TEAL)
     for i, c in enumerate(cajas, start=5):
         for col, val in enumerate(["“" if c.get("segunda") else c.get("orden"), "“" if c.get("segunda") else c.get("vagon"),
                                    c.get("caja_movil"), c.get("tara_kg")], start=1):
@@ -135,6 +166,8 @@ def hoja_composicion(wb: Workbook, tren: int, convoy: str, fecha: str, cajas: li
             if col == 4:
                 celda.number_format = "#,##0"
     ws.freeze_panes = "A5"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
 
 
 # ---- REGISTRO VIAJES PR -------------------------------------------------------------------------------------------
