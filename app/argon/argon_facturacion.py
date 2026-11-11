@@ -323,6 +323,11 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                             via.append(destino)
                         destino = None
                         continue
+                    if n["tipo"] in ("SITUACION", "DISPONIBLE") and n["ubicacion"] and n["ubicacion"] != origen \
+                            and tipos and L.norm(n["ubicacion"]) not in tipos:
+                        # sitio que no está en UBICACIONES en mitad del viaje («NARBONE»): es informativo, el tren sigue
+                        via.append(n["texto"])
+                        continue
                     if n["tipo"] in ("SITUACION", "DISPONIBLE"):
                         if n["ubicacion"] and n["ubicacion"] != origen or destino:
                             if destino and n["ubicacion"] != destino:
@@ -456,7 +461,7 @@ def partir_trenes(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
             continue
         for sitio, fecha in s.paradas:
             a = replace(s, destino=sitio, fecha_fin=fecha)
-            b = replace(s, origen=sitio, fecha=fecha or s.fecha, notas=list(s.notas), falta=[], ir={}, paradas=[],
+            b = replace(s, origen=sitio, fecha=fecha or s.fecha, notas=list(s.notas), falta=[], ir={}, paradas=[], via=None,
                         expedicion=None, reserva=None,
                         id_servicio=f"{s.contenedor}|{fecha or s.fecha}|TREN|{sitio}|{s.destino}|")
             if _tarifa(a, tablas["tarifas"], a.fecha) and _tarifa(b, tablas["tarifas"], b.fecha):

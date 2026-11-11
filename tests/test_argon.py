@@ -648,3 +648,17 @@ def test_conciliar_sin_tiempo_deja_el_resto_para_la_siguiente_llamada():
     assert res["restantes"] == 1 and not res["lineas_corregidas"] and o.lineas[lid]["price_unit"] == precio + 50
     r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
     assert o.lineas[lid]["price_unit"] == precio and len(r["lineas_corregidas"]) == 1
+
+
+def test_sitio_desconocido_en_mitad_del_tren_es_informativo():
+    import argon_facturacion as F
+    base = dict(contenedor="AIRU 1", codigo_corto="1", referencia=None, chasis=None, iniciales=None, bloqueado=False,
+                cancelada=False, forzar=None, horas_espera=None, origen=None, llegada=None, reexpedicion=False, carga="CARGADO")
+    movs = [dict(base, fecha="2026-11-02", tipo="SALIDA_TREN", ubicacion="AMBERES", texto="SL AMBERES", celda="J1"),
+            dict(base, fecha="2026-11-04", tipo="SITUACION", ubicacion="NARBONE", texto="NARBONE", celda="J2"),
+            dict(base, fecha="2026-11-05", tipo="SALIDA_TREN", ubicacion="LA LLAGOSTA", texto="SL LLAGOSTA", celda="J3"),
+            dict(base, fecha="2026-11-06", tipo="DESCARGA", ubicacion="LA BOELLA", texto="BOELLA", celda="J4")]
+    tipos = {"AMBERES": "TERMINAL FERROVIARIA", "LA LLAGOSTA": "TERMINAL FERROVIARIA", "LA BOELLA": "TERMINAL FERROVIARIA"}
+    t = [(s.origen, s.destino, s.fecha, s.fecha_fin) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
+    assert t[0] == ("AMBERES", "LA LLAGOSTA", "2026-11-02", "2026-11-05")
+    assert t[1][:2] == ("LA LLAGOSTA", "LA BOELLA")
