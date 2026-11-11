@@ -615,8 +615,11 @@ def test_conciliar_freno_si_hay_que_anular_demasiado():
         o.sig += 1
         o.lineas[o.sig] = dict(base, product_id=[900000 + n, ""], name=f"Sobra {n}")
     r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
-    assert not r["lineas_anuladas"] and any("demasiadas" in e for e in r["errores"])
+    assert not r["lineas_anuladas"] and len(r["anulaciones_frenadas"]) == 40
     assert not any(str(v.get("name", "")).startswith("ANULADA") for v in o.lineas.values())
+    # el botón del correo: se relanza sin freno y se anulan
+    r = E.procesar(EXCEL, CFG | {"sin_freno": True}, real=True, odoo=o, limite_s=999)
+    assert len(r["lineas_anuladas"]) == 40 and not r.get("anulaciones_frenadas")
 
 
 def test_descarga_por_medios_del_cliente():
@@ -662,3 +665,14 @@ def test_sitio_desconocido_en_mitad_del_tren_es_informativo():
     t = [(s.origen, s.destino, s.fecha, s.fecha_fin) for s in F.construir(movs, tipos) if s.servicio == "TREN"]
     assert t[0] == ("AMBERES", "LA LLAGOSTA", "2026-11-02", "2026-11-05")
     assert t[1][:2] == ("LA LLAGOSTA", "LA BOELLA")
+
+
+def test_correo_freno_con_boton():
+    import argon_api as A
+    x = {"pedido": "S1", "url": None, "contenedor": "CARU 1", "fecha": "2026-11-02", "linea": "Tramo", "cambio": "ya no está"}
+    res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "errores": [], "modo": "real",
+           "pendientes_de_datos": [], "bloqueos_largos": [], "excel": {"avisos": [], "escrituras": []},
+           "anulaciones_frenadas": [x] * 7}
+    av = {k: [] for k in ("bloqueados", "sin_anotar", "sl_sin_numero", "revisar", "vencimientos")}
+    h = A.correo(dt.date(2026, 11, 11), res, av, None, "https://n8n/webhook/x")
+    assert "PENDIENTE DE CONFIRMAR: 7" in h and "https://n8n/webhook/x" in h and "Revisado: relanzar y aplicar" in h

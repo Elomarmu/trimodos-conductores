@@ -62,7 +62,7 @@ def enlaces(url_excel: str | None = None) -> str:
             "pantalla de inicio» (iPhone).</p></div>")
 
 
-def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None) -> str:
+def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None, url_relanzar: str | None = None) -> str:
     e = html.escape
     td = 'style="padding:3px 8px;border-bottom:1px solid #ddd"'
     th = 'style="padding:4px 8px;background:#1F4E79;color:#fff;text-align:left"'
@@ -111,6 +111,15 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None)
                  "<p style='font:10pt Calibri,Arial;color:#555'>Odoo no deja borrar líneas de un pedido confirmado: se dejan "
                  "a 0 con «ANULADA» delante. Si el servicio ha cambiado de producto, la línea buena se ha añadido en el mismo pedido.</p>" +
                  tabla(cab_c, [fila_c(x) for x in odoo_res["lineas_anuladas"]]))
+    if odoo_res.get("anulaciones_frenadas"):
+        boton = ("" if not url_relanzar else
+                 f"<p><a href=\"{html.escape(url_relanzar)}\" style=\"display:inline-block;padding:8px 14px;border-radius:4px;"
+                 "background:#C00000;color:#fff;text-decoration:none;font:bold 10pt Calibri,Arial\">Revisado: relanzar y aplicar</a></p>")
+        p.append(h3(f"PENDIENTE DE CONFIRMAR: {len(odoo_res['anulaciones_frenadas'])} líneas para anular") +
+                 "<p style='font:10pt Calibri,Arial;color:#555'>Son demasiadas para una noche y no se ha anulado ninguna "
+                 "(freno de seguridad). Revisadlas: si alguna está mal, corregid la Excel. Después pulsad el botón: el proceso "
+                 "vuelve a leer la Excel con los cambios y anula lo que siga sin salir de ella; lo demás se da por bueno.</p>" +
+                 tabla(cab_c, [fila_c(x) for x in odoo_res["anulaciones_frenadas"]]) + boton)
     if odoo_res.get("cambios_facturados"):
         p.append(h3("REVISAR A MANO: cambios en servicios ya facturados") +
                  "<p style='font:10pt Calibri,Arial;color:#555'>La Excel ya no coincide con lo facturado. No se ha tocado nada: "
@@ -168,12 +177,14 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
     formas = [clave.encode("utf-8")] + ([clave.encode("latin-1")] if all(ord(c) < 256 for c in clave) else [])
     if not clave or not any(hmac.compare_digest(recibida, f) for f in formas):
         raise HTTPException(status_code=401, detail="Clave incorrecta")
-    cuerpo, url_excel, historico = await request.body(), None, False
+    cuerpo, url_excel, historico, extra = await request.body(), None, False, {}
     if cuerpo[:1] == b"{":  # n8n: {"excel_b64": "...", "url_excel": "..."} (su ejecutor de código no envía bien los binarios)
         try:
             datos = json.loads(cuerpo)
             cuerpo, url_excel = base64.b64decode(datos["excel_b64"]), datos.get("url_excel")
             historico = bool(datos.get("historico"))  # n8n sabe escribir rangos enteros (hoja HISTORICO)
+            # botón del correo «relanzar y aplicar»: esta vez se anula sin freno de seguridad
+            extra = {"sin_freno": bool(datos.get("sin_freno")), "url_relanzar": datos.get("url_relanzar")}
         except Exception:
             raise HTTPException(status_code=400, detail="JSON sin «excel_b64» válido") from None
     if not cuerpo.startswith(b"PK"):
@@ -183,15 +194,16 @@ async def procesar(request: Request, modo: str = "prueba", hoy: str | None = Non
         t.write(cuerpo)
         ruta = t.name
     try:
-        return _procesar(ruta, modo, dia, url_excel, historico)
+        return _procesar(ruta, modo, dia, url_excel, historico, **extra)
     except Exception as e:  # el detalle vuelve a n8n y sale en el error del nodo (no contiene claves)
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
     finally:
         os.unlink(ruta)
 
 
-def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None, historico: bool = False) -> dict:
-    cfg = config()
+def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None, historico: bool = False,
+              sin_freno: bool = False, url_relanzar: str | None = None) -> dict:
+    cfg = config() | {"sin_freno": sin_freno}
     res = E.procesar(ruta, cfg, real=(modo == "real"), limite_s=18.0, hoy=dia)
     conts, estados = L.leer(ruta)
     av = D.avisos(conts, estados, [], dia)
@@ -207,7 +219,7 @@ def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None, 
             res.setdefault("errores", []).append(f"No se ha podido calcular el histórico: {ex}")
     return {"ok": True, "hoy": dia.isoformat(), "odoo": res, "restantes": res["restantes"],
             "escrituras_excel": escr,
-            "correo_html": correo(dia, res, av, url_excel), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
+            "correo_html": correo(dia, res, av, url_excel, url_relanzar), "recordatorios": D.recordatorios(av["vencimientos"], dia)}
 
 
 @router.post("/formatear")
