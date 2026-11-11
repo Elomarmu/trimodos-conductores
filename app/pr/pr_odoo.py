@@ -417,7 +417,24 @@ CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobac
 TODO_OK = R.texto_comprobaciones({k: True for k, _ in R.COMPROBACIONES})   # de momento no se revisan: siempre OK
 
 
-def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[dict]) -> dict:
+def convoy_tren(tren: dict) -> str:
+    """Nº de convoy con el que sale el tren: el de salida si la oficina lo ha puesto; si no, el de entrada (el del listado)."""
+    return str(tren.get("convoy_salida") or tren.get("convoy") or "")
+
+
+def cambiar_salida(odoo, tren: dict, lista: list[dict], convoy_salida: str) -> list[int]:
+    """Oficina: pone (o corrige) el nº de convoy de salida del tren. Se cambia también en las cargas ya asignadas."""
+    tren["convoy_salida"] = (convoy_salida or "").strip()
+    escribir_tren(odoo, tren)
+    afectados = []
+    for v in lista:
+        if v.get("tren") == str(tren["tren"]) and v.get("caja_movil") and v.get("convoy") != convoy_tren(tren):
+            _cambiar_obs(odoo, v["bulto_id"], {"convoy": convoy_tren(tren)})
+            afectados.append(v["bulto_id"])
+    return afectados
+
+
+def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[dict], convoy_salida: str = "") -> dict:
     """La composición del tren (vagones, cajas y taras) se guarda como adjunto JSON «PR_TREN_<n>.json» del pedido de PR
     del mes del tren (o del último pedido de PR). Si ya existía ese tren, se sustituye."""
     if not cajas:
@@ -425,7 +442,7 @@ def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[di
     pedido = buscar_pedido_mes(odoo, fecha) or (pedidos_pr(odoo, desde_defecto()) or [None])[-1]
     if not pedido:
         raise ErrorPR("Todavía no hay ningún pedido de PR en Odoo: registra antes algún viaje.")
-    datos = {"tren": int(tren), "convoy": convoy, "fecha": fecha, "pedido_id": pedido["id"],
+    datos = {"tren": int(tren), "convoy": convoy, "convoy_salida": (convoy_salida or "").strip(), "fecha": fecha, "pedido_id": pedido["id"],
              "cajas": [{k: c.get(k) for k in ("orden", "vagon", "segunda", "caja_movil", "tara_kg")} for c in cajas], "orden": []}
     anterior = leer_tren(odoo, int(tren))
     if anterior:   # se vuelve a cargar el mismo tren: se conserva el orden de carga de los vagones que siguen en él
@@ -563,7 +580,8 @@ def estado_tren(odoo, tren: dict, lista: list[dict]) -> dict:
     cargados = [v for v in tren.get("orden") or [] if any(c["vagon"] == v and (c["carga"] or c["vacia"]) for c in cajas)]
     grupos = [{"vagon": v, "cajas": [c for c in cajas if c["vagon"] == v]} for v in cargados]
     stock = [_carga(v) for v in lista if v["estado"] == "En stock"]
-    return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "cajas": cajas, "grupos": grupos, "stock": stock}
+    return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "convoy_salida": tren.get("convoy_salida") or "",
+            "cajas": cajas, "grupos": grupos, "stock": stock}
 
 
 def mover_vagon(odoo, tren: dict, vagon: str, hacia: str) -> None:
@@ -647,7 +665,7 @@ def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str)
     p = odoo("tms.package", "search_read", [[["id", "=", bulto_id], ["partner_id", "=", R.CLIENTE_ID]]], fields=["name", "unload_note"])
     if not p:
         raise ErrorPR("No encuentro esa carga.")
-    datos = {"tren": str(tren["tren"]), "convoy": tren.get("convoy"), "fecha_tren": tren.get("fecha"), "vagon": caja.get("vagon"),
+    datos = {"tren": str(tren["tren"]), "convoy": convoy_tren(tren), "fecha_tren": tren.get("fecha"), "vagon": caja.get("vagon"),
              "caja_movil": caja_movil, "comprobaciones": TODO_OK}
     odoo("tms.package", "write", [[bulto_id], {"unload_note": R.observaciones(datos, p[0].get("unload_note"))}])
     # Dos personas a la vez con la misma caja: si ya hay otra carga en esa caja de este tren, se deshace esta.

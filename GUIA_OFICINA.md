@@ -65,12 +65,19 @@ Lista de las cargas a las que les falta algo: foto del albarán, DI de residuos,
 - Pulsa **«Completar»** y se abre esa carga en «Modificar una carga».
 - Revísala a menudo, sobre todo antes de cerrar un tren.
 
-### Cargar la composición del tren
+### Composición del tren
+
+Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almacén con su **nº de convoy de entrada** (el del listado de Captrain).
+
+- El **nº de convoy de salida no es el mismo que el de entrada**. Cuando lo sepas, escríbelo en **«Nº convoy de salida»** y pulsa **«Guardar el convoy de salida»**.
+- Se cambia en la Excel del tren, en las cargas ya asignadas y en el correo del tren. Si te equivocas, escríbelo otra vez y guarda.
+
+Para un **tren nuevo**:
 
 1. Pulsa **«Subir el listado del tren»**. Puedes subir el PDF de Captrain o fotos de la primera y la última hoja.
 2. La app lee los vagones y las cajas móviles. Revisa:
     - el **Nº de tren**: es nuestro número correlativo y la app propone el siguiente;
-    - el **Nº convoy** (el de Captrain);
+    - el **Nº convoy de entrada** (el de Captrain) y, si ya lo sabes, el **de salida** (si no, se pone después);
     - la **fecha**;
     - la lista de vagones y cajas.
 3. Pulsa **«Guardar la composición del tren»**.
@@ -110,7 +117,12 @@ La lista **«Ya cargadas»** está en el orden del tren: **arriba los vagones pe
 
 ### Terminar el tren
 
-Cuando esté todo cargado, pulsa **«Terminar el tren y enviar las Excel»** y confirma. Se hacen tres cosas:
+Cuando esté todo cargado, pulsa **«Terminar el tren y enviar las Excel»**. La app enseña el **nº de convoy de salida** (si todavía no se había puesto, el de entrada):
+
+- Si es correcto, pulsa **«Confirmar y enviar»**.
+- Si no lo es, **escribe el bueno** y pulsa «Confirmar y enviar»: se guarda en el tren y en sus cargas antes de enviar.
+
+Al enviar se hacen tres cosas:
 
 - se generan las Excel **CARTON PAJA TREN N** y **REGISTRO VIAJES PR**, que también se pueden descargar;
 - se guardan en SharePoint;

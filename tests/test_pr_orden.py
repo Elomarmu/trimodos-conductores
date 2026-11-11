@@ -211,3 +211,21 @@ def test_correo_de_pedido_nuevo_con_enlace(monkeypatch):
     assert "Primer viaje" not in h            # sin tarea no sale el botón
     A.avisar("punto_nuevo", {"punto": "X", "albaran": "1", "fecha": "2026-11-10"})
     assert "<a " not in enviados[1]["html"]
+
+
+def test_convoy_de_salida():
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    t = _cargar(odoo, 11, "CRPU0910069")
+    assert O.convoy_tren(t) == "90107"                                         # sin salida: el de entrada
+    assert R.leer_observaciones(odoo.bultos[11]["unload_note"])["convoy"] == "90107"
+    assert O.cambiar_salida(odoo, t, odoo.viajes(), "  91234 ") == [11]        # se cambia también en las cargas
+    t = O.tren_actual(odoo)
+    assert t["convoy"] == "90107" and t["convoy_salida"] == "91234" and O.convoy_tren(t) == "91234"
+    assert R.leer_observaciones(odoo.bultos[11]["unload_note"])["convoy"] == "91234"
+    t = _cargar(odoo, 12, "CTEA25000377")                                       # las nuevas ya van con el de salida
+    assert R.leer_observaciones(odoo.bultos[12]["unload_note"])["convoy"] == "91234"
+    e = O.estado_tren(odoo, t, odoo.viajes())
+    assert e["convoy"] == "90107" and e["convoy_salida"] == "91234"
+    ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "91234", "2026-11-09", O.cajas_en_orden(t), {}, "90107")))
+    assert ws["TREN 86"]["Q2"].value == "91234" and "de entrada: 90107" in ws["COMPOSICION"]["A2"].value

@@ -53,7 +53,8 @@ COLS_TREN = ["ord", "Fecha", "Matrícula", "Balas", "Peso", "Lugar de carga", "O
 ANCHOS_TREN = [5, 11, 11, 7, 9, 22, 16, 15, 15, 14, 10, 7, 7, 11, 9, 8, 9, 9]
 
 
-def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viajes_por_caja: dict[str, dict]) -> bytes:
+def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viajes_por_caja: dict[str, dict],
+                     convoy_entrada: str = "") -> bytes:
     """cajas: filas del tren (orden, vagon, segunda, caja_movil, tara_kg). viajes_por_caja: caja móvil → viaje que lleva.
     Las comprobaciones de momento no se revisan: salen siempre OK."""
     wb = Workbook()
@@ -64,7 +65,7 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     ws["H1"], ws["J1"] = "PUESTO A DISPOSICION", "HORA INICIO"
     ws["H2"], ws["J2"] = "finalizacion estimada", "HORA SALIDA"
     ws["O1"], ws["Q1"] = "TREN", tren
-    ws["O2"], ws["Q2"] = "Nº Convoy", convoy
+    ws["O2"], ws["Q2"] = "Nº Convoy", convoy   # el de salida (si no se sabe todavía, el de entrada)
     ws["O3"], ws["Q3"] = "Fecha", _fecha(fecha)
     ws["Q3"].number_format = "DD/MM/YYYY"
     for c in ("H1", "J1", "H2", "J2", "O1", "O2", "O3"):
@@ -109,18 +110,19 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     ws.freeze_panes = "A6"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
-    hoja_composicion(wb, tren, convoy, fecha, cajas)
+    hoja_composicion(wb, tren, convoy, fecha, cajas, convoy_entrada)
     return _guardar(wb)
 
 
 # ---- COMPOSICIÓN DEL TREN (la carga la oficina) -----------------------------------------------------------------
 
-def hoja_composicion(wb: Workbook, tren: int, convoy: str, fecha: str, cajas: list[dict]):
+def hoja_composicion(wb: Workbook, tren: int, convoy: str, fecha: str, cajas: list[dict], convoy_entrada: str = ""):
     """Hoja «COMPOSICION» del libro CARTON PAJA TREN: vagones, cajas y taras tal como los cargó la oficina."""
     ws = wb.create_sheet("COMPOSICION")
     ws["A1"] = f"COMPOSICIÓN DEL TREN {tren}"
     ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = f"Nº convoy: {convoy or '—'} · Fecha: {'-'.join(reversed((fecha or '').split('-')))} · {len(cajas)} cajas"
+    entrada = f" (de entrada: {convoy_entrada})" if convoy_entrada and convoy_entrada != convoy else ""
+    ws["A2"] = f"Nº convoy de salida: {convoy or '—'}{entrada} · Fecha: {'-'.join(reversed((fecha or '').split('-')))} · {len(cajas)} cajas"
     _cabecera(ws, 4, ["Orden", "Vagón", "Caja móvil", "Tara C.Movil"], [8, 16, 16, 13])
     for i, c in enumerate(cajas, start=5):
         for col, val in enumerate(["“" if c.get("segunda") else c.get("orden"), "“" if c.get("segunda") else c.get("vagon"),
