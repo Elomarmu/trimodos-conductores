@@ -286,13 +286,20 @@ def actualizar(body: Actualizar):
     if not hechos:
         raise AppError("No has cambiado nada.", 400, "sin_cambios")
     viaje = next((v for v in O.viajes(odoo) if v["bulto_id"] == body.bulto_id), None)
-    if viaje and viaje.get("caja_movil") and viaje.get("tren"):   # ya va en un tren: su foto en SharePoint se pone al día
+    en_tren = None
+    if viaje and viaje.get("caja_movil") and viaje.get("tren"):   # ya va en un tren: sus documentos en SharePoint al día
         sincronizar_foto(odoo, viaje, nuevos=nuevos)
+        t = O.tren_actual(odoo)
+        if t and str(t["tren"]) == str(viaje["tren"]):
+            en_tren = t
     res = {"bulto": ps[0]["name"], "cambiado": hechos,
            "faltan_docs": [R.DOCUMENTOS[d][3] for d in R.DOCUMENTOS if viaje and viaje.get("doc_" + d) is False]}
     if tarea and set(hechos) & {"código Paper", "peso", "balas", "contenedor"}:
         imprimir(tarea, res)
-    subir_registro(odoo)
+    if en_tren:   # la Excel del tren lleva el código Paper, las balas y el peso de esta carga
+        poner_al_dia(odoo, en_tren, O.viajes(odoo))
+    else:
+        subir_registro(odoo)
     return res
 
 

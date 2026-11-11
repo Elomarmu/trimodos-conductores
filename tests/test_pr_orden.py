@@ -284,3 +284,26 @@ def test_volver_a_cargar_la_composicion_mantiene_las_cargas_y_saca_las_de_cajas_
     libro = openpyxl.load_workbook(io.BytesIO(__import__("base64").b64decode(
         next(d for d in enviados if d["evento"] == "composicion")["archivos"][0]["b64"])))["TREN 86"]
     assert any(libro.cell(f, 10).value == "CRPU0910069" and libro.cell(f, 7).value for f in range(6, 10))   # la Excel la lleva
+
+
+def test_cada_cambio_del_tren_pone_al_dia_la_excel_y_los_documentos(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    enviados = []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(O, "leer_foto", lambda o, tarea, doc="albaran": {"b64": "QUJD", "tipo": "image/jpeg"})
+    monkeypatch.setattr(O, "apuntar_foto", lambda *a, **k: None)
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    eventos = lambda: [d["evento"] for d in enviados]
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))       # carga: albarán + DI + Excel del tren + registro
+    assert eventos() == ["foto_subir", "foto_subir", "composicion", "registro"]
+    enviados.clear()
+    A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="MXMU1450334"))
+    enviados.clear()
+    A.tren_mover(A.Mover(vagon=V1, hacia="subir"))                          # orden: Excel del tren
+    assert eventos() == ["composicion"]
+    enviados.clear()
+    A.tren_quitar(A.Asignar(bulto_id=12, caja_movil="MXMU1450334"))        # descargar: Excel + registro
+    assert "composicion" in eventos() and "registro" in eventos()
