@@ -1,8 +1,10 @@
 # App de conductores · Grupo Trimodos / TRANSARGI
 
-PWA para móvil que permite al conductor corregir, al cargar, la **mercancía, los elementos (bultos), los euro palets y el peso** de la orden de transporte, y descargar la nueva orden en PDF. Se integra con **Odoo 15** (JSON-RPC) a través de un pequeño backend (FastAPI): el móvil nunca ve credenciales de Odoo.
+PWA para móvil que permite al conductor corregir, al cargar, la **mercancía, los bultos y los kilos por lugar**, y la **tractora y el remolque de la orden**, y descargar la nueva orden en PDF. Los euro palets se muestran en solo lectura. Se integra con **Odoo 15** (JSON-RPC) a través de un pequeño backend (FastAPI): el móvil nunca ve credenciales de Odoo.
 
 > Guía de una página para los conductores: [GUIA_CONDUCTORES.md](GUIA_CONDUCTORES.md)
+
+La app de **oficina y almacén** se publica en `/oficina/`; comparte la carcasa con conductores y se genera desde `public/index.html` mediante `python scripts/generar_oficina.py`. Sus herramientas requieren `APP_OFICINA_CODE`, que puede configurarse separado de `APP_ACCESS_CODE`.
 
 **Estado:** prototipo. Antes de ponerlo en manos de conductores, lee [Seguridad](#7-seguridad) y [Alojamiento](#6-alojamiento-y-despliegue).
 
@@ -61,6 +63,7 @@ Después abre **http://localhost:8000** en el navegador. La cámara web funciona
 | `ODOO_COMPANY_IDS` | `1,7` (1 = STINSA, 7 = TRANSARGI S.L.U). |
 | `SECRET_KEY` | Clave larga aleatoria para firmar las sesiones (obligatoria en `real`). |
 | `APP_ACCESS_CODE` | **Código de acceso compartido** (mínimo 8 caracteres). En modo `real` es **obligatorio**: sin él, la API se niega a funcionar (error 503). Los conductores lo escriben una vez en el móvil y se queda guardado. En modo `mock`, si está vacío, no se pide. |
+| `APP_OFICINA_CODE` | Código propio de oficina y almacén (mínimo 8 caracteres), distinto del de conductores. Si no se configura, se usa `APP_ACCESS_CODE`. |
 | `QR_ALLOWED_HOSTS` | Dominios extra aceptados dentro del QR (p. ej. la demo de Tecnativa). |
 
 **Cómo averiguar la base de datos:** Odoo suele tener desactivado el listado. Con la sesión iniciada, abre la consola del navegador (F12) y escribe `odoo.session_info.db`. Para producción es `prod`.
@@ -104,9 +107,10 @@ El cambio es **solo tocar el `.env`** (`ODOO_USER`, `ODOO_PASSWORD`). Aun con tu
 
 | Modelo | Permisos | Para qué |
 |---|---|---|
-| `project.task` | leer **y escribir** | leer la orden; Odoo exige *escritura* para publicar la nota (`message_post`) |
-| `tms.package` | leer **y escribir** (sin crear ni borrar) | editar los 4 campos |
-| `tms.goods` | solo leer | autocompletar mercancía |
+| `project.task` | leer **y escribir** | leer la orden, editar tractora/remolque y publicar la nota (`message_post`) |
+| `tms.package` | leer **y escribir** (sin crear ni borrar) | editar mercancía, bultos y kilos |
+| `tms.goods` | leer y crear (sin escribir ni borrar) | autocompletar y, con confirmación, crear mercancía con `name` |
+| `fleet.vehicle` | solo leer | validar las matrículas y mostrar el modelo |
 | `ir.attachment` | leer (y lo que Odoo necesite para generar el adjunto al imprimir) | comprobar el token del QR y el PDF |
 | `sale.order` | solo leer | localizar la tarea por número de pedido |
 | Informe 412 (`tms_reporting.tms_transportation_order`) | poder imprimirlo | generar la nueva orden |
@@ -125,7 +129,7 @@ El proyecto ya está preparado para **Vercel**: FastAPI como función Python (`a
 ### Pasos
 1. Cuenta en **GitHub** y repositorio **privado**; subir el proyecto (`.env` no se sube): `git remote add origin <url>` y `git push -u origin main`.
 2. Cuenta en **Vercel** → *Add New Project* → importar el repositorio (preset **Other**, sin comandos de build).
-3. En *Settings → Environment Variables* añadir las del `.env` (`ODOO_MODE=real`, `DRY_RUN`, `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`, `ODOO_COMPANY_IDS`, `SECRET_KEY`, `APP_ACCESS_CODE`), marcando como **Sensitive** las secretas. **Nunca en el código.** Los cambios de variables solo se aplican con un **nuevo despliegue** (*Redeploy*).
+3. En *Settings → Environment Variables* añadir las del `.env` (`ODOO_MODE=real`, `DRY_RUN`, `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`, `ODOO_COMPANY_IDS`, `SECRET_KEY`, `APP_ACCESS_CODE` y `APP_OFICINA_CODE`), marcando como **Sensitive** las secretas. **Nunca en el código.** Los cambios de variables solo se aplican con un **nuevo despliegue** (*Redeploy*).
 4. Desplegar y abrir `https://…vercel.app/api/health`: debe devolver `"ok":true`.
 5. Desplegar siempre con `DRY_RUN=true`; ponerlo en `false` solo para pruebas autorizadas y volver a `true`.
 
@@ -146,9 +150,9 @@ Si la usan los conductores de la empresa, hay que pasar a **Vercel Pro** u otro 
 ## 7. Seguridad
 
 - **Sin credenciales en el móvil.** Todo pasa por el backend.
-- **Lista blanca en el cliente Odoo** ([app/odoo_client.py](app/odoo_client.py)): no existe ninguna llamada genérica. Solo se puede leer tareas, bultos, mercancías, adjuntos y pedidos; escribir **únicamente** `goods_id`, `number_of_packages`, `euro_pallet_qty` y `shipping_weight` de `tms.package`; publicar nota **solo** en `project.task`; imprimir **solo** el informe de la orden de transporte. Hay tests que lo garantizan.
-- **El token del QR se valida en el servidor** (comparación en tiempo constante contra el `access_token` del adjunto) y la sesión firmada (30 min) se vuelve a validar al guardar. El servidor comprueba también que los bultos sean de esa tarea y que no hayan cambiado (`write_date`).
-- **Reglas de negocio en el servidor:** enteros ≥ 0, peso > 0 (si el peso que se pone supera el umbral **`PESO_AVISO_KG`**, por defecto 27.000 kg, la app pide confirmarlo antes del resumen; el servidor es el único que tiene el número y se lo manda a la pantalla: «Es posible que el conjunto supere la MMA autorizada…»; no es un límite, el máximo depende del conjunto), mercancía existente y **etapa de la tarea «Nuevo» o «En desarrollo»** (configurable con `EDITABLE_STAGES`; se compara sin importar mayúsculas ni acentos). En cualquier otra etapa la orden se puede consultar pero no modificar.
+- **Lista blanca en el cliente Odoo** ([app/odoo_client.py](app/odoo_client.py)): no existe ninguna llamada genérica. Se leen tareas, bultos, mercancías, adjuntos, pedidos y vehículos. Solo se escriben `goods_id`, `number_of_packages` y `shipping_weight` en `tms.package`, y `tractor_id`/`trailer_id` en `project.task`; `tms.goods` solo se crea con `name`. Euro palets son solo lectura. Hay tests que lo garantizan.
+- **El token del QR se valida en el servidor** (comparación en tiempo constante contra el `access_token` del adjunto) y la sesión firmada (30 min) se vuelve a validar al guardar. El servidor comprueba también los `write_date` de la tarea y los bultos, la etapa y vuelve a resolver las matrículas en Odoo antes de escribir.
+- **Reglas de negocio en el servidor:** bultos entero ≥ 0, peso > 0 (si supera el umbral **`PESO_AVISO_KG`**, por defecto 27.000 kg, se pide confirmación; no es un límite), mercancía existente o nueva con confirmación y **etapa de la tarea «Nuevo» o «En desarrollo»**. La tractora es obligatoria y el remolque opcional. Las matrículas se normalizan y solo se aceptan vehículos sin compañía o de la compañía de la tarea; no se crean vehículos. En cualquier otra etapa la orden se puede consultar pero no modificar.
 - **Trazabilidad:** cada guardado deja una **nota interna** en la tarea («Modificado desde la app de conductores», fecha/hora y valores antes → ahora) y un log en el servidor sin datos sensibles (las URL con token no se registran).
 - **Cabeceras:** `nosniff`, `no-referrer`, sin marcos, cámara solo para la propia app, y la API nunca se guarda en caché.
 
@@ -178,7 +182,8 @@ Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecna
 - **JSON-RPC con clave API:** funciona (la clave API se pone en `ODOO_PASSWORD`). Los modelos y campos del módulo TMS son los mismos y las empresas siguen siendo 1 (STINSA) y 7 (TRANSARGI).
 - **Regla de edición:** solo depende de la etapa de la tarea («Nuevo» o «En desarrollo»), igual en la v15 y la v18; ya no se consultan facturas ni el estado de los bultos.
 - **Notas en la tarea:** Odoo 18 escapa el cuerpo recibido por RPC (se vería el HTML escrito). La app envía `body_is_html=True` solo en Odoo ≥ 18; en la v15 no existe ese parámetro. Comprobado en la plataforma de pruebas.
-- **Guardado completo en la v18 (probado):** escribir los 4 campos, dejar la mercancía en blanco, nota interna e imprimir la orden funcionan; tarda 4-5 s.
+- **Guardado existente en la v18 (probado):** mercancía, bultos y kilos, mercancía en blanco, nota interna e impresión funcionan; tarda 4-5 s. La nueva edición de vehículos y creación de mercancías se valida en simulación; no se ha escrito ni impreso en Odoo para probarla.
+- **Vehículos:** en v15 y v18 la tarea tiene `tractor_id`/`trailer_id`; el informe 412 los usa para la tractora y el remolque. La matrícula está en `fleet.vehicle.license_plate`; `vehicle_type` distingue tractor/remolque. Los vehículos pueden no tener compañía o pertenecer a STINSA/TRANSARGI. En v18 se verificó en solo lectura que el usuario técnico tiene escritura de tarea, creación de `tms.goods` y lectura de flota. Conserva permisos sobrantes (`project.task.unlink`, `tms.package.create/unlink`, `tms.goods.write`, `sale.order.write`); pedir a Tecnativa que los retire.
 - **Imprimir el PDF NO funciona solo con clave API.** Imprimir exige una sesión web (`/web/session/authenticate`) y Odoo no admite claves API ahí (tampoco por cabeceras Basic/Bearer). Opciones:
   1. (Verificado: funciona) Usuario técnico **sin verificación en dos pasos (2FA)** y con contraseña, puesta en `ODOO_WEB_PASSWORD` (la clave API sigue en `ODOO_PASSWORD`). Con 2FA activado, Odoo responde `{uid: null}` y no se puede imprimir.
   2. Pedir a Tecnativa un **método público** en la tarea que genere la orden y devuelva el adjunto (sin sesión web, solo con clave API).
@@ -196,7 +201,8 @@ Lo que se ha comprobado con la plataforma de pruebas de Odoo 18 (`stinsa18.tecna
 
 - Una tarea cuenta como **orden de transporte** si tiene `is_transport_order`, **o** una orden de transporte ya generada, **o** bultos (`tms_package_ids`): hay tareas reales (p. ej. las del pedido S2621553) con la marca a `False`, con su PDF o todavía sin imprimir. Que se pueda **modificar** lo decide solo la etapa («Nuevo» o «En desarrollo»).
 - Si una tarea se recrea en Odoo, el QR del PDF antiguo apunta a la tarea anterior y deja de encontrarse; hay que escanear el de la orden nueva o escribir el número de pedido.
-- Un bulto puede venir **vacío** (sin mercancía, 0 elementos, 0 euro palets, 0 kg). Se puede dejar la **mercancía en blanco** (`goods_id` no es obligatorio en `tms.package`). Al guardar solo se validan los campos que cambian.
+- Un bulto puede venir **vacío** (sin mercancía, 0 elementos, 0 euro palets, 0 kg). Se puede dejar la **mercancía en blanco** (`goods_id` no es obligatorio en `tms.package`). Euro palets son solo lectura; al guardar solo se validan los campos que cambian.
+- Los vehículos de la orden están en `project.task.tractor_id` y `project.task.trailer_id`; la matrícula es `fleet.vehicle.license_plate`. La búsqueda usa `ilike` acotado y luego compara matrículas normalizadas exactamente. `tms.goods.name` es el único campo obligatorio conocido; no se altera el catálogo hasta la confirmación final del guardado.
 - El mismo número de pedido puede existir en STINSA y en TRANSARGI: por eso al escribirlo a mano se elige la empresa.
 
 ## 11. Estructura

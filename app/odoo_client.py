@@ -1,7 +1,7 @@
 """Cliente Odoo con lista blanca. NO existe ninguna llamada genérica: cada operación permitida es un método fijo.
 
-Lectura de tareas/bultos/mercancías/adjuntos; escritura SOLO de 4 campos en tms.package; message_post SOLO en project.task;
-impresión SOLO del informe tms_reporting.tms_transportation_order.
+Lectura de tareas/bultos/mercancías/vehículos/adjuntos; escritura de tres campos en tms.package y dos en project.task;
+creación de mercancías solo con name; message_post SOLO en project.task e impresión solo del informe de transporte.
 """
 import json
 import logging
@@ -17,15 +17,21 @@ ORDER_MODEL = "sale.order"
 TASK_MODEL = "project.task"
 PACKAGE_MODEL = "tms.package"
 GOODS_MODEL = "tms.goods"
+FLEET_MODEL = "fleet.vehicle"
 ATTACHMENT_MODEL = "ir.attachment"
 
-TASK_FIELDS = ["name", "company_id", "stage_id", "is_transport_order", "tms_package_ids", "tms_transport_order_attachment_id"]
+TASK_FIELDS = [
+    "name", "company_id", "stage_id", "is_transport_order", "tms_package_ids",
+    "tms_transport_order_attachment_id", "write_date", "tractor_id", "trailer_id",
+]
 PACKAGE_FIELDS = [
     "name", "carrier_tracking_ref", "goods_id", "number_of_packages", "euro_pallet_qty", "shipping_weight",
     "shipping_origin_id", "shipping_destination_id", "pickup_date", "forecast_unload_date", "state", "write_date",
 ]
 ATTACHMENT_FIELDS = ["res_model", "res_id", "access_token", "name"]
-EDITABLE_FIELDS = frozenset({"goods_id", "number_of_packages", "euro_pallet_qty", "shipping_weight"})
+PACKAGE_WRITABLE_FIELDS = frozenset({"goods_id", "number_of_packages", "shipping_weight"})
+EDITABLE_FIELDS = PACKAGE_WRITABLE_FIELDS
+TASK_WRITABLE_FIELDS = frozenset({"tractor_id", "trailer_id"})
 REPORT_NAME = "tms_reporting.tms_transportation_order"
 
 # (modelo, método) permitidos. Todo lo demás se rechaza antes de salir hacia Odoo.
@@ -34,6 +40,9 @@ ALLOWED_CALLS = {
     (TASK_MODEL, "read"),
     (TASK_MODEL, "search_read"),
     (TASK_MODEL, "fields_get"),
+    (FLEET_MODEL, "search_read"),
+    (FLEET_MODEL, "read"),
+    (GOODS_MODEL, "create"),
     (PACKAGE_MODEL, "read"),
     (PACKAGE_MODEL, "fields_get"),
     (GOODS_MODEL, "name_search"),
@@ -41,7 +50,8 @@ ALLOWED_CALLS = {
     (ATTACHMENT_MODEL, "read"),
     ("res.company", "search_read"),
     ("ir.actions.report", "search_read"),   # solo vía find_report (diagnóstico)
-    (PACKAGE_MODEL, "write"),        # solo vía write_package (campos EDITABLE_FIELDS)
+    (PACKAGE_MODEL, "write"),        # solo campos PACKAGE_WRITABLE_FIELDS
+    (TASK_MODEL, "write"),           # solo tractor_id y trailer_id
     (TASK_MODEL, "message_post"),    # solo vía post_note
 }
 
@@ -51,7 +61,8 @@ EXPECTED_PERMISSIONS = [
     (TASK_MODEL, "unlink", False),
     (PACKAGE_MODEL, "read", True), (PACKAGE_MODEL, "write", True),
     (PACKAGE_MODEL, "create", False), (PACKAGE_MODEL, "unlink", False),
-    (GOODS_MODEL, "read", True), (GOODS_MODEL, "write", False),
+    (GOODS_MODEL, "read", True), (GOODS_MODEL, "create", True), (GOODS_MODEL, "write", False),
+    (FLEET_MODEL, "read", True),
     (ATTACHMENT_MODEL, "read", True),
     (ORDER_MODEL, "read", True), (ORDER_MODEL, "write", False), (ORDER_MODEL, "unlink", False),
 ]
@@ -90,6 +101,18 @@ class OdooClient:
     def _call(self, model: str, method: str, args: list, kwargs: dict | None = None):
         if (model, method) not in ALLOWED_CALLS:
             raise PermissionError(f"Operación no permitida: {model}.{method}")
+        if model == PACKAGE_MODEL and method == "write":
+            if len(args) != 2 or not isinstance(args[1], dict) or not args[1] or not set(args[1]) <= PACKAGE_WRITABLE_FIELDS:
+                raise PermissionError("Campos no permitidos en tms.package.write")
+        if model == TASK_MODEL and method == "write":
+            if len(args) != 2 or not isinstance(args[1], dict) or not args[1] or not set(args[1]) <= TASK_WRITABLE_FIELDS:
+                raise PermissionError("Campos no permitidos en project.task.write")
+            if any(value is not False and (not isinstance(value, int) or value <= 0) for value in args[1].values()):
+                raise PermissionError("Vehículo no válido")
+        if model == GOODS_MODEL and method == "create":
+            if len(args) != 1 or not isinstance(args[0], dict) or set(args[0]) != {"name"} \
+                    or not isinstance(args[0]["name"], str) or not args[0]["name"].strip():
+                raise PermissionError("Solo se permite crear tms.goods con el campo name")
         kwargs = dict(kwargs or {})
         kwargs["context"] = {"allowed_company_ids": self.s.company_ids, "lang": "es_ES"}
         uid = self._login()
@@ -115,6 +138,28 @@ class OdooClient:
         rows = self._call(TASK_MODEL, "read", [[task_id]], {"fields": TASK_FIELDS})
         return rows[0] if rows else None
 
+    def read_vehicles(self, vehicle_ids: list[int]) -> list[dict]:
+        if not vehicle_ids:
+            return []
+        return self._call(
+            FLEET_MODEL, "read", [vehicle_ids],
+            {"fields": ["license_plate", "display_name", "model_id", "vehicle_type", "company_id"]},
+        )
+
+    def search_vehicles(self, pattern: str, company_id: int, limit: int = 50) -> list[dict]:
+        domain = [
+            "&", ["license_plate", "ilike", pattern], "|",
+            ["company_id", "=", False], ["company_id", "=", company_id],
+        ]
+        return self._call(
+            FLEET_MODEL, "search_read", [domain],
+            {
+                "fields": ["license_plate", "display_name", "model_id", "vehicle_type", "company_id"],
+                "limit": min(max(limit, 1), 50),
+                "order": "license_plate, id",
+            },
+        )
+
     def read_packages(self, package_ids: list[int]) -> list[dict]:
         if not package_ids:
             return []
@@ -126,13 +171,27 @@ class OdooClient:
 
     def search_goods(self, query: str, limit: int = 10) -> list[dict]:
         limit = min(limit, 10)
-        return [{"id": i, "name": n} for i, n in self._call(GOODS_MODEL, "name_search", [query], {"limit": limit})]
+        found = self._call(GOODS_MODEL, "name_search", [query], {"limit": limit})
+        if len(found) < limit and len(query.strip()) >= 4:
+            found += self._call(GOODS_MODEL, "name_search", [query.strip()[:4]], {"limit": limit})
+        unique = {goods_id: name for goods_id, name in found}
+        return [{"id": goods_id, "name": name} for goods_id, name in list(unique.items())[:limit]]
 
     # ---- escritura (solo lo imprescindible) ------------------------------------
     def write_package(self, package_id: int, values: dict) -> None:
-        if not values or not set(values) <= EDITABLE_FIELDS:
+        if not values or not set(values) <= PACKAGE_WRITABLE_FIELDS:
             raise PermissionError("Campo no permitido")
         self._call(PACKAGE_MODEL, "write", [[int(package_id)], values])
+
+    def write_task_vehicles(self, task_id: int, values: dict) -> None:
+        if not values or not set(values) <= TASK_WRITABLE_FIELDS:
+            raise PermissionError("Campo no permitido")
+        self._call(TASK_MODEL, "write", [[int(task_id)], values])
+
+    def create_goods(self, name: str) -> int:
+        if not name or not name.strip():
+            raise ValueError("El nombre de la mercancía no puede estar vacío.")
+        return self._call(GOODS_MODEL, "create", [{"name": name}])
 
     def _major(self) -> int:
         if self._major_cache is None:

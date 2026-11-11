@@ -45,7 +45,7 @@ def main():
         graves = [f for f in missing if f not in OPCIONALES]
         check(not graves, f"{model}: {len(wanted) - len(missing)}/{len(wanted)} campos"
               + (f"  FALTAN: {graves}" if graves else "") + (f"  (ausentes pero con alternativa: {opcionales})" if opcionales else ""))
-    check(EDITABLE_FIELDS <= set(o.describe_fields(PACKAGE_MODEL, [""])), f"{PACKAGE_MODEL}: existen los 4 campos editables")
+    check(EDITABLE_FIELDS <= set(o.describe_fields(PACKAGE_MODEL, [""])), f"{PACKAGE_MODEL}: existen los 3 campos editables")
     try:
         o.search_goods("a", 1)
         check(True, f"{GOODS_MODEL}: name_search funciona")

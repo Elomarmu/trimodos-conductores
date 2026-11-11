@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const LOGOS = { trimodos: "/img/trimodos.png", stinsa: "/img/stinsa.png", transargi: "/img/transargi.png" };
 const COMPANY_BY_ID = { 1: "stinsa", 7: "transargi" };
 const PENDING = { pending: true };   // ha escrito en Mercancía pero aún no ha elegido de la lista
-const state = { data: null, edits: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, pdfLoading: null, health: {} };
+const state = { data: null, edits: {}, vehicleEdits: {}, vehicleRequest: {}, lastReq: null, company: null, pdfUrl: null, pdfBlob: null, pdfLoading: null, health: {} };
 
 // ---------- utilidades ----------
 function h(tag, attrs = {}, ...children) {
@@ -124,7 +124,7 @@ function show(name) {
 function go(name) {
   if (name === currentScreen) return show(name);
   if (name === "menu") {                      // volver al menú: se limpia la orden y el historial
-    state.data = null; state.edits = {}; pending = null; state.company = null; state.onConfirm = null; state.pdfName = null;
+    state.data = null; state.edits = {}; state.vehicleEdits = {}; state.vehicleRequest = {}; pending = null; pendingVehicles = null; state.company = null; state.onConfirm = null; state.pdfName = null;
     for (const x of document.querySelectorAll(".seg-btn")) x.setAttribute("aria-checked", "false");
     setBrand(null, "menu");
     history.replaceState({ s: "menu" }, "");
@@ -137,7 +137,7 @@ window.addEventListener("popstate", (e) => {
   let target = (e.state && e.state.s) || "menu";
   if (!state.data && (target === "edit" || target === "review")) target = "menu";
   if (target === "review" && !pending) target = "edit";
-  if (!$("confirm").hidden) $("confirm").hidden = true;
+  if (!$("confirm").hidden) closeConfirm();
   if (!$("mma").hidden) $("mma").hidden = true;
   show(target);
 });
@@ -275,6 +275,8 @@ async function load(req) {
     state.data = await post("/api/resolve-qr", req);
     state.lastReq = req;
     state.edits = {};
+    state.vehicleEdits = {};
+    state.vehicleRequest = {};
     renderEdit();
     go("edit");
   } catch (e) {
@@ -286,13 +288,6 @@ async function load(req) {
 }
 
 // ---------- pantalla 3: edición ----------
-const FIELDS = [
-  { key: "mercancia", label: "Mercancía" },
-  { key: "elementos", label: "Elementos (bultos)" },
-  { key: "euro_palets", label: "Euro palets" },
-  { key: "peso", label: "Peso (kg)" },
-];
-
 function current(p) {
   const e = state.edits[p.id] || {};
   return {
@@ -318,7 +313,132 @@ function renderEdit() {
 
   const box = $("packages");
   box.replaceChildren();
+  renderVehicles();
   d.bultos.forEach((p, i) => box.append(packageCard(p, i)));
+}
+
+function baselineVehicle(role) { return state.data.vehiculos[role] || null; }
+function selectedVehicle(role) {
+  const edit = state.vehicleEdits[role];
+  return edit ? edit.vehicle : baselineVehicle(role);
+}
+function vehiclePlate(role) {
+  const edit = state.vehicleEdits[role];
+  return edit ? edit.plate : baselineVehicle(role)?.matricula || "";
+}
+
+function renderVehicles() {
+  const box = $("vehicles");
+  const card = h("section", { class: "pkg vehicle-card" }, h("h2", {}, "Vehículos de la orden"));
+  for (const [role, label, type] of [["tractora", "Tractora", "tractor"], ["remolque", "Remolque", "trailer"]]) {
+    const vehicle = baselineVehicle(role);
+    const input = h("input", {
+      type: "text", id: `vehicle-${role}`, value: vehicle?.matricula || "",
+      autocapitalize: "characters", autocomplete: "off", spellcheck: "false",
+      inputmode: "text", disabled: !state.data.editable,
+      "aria-label": label,
+    });
+    const status = h("p", { class: "vehicle-status", "aria-live": "polite" },
+      vehicle ? `✓ Encontrada en Odoo: ${vehicle.matricula}${vehicle.modelo ? ` · ${vehicle.modelo}` : ""}` :
+        role === "tractora" ? "Obligatoria" : "Opcional: puede dejarse en blanco.");
+    const sugg = h("div", { class: "sugg" });
+    input.addEventListener("input", () => {
+      state.vehicleRequest[role] = (state.vehicleRequest[role] || 0) + 1;
+      state.vehicleEdits[role] = { plate: input.value, vehicle: null, confirmedMismatch: false, status: "pending" };
+      status.textContent = "";
+      status.className = "vehicle-status";
+      sugg.replaceChildren();
+      markChanged();
+    });
+    input.addEventListener("blur", () => checkVehicle(role, type, input, status, sugg));
+    card.append(h("div", { class: "field", "data-key": role },
+      h("label", { for: input.id }, label), input, status, sugg));
+  }
+  box.replaceChildren(card);
+}
+
+async function checkVehicle(role, type, input, status, sugg) {
+  const plate = input.value.trim();
+  const seq = (state.vehicleRequest[role] || 0) + 1;
+  state.vehicleRequest[role] = seq;
+  sugg.replaceChildren();
+  if (!plate && role === "remolque") {
+    state.vehicleEdits[role] = { plate: "", vehicle: null, confirmedMismatch: false, status: "empty" };
+    status.textContent = "Opcional: se guardará sin remolque.";
+    status.className = "vehicle-status";
+    markChanged();
+    return;
+  }
+  if (!plate && role === "tractora") {
+    state.vehicleEdits[role] = { plate: "", vehicle: null, confirmedMismatch: false, status: "not-found" };
+    status.textContent = "La tractora es obligatoria.";
+    status.className = "vehicle-status bad";
+    markChanged();
+    return;
+  }
+  status.textContent = "Comprobando matrícula…";
+  status.className = "vehicle-status";
+  try {
+    const q = new URLSearchParams({
+      task_id: String(state.data.tarea.id), sesion: state.data.sesion,
+      tipo: type, matricula: plate,
+    });
+    const result = await api(`/api/vehicles?${q}`);
+    if (seq !== state.vehicleRequest[role]) return;
+    if (!result.encontrada) {
+      state.vehicleEdits[role] = { plate, vehicle: null, confirmedMismatch: false, status: "not-found" };
+      status.textContent = `No encontramos la matrícula ${result.matricula_normalizada}. Revísala o avisa a tu responsable de tráfico.`;
+      status.className = "vehicle-status bad";
+      markChanged();
+      return;
+    }
+    if (result.resultados.length > 1) {
+      status.textContent = "Hay varias coincidencias. Elige matrícula y modelo:";
+      status.className = "vehicle-status warn";
+      sugg.replaceChildren(...result.resultados.map((candidate) =>
+        h("button", { type: "button", class: "btn", onclick: () => chooseVehicle(role, type, plate, candidate, status, sugg) },
+          `${candidate.matricula}${candidate.modelo ? ` · ${candidate.modelo}` : ""}`)));
+      return;
+    }
+    chooseVehicle(role, type, plate, result.resultados[0], status, sugg);
+  } catch (e) {
+    if (seq === state.vehicleRequest[role]) {
+      state.vehicleEdits[role] = { plate, vehicle: null, confirmedMismatch: false, status: "error" };
+      status.textContent = e.message;
+      status.className = "vehicle-status bad";
+    }
+  }
+}
+
+function chooseVehicle(role, expectedType, plate, vehicle, status, sugg) {
+  const wrongType = vehicle.tipo && vehicle.tipo !== expectedType;
+  if (wrongType) {
+    const actual = vehicle.tipo === "trailer" ? "un remolque" : "una tractora";
+    state.vehicleEdits[role] = { plate, vehicle: null, candidate: vehicle, confirmedMismatch: false, status: "mismatch" };
+    status.textContent = `Aviso: ${vehicle.matricula} es ${actual}, no ${role === "tractora" ? "una tractora" : "un remolque"}.`;
+    status.className = "vehicle-status warn";
+    sugg.replaceChildren(
+      h("p", { class: "hint" }, "¿Quieres continuar de todos modos?"),
+      h("div", { class: "vehicle-confirm" },
+        h("button", { type: "button", class: "btn ok", onclick: () => acceptVehicle(role, plate, vehicle, true, status, sugg) }, "Sí, continuar"),
+        h("button", { type: "button", class: "btn danger", onclick: () => {
+          state.vehicleEdits[role] = { plate, vehicle: null, confirmedMismatch: false, status: "not-found" };
+          status.textContent = "Escribe otra matrícula.";
+          status.className = "vehicle-status bad";
+          sugg.replaceChildren();
+          markChanged();
+        } }, "No, corregir")));
+    return;
+  }
+  acceptVehicle(role, plate, vehicle, false, status, sugg);
+}
+
+function acceptVehicle(role, plate, vehicle, confirmedMismatch, status, sugg) {
+  state.vehicleEdits[role] = { plate, vehicle, confirmedMismatch, status: "found" };
+  status.textContent = `✓ Encontrada en Odoo: ${vehicle.matricula}${vehicle.modelo ? ` · ${vehicle.modelo}` : ""}`;
+  status.className = "vehicle-status found";
+  sugg.replaceChildren();
+  markChanged();
 }
 
 function packageCard(p, index) {
@@ -343,17 +463,18 @@ function packageCard(p, index) {
       if (q.length < 2) return sugg.replaceChildren();
       try {
         const r = await api("/api/goods?q=" + encodeURIComponent(q));
-        sugg.replaceChildren(...r.resultados.map((g) => h("button", { type: "button", class: "btn", onclick: () => {
-          setEdit(p, "goods", { id: g.id, name: g.name });
-          goodsInput.value = g.name;
-          sugg.replaceChildren();
-          markChanged();
-        } }, g.name)));
-        if (!r.resultados.length) sugg.replaceChildren(h("p", { class: "hint" }, "No hay mercancías con ese nombre."));
+        const options = [];
+        if (r.resultados.length) options.push(h("p", { class: "hint" }, "¿Es alguna de estas?"));
+        options.push(...r.resultados.map((g) => h("button", { type: "button", class: "btn", onclick: () => selectGoods(p, goodsInput, sugg, g) }, g.name)));
+        if (r.crear_nombre) options.push(h("button", {
+          type: "button", class: "btn secondary",
+          onclick: () => confirmNewGoods(p, goodsInput, sugg, r.crear_nombre, r.resultados),
+        }, `➕ Crear mercancía nueva: "${r.crear_nombre}"`));
+        if (!options.length) options.push(h("p", { class: "hint" }, "No hay mercancías parecidas."));
+        sugg.replaceChildren(...options);
       } catch (e) { showError(e.message); }
     }, 300);
   });
-  // «Antes: …» solo se ve en los campos que se cambian (lo controla la clase .changed); es el mismo «Antes» del resumen.
   const goodsField = h("div", { class: "field", "data-key": "mercancia" }, h("label", { for: `g-${p.id}` }, "Mercancía"), goodsInput, sugg, h("div", { class: "was" }, "Antes: " + (p.mercancia?.name || "(en blanco)")));
 
   const numField = (key, label, value, dec) => {
@@ -363,23 +484,73 @@ function packageCard(p, index) {
     input.addEventListener("focus", () => input.select());
     return h("div", { class: "field", "data-key": key }, h("label", { for: input.id }, label), input, h("div", { class: "was" }, "Antes: " + fmtNum(p[key])));
   };
+  const readOnlyNumField = (label, value) => h("div", { class: "field" },
+    h("label", {}, label),
+    h("input", { type: "text", value: fmtNum(value), readonly: true, "aria-readonly": "true", tabindex: "-1" }));
   const c = current(p);
   card.append(goodsField,
-    h("div", { class: "row2" }, numField("elementos", "Elementos", c.elementos, false), numField("euro_palets", "Euro palets", c.euro_palets, false)),
-    numField("peso", "Peso (kg)", c.peso, true));
+    h("div", { class: "row2" }, numField("elementos", "Bultos", c.elementos, false), readOnlyNumField("Euro palets · solo lectura", p.euro_palets)),
+    numField("peso", "Kilos (kg)", c.peso, true));
   card.dataset.pkg = p.id;
   return card;
 }
 
+function selectGoods(p, input, sugg, goods) {
+  setEdit(p, "goods", { id: goods.id, name: goods.name });
+  input.value = goods.name;
+  sugg.replaceChildren();
+  markChanged();
+}
+
+function confirmNewGoods(p, input, sugg, name, similar) {
+  const alternatives = $("confirm-similar");
+  alternatives.replaceChildren();
+  if (similar.length) {
+    alternatives.append(h("p", { class: "hint" }, "¿Es alguna de estas?"));
+    alternatives.append(...similar.map((goods) => h("button", {
+      type: "button", class: "btn",
+      onclick: () => {
+        selectGoods(p, input, sugg, goods);
+        closeConfirm();
+      },
+    }, goods.name)));
+  }
+  $("confirm-q").textContent = "Confirmar mercancía nueva";
+  $("confirm-txt").textContent = `Se creará la mercancía "${name}" en el sistema. ¿Es correcto?`;
+  $("btn-yes").textContent = "Sí, es correcto";
+  state.onConfirm = () => {
+    setEdit(p, "goods", { id: null, name, nueva: true });
+    input.value = name;
+    sugg.replaceChildren();
+    markChanged();
+    closeConfirm();
+  };
+  $("confirm").hidden = false;
+  $("btn-no").focus();
+}
+
+function closeConfirm() {
+  $("confirm").hidden = true;
+  $("confirm-q").textContent = "¿Seguro?";
+  $("confirm-txt").textContent = "Se generará una nueva orden de transporte.";
+  $("btn-yes").textContent = "Sí, guardar";
+  $("confirm-similar").replaceChildren();
+  state.onConfirm = null;
+}
+
 function markChanged() {
-  for (const card of document.querySelectorAll(".pkg")) {
+  for (const card of document.querySelectorAll("#packages .pkg")) {
     const p = state.data.bultos.find((x) => String(x.id) === card.dataset.pkg);
     const c = current(p);
     const changed = {
       mercancia: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
-      elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
+      elementos: c.elementos !== p.elementos, peso: c.peso !== p.peso,
     };
     for (const f of card.querySelectorAll(".field")) f.classList.toggle("changed", !!changed[f.dataset.key]);
+  }
+  for (const role of ["tractora", "remolque"]) {
+    const changed = (selectedVehicle(role)?.id || null) !== (baselineVehicle(role)?.id || null);
+    document.querySelector(`#vehicles [data-key="${role}"]`)?.classList.toggle("changed", changed);
   }
 }
 
@@ -392,30 +563,80 @@ function collectChanges() {
     const name = `${place} · ${p.name}`;   // en los avisos; en pantalla, lugar y bulto van por separado
     const changed = {
       goods: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
-      elementos: c.elementos !== p.elementos, euro_palets: c.euro_palets !== p.euro_palets, peso: c.peso !== p.peso,
+      elementos: c.elementos !== p.elementos, peso: c.peso !== p.peso,
     };
-    if (!Object.values(changed).some(Boolean) && !Number.isNaN(c.elementos + c.euro_palets + c.peso)) continue; // bulto sin tocar: no se valida
+    if (!Object.values(changed).some(Boolean)) continue;
     // Bulto modificado: tiene que quedar completo y correcto.
-    if (c.goods === PENDING) throw new Error(`${name}: elige la mercancía de la lista o borra el texto para dejarla en blanco.`);
-    for (const k of ["elementos", "euro_palets"]) {
-      if (!Number.isInteger(c[k]) || c[k] < 0) throw new Error(`${name}: ${k === "elementos" ? "Elementos" : "Euro palets"} tiene que ser un número entero, 0 o más.`);
+    if (c.goods === PENDING) throw new Error(`${name}: elige una mercancía, crea una nueva con confirmación o borra el texto para dejarla en blanco.`);
+    if (!Number.isInteger(c.elementos) || c.elementos < 0) {
+      throw new Error(`${name}: Bultos tiene que ser un número entero, 0 o más.`);
     }
     if (!(c.peso > 0)) throw new Error(`${name}: el peso tiene que ser mayor que 0.`);
     const rows = [
-      { label: "Mercancía", before: p.mercancia?.name || "(en blanco)", after: c.goods ? c.goods.name : "(en blanco)", changed: changed.goods },
-      { label: "Elementos", before: fmtNum(p.elementos), after: fmtNum(c.elementos), changed: changed.elementos },
-      { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(c.euro_palets), changed: changed.euro_palets },
-      { label: "Peso", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
+      {
+        label: "Mercancía", before: p.mercancia?.name || "(en blanco)",
+        after: c.goods ? c.goods.name : "(en blanco)", changed: changed.goods,
+        nueva: !!c.goods?.nueva,
+      },
+      { label: "Bultos", before: fmtNum(p.elementos), after: fmtNum(c.elementos), changed: changed.elementos },
+      { label: "Euro palets", before: fmtNum(p.euro_palets), after: fmtNum(p.euro_palets), changed: false },
+      { label: "Kilos", before: fmtNum(p.peso) + " kg", after: fmtNum(c.peso) + " kg", changed: changed.peso },
     ];
-    changes.push({ pkg: p, name, place, rows, payload: { package_id: p.id, goods_id: c.goods ? c.goods.id : 0, number_of_packages: c.elementos, euro_pallet_qty: c.euro_palets, shipping_weight: c.peso }, heavy: changed.peso && c.peso > state.data.umbral_peso_kg });   // el umbral lo manda el servidor
+    const payload = { package_id: p.id, number_of_packages: c.elementos, shipping_weight: c.peso };
+    if (c.goods?.nueva) payload.new_goods_name = c.goods.name;
+    else payload.goods_id = c.goods ? c.goods.id : 0;
+    changes.push({ pkg: p, name, place, rows, payload, heavy: changed.peso && c.peso > state.data.umbral_peso_kg });
   }
-  if (!changes.length) throw new Error("No has cambiado ningún dato.");
   return changes;
 }
+
+function clientNormalizePlate(value) { return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+function vehicleLabel(vehicle) {
+  return vehicle ? `${vehicle.matricula}${vehicle.modelo ? ` (${vehicle.modelo})` : ""}` : "(en blanco)";
+}
+
+function collectVehicleChanges() {
+  const rows = [];
+  const payload = {};
+  let changed = false;
+  for (const role of ["tractora", "remolque"]) {
+    const edit = state.vehicleEdits[role];
+    const vehicle = selectedVehicle(role);
+    const plate = edit ? edit.plate.trim() : vehicle?.matricula || "";
+    if (role === "tractora" && !vehicle) {
+      throw new Error("La tractora es obligatoria. Escribe la matrícula y espera a que aparezca «Encontrada».");
+    }
+    if (plate && !vehicle) {
+      throw new Error(`No encontramos la matrícula ${clientNormalizePlate(plate)}. Revísala o avisa a tu responsable de tráfico.`);
+    }
+    if (vehicle && clientNormalizePlate(plate) !== clientNormalizePlate(vehicle.matricula)) {
+      throw new Error(`${role === "tractora" ? "Tractora" : "Remolque"}: vuelve a comprobar la matrícula antes de continuar.`);
+    }
+    const initial = baselineVehicle(role);
+    const differs = (vehicle?.id || null) !== (initial?.id || null);
+    changed ||= differs;
+    rows.push({
+      label: role === "tractora" ? "Tractora" : "Remolque",
+      before: vehicleLabel(initial), after: vehicleLabel(vehicle), changed: differs,
+    });
+    payload[role] = {
+      vehicle_id: vehicle?.id || null,
+      matricula: plate,
+      confirmar_tipo_incorrecto: !!edit?.confirmedMismatch,
+    };
+  }
+  return { rows, payload, changed };
+}
+
 let pending = null;
+let pendingVehicles = null;
 $("btn-review").addEventListener("click", () => {
   clearError();
-  try { pending = collectChanges(); } catch (e) { return showError(e.message); }
+  try {
+    pending = collectChanges();
+    pendingVehicles = collectVehicleChanges();
+    if (!pending.length && !pendingVehicles.changed) throw new Error("No has cambiado ningún dato.");
+  } catch (e) { return showError(e.message); }
   const pesados = pending.filter((c) => c.heavy);
   if (!pesados.length) return mostrarResumen();
   // peso alto: antes del resumen se pide confirmarlo
@@ -431,33 +652,45 @@ function mostrarResumen() {
   $("review-actions").hidden = false;
   $("done-actions").hidden = true;
   $("review-body").className = "";
-  $("review-body").replaceChildren(h("div", { class: "diffs" }, pending.map((c) =>
+  const vehicleDiff = h("section", { class: "diff" }, h("h2", {}, "Vehículos de la orden"),
+    pendingVehicles.rows.map((r) => r.changed
+      ? h("div", { class: "line changed" }, h("span", { class: "lbl" }, r.label), h("span", { class: "before" }, "Antes: " + r.before), h("span", { class: "after" }, "Ahora: " + r.after))
+      : h("div", { class: "line same" }, h("span", { class: "lbl" }, r.label), h("span", { class: "val" }, r.after, h("small", {}, " (sin cambios)")))));
+  const packageDiffs = pending.map((c) =>
     h("section", { class: "diff" }, h("h2", {}, c.place, h("span", { class: "code" }, c.pkg.name)),
       c.rows.map((r) => r.changed
-        ? h("div", { class: "line changed" }, h("span", { class: "lbl" }, r.label), h("span", { class: "before" }, "Antes: " + r.before), h("span", { class: "after" }, "Ahora: " + r.after))
-        : h("div", { class: "line same" }, h("span", { class: "lbl" }, r.label), h("span", { class: "val" }, r.after, h("small", {}, " (sin cambios)"))))))));
+        ? h("div", { class: "line changed" }, h("span", { class: "lbl" }, r.label), h("span", { class: "before" }, "Antes: " + r.before), h("span", { class: "after" }, "Ahora: " + r.after, r.nueva ? h("small", {}, " (mercancía nueva creada desde la app)") : null))
+        : h("div", { class: "line same" }, h("span", { class: "lbl" }, r.label), h("span", { class: "val" }, r.after, h("small", {}, " (sin cambios)"))))));
+  $("review-body").replaceChildren(h("div", { class: "diffs" }, ...(pendingVehicles.changed ? [vehicleDiff] : []), ...packageDiffs));
   go("review");
 }
 $("btn-back-edit").addEventListener("click", () => go("edit"));
 $("btn-save").addEventListener("click", () => {
+  closeConfirm();
   $("confirm-txt").textContent = "Se generará una nueva orden de transporte.";
   $("confirm").hidden = false; $("btn-no").focus();
 });
-$("btn-no").addEventListener("click", () => { $("confirm").hidden = true; $("confirm-q").textContent = "¿Seguro?"; });
-$("btn-yes").addEventListener("click", () => { $("confirm-q").textContent = "¿Seguro?"; });
+$("btn-no").addEventListener("click", closeConfirm);
 // En el ordenador, «Esc» responde «No» en los avisos (nunca guarda nada).
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!$("confirm").hidden) $("btn-no").click();
   else if (!$("mma").hidden) $("btn-mma-no").click();
 });
-$("btn-yes").addEventListener("click", () => (state.onConfirm || save)());
+$("btn-yes").addEventListener("click", () => {
+  const action = state.onConfirm || save;
+  closeConfirm();
+  action();
+});
 
 async function save() {
   $("confirm").hidden = true;
   busy("Guardando y generando la orden…");
   try {
-    const r = await post("/api/update", { task_id: state.data.tarea.id, sesion: state.data.sesion, cambios: pending.map((c) => c.payload) });
+    const r = await post("/api/update", {
+      task_id: state.data.tarea.id, sesion: state.data.sesion,
+      cambios: pending.map((c) => c.payload), ...pendingVehicles.payload,
+    });
     renderDone(r);
   } catch (e) {
     if (e.code === "datos_cambiados") {
@@ -485,7 +718,7 @@ $("btn-retry").addEventListener("click", async () => {
   try {
     const r = await post("/api/reprint", { task_id: state.data.tarea.id, sesion: state.data.sesion });
     $("btn-retry").hidden = true;
-    renderDone({ ...r, bultos_modificados: pending.length });
+    renderDone({ ...r, bultos_modificados: pending.length, vehiculos_modificados: pendingVehicles.changed ? 1 : 0 });
   } catch (e) { showError(e.message); } finally { busy(null); }
 });
 
@@ -500,7 +733,7 @@ function renderDone(r) {
   $("review-body").className = "result";
   $("review-body").replaceChildren(...[
     mark,
-    h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte (${r.bultos_modificados} ${r.bultos_modificados === 1 ? "lugar modificado" : "lugares modificados"}).`),
+    h("p", {}, `Se ha guardado y se ha generado la nueva orden de transporte. Bultos modificados: ${r.bultos_modificados || 0}. Vehículos modificados: ${r.vehiculos_modificados || 0}.`),
     r.modo_aviso ? h("div", { class: "banner info" }, r.modo_aviso) : null,
   ].filter(Boolean));
   $("review-actions").hidden = true;

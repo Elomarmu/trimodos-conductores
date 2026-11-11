@@ -124,7 +124,10 @@ def test_resolve_pedido_inexistente_y_vacio():
 # --- sesión firmada
 def test_sesion_ok_manipulada_y_caducada():
     t = sign_session("k", 5, {1: "2026-01-01 10:00:00"}, now=1000)
-    assert verify_session("k", t, now=1001) == {"task_id": 5, "write_dates": {1: "2026-01-01 10:00:00"}, "verified": False}
+    assert verify_session("k", t, now=1001) == {
+        "task_id": 5, "write_dates": {1: "2026-01-01 10:00:00"},
+        "task_write_date": None, "verified": False,
+    }
     with pytest.raises(AppError):
         verify_session("otra", t, now=1001)
     with pytest.raises(AppError):
@@ -138,9 +141,16 @@ def test_sesion_ok_manipulada_y_caducada():
 def test_cliente_real_rechaza_operaciones_no_permitidas():
     from app.odoo_client import OdooClient
     c = OdooClient(get_settings())
-    for model, method in [("res.users", "read"), ("tms.package", "unlink"), ("project.task", "write"), ("ir.attachment", "search_read")]:
+    for model, method, args in [
+        ("res.users", "read", [[1]]),
+        ("tms.package", "unlink", [[1]]),
+        ("project.task", "write", [[1], {"name": "no"}]),
+        ("tms.package", "write", [[1], {"euro_pallet_qty": 5}]),
+        ("tms.goods", "create", [{"name": "MADERA", "adr_id": 1}]),
+        ("ir.attachment", "search_read", [[]]),
+    ]:
         with pytest.raises(PermissionError):
-            c._call(model, method, [[1]])
+            c._call(model, method, args)
 
 
 def test_api_resolve_y_goods():
@@ -152,7 +162,138 @@ def test_api_resolve_y_goods():
     assert r.status_code == 200 and r.json()["tarea"]["id"] == 204067
     r = c.post("/api/resolve-qr", json={"qr_text": "basura"})
     assert r.status_code == 400 and "error" in r.json()
-    assert len(c.get("/api/goods", params={"q": "a"}).json()["resultados"]) <= 10
+    result = c.get("/api/goods", params={"q": "a"}).json()
+    assert len(result["resultados"]) <= 10 and result["crear_nombre"] is None
+
+
+@pytest.mark.parametrize("plate", ["0019 LML", "0019-LML", "0019lml", "0019.lml", "0019 - lml"])
+def test_busqueda_matricula_normalizada(plate):
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    result = service.lookup_vehicles(odoo, get_settings(), r["sesion"], 204067, "tractor", plate)
+    assert result["encontrada"] is True
+    assert result["matricula_normalizada"] == "0019LML"
+    assert result["resultados"][0]["matricula"] == "0019LML"
+    assert result["resultados"][0]["modelo"] == "VARIOS/NACIONAL - tractor"
+
+
+def test_matricula_no_encontrada():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    result = service.lookup_vehicles(odoo, get_settings(), r["sesion"], 204067, "tractor", "9999-ZZZ")
+    assert result["encontrada"] is False and result["resultados"] == []
+    with pytest.raises(AppError) as e:
+        service.update(
+            odoo, get_settings(), r["sesion"], 204067, [],
+            vehiculos={"tractora": {"vehicle_id": None, "matricula": "9999-ZZZ"}},
+        )
+    assert e.value.code == "vehiculo_no_encontrado" and "9999ZZZ" in e.value.message
+
+
+def test_matriculas_duplicadas_se_muestran_y_exigen_seleccion():
+    odoo = MockOdoo()
+    odoo.vehicles[6274] = {
+        **odoo.vehicles[6273], "id": 6274, "license_plate": "0019-LML",
+        "display_name": "0019-LML", "model_id": [401, "MODELO ALTERNATIVO"],
+    }
+    r = _sesion(odoo)
+    result = service.lookup_vehicles(odoo, get_settings(), r["sesion"], 204067, "tractor", "0019LML")
+    assert [v["id"] for v in result["resultados"]] == [6273, 6274]
+    with pytest.raises(AppError) as e:
+        service.update(
+            odoo, get_settings(), r["sesion"], 204067, [],
+            vehiculos={"tractora": {"vehicle_id": None, "matricula": "0019LML"}},
+        )
+    assert e.value.code == "vehiculo_duplicado"
+
+
+def test_update_revalida_vehiculo_y_tipo_antes_de_escribir():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    wrong_type = {"vehicle_id": 6272, "matricula": "R6006BCL"}
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [], vehiculos={"tractora": wrong_type})
+    assert e.value.code == "tipo_vehiculo_incorrecto"
+    wrong_id = {"vehicle_id": 999999, "matricula": "0019LML"}
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=13)],
+                       vehiculos={"tractora": wrong_id})
+    assert e.value.code == "vehiculo_cambiado"
+    assert odoo.writes == [] and odoo.task_writes == []
+
+
+def test_update_guarda_tractora_remolque_en_tarea_y_pdf_de_muestra():
+    odoo = MockOdoo()
+    odoo.vehicles[6274] = {
+        "id": 6274, "license_plate": "0020ABC", "display_name": "0020ABC",
+        "model_id": [401, "MODELO TRACTORA NUEVO"], "vehicle_type": "tractor", "company_id": False,
+    }
+    odoo.vehicles[6275] = {
+        "id": 6275, "license_plate": "R6007BCL", "display_name": "R6007BCL",
+        "model_id": [402, "MODELO REMOLQUE NUEVO"], "vehicle_type": "trailer", "company_id": False,
+    }
+    r = _sesion(odoo)
+    out = service.update(
+        odoo, get_settings(), r["sesion"], 204067, [],
+        vehiculos={
+            "tractora": {"vehicle_id": 6274, "matricula": "0020-ABC"},
+            "remolque": {"vehicle_id": 6275, "matricula": "R6007BCL"},
+        },
+    )
+    assert out["vehiculos_modificados"] == 2 and out["bultos_modificados"] == 0
+    assert odoo.task_writes == [(204067, {"tractor_id": 6274, "trailer_id": 6275})]
+    note = odoo.notes[0][1]
+    assert "Modificado desde la app de conductores" in note
+    assert "Tractora: 0019LML (VARIOS/NACIONAL - tractor) → 0020ABC (MODELO TRACTORA NUEVO)" in note
+    assert "Remolque: R6006BCL (VARIOS/NACIONAL - trailer) → R6007BCL (MODELO REMOLQUE NUEVO)" in note
+    assert "Tractora: 0020ABC" in odoo.last_pdf_lines
+    assert "Remolque: R6007BCL" in odoo.last_pdf_lines
+
+
+def test_mercancia_nueva_solo_se_crea_al_guardar(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    odoo = MockOdoo()
+    monkeypatch.setattr("app.main._odoo", odoo)
+    c = TestClient(app)
+    result = c.get("/api/goods", params={"q": "cartones"})
+    assert result.status_code == 200 and result.json()["crear_nombre"] == "CARTONES"
+    assert any(g["name"] == "Cartón y papel" for g in result.json()["resultados"])
+    assert odoo.goods_creates == []
+
+    r = _sesion(odoo)
+    out = service.update(
+        odoo, get_settings(), r["sesion"], 204067,
+        [_cambio(goods_id=None, new_goods_name="  mineral   de hierro ", number_of_packages=13)],
+    )
+    assert odoo.goods_creates == [{"id": 6, "name": "MINERAL DE HIERRO"}]
+    assert odoo.packages[287102]["goods_id"] == [6, "MINERAL DE HIERRO"]
+    assert out["mercancias_nuevas_creadas"] == 1
+    assert "Mercancía: Cartón y papel → MINERAL DE HIERRO (mercancía nueva creada desde la app)" in odoo.notes[0][1]
+
+
+def test_mercancia_nueva_es_un_cambio_valido_sin_otras_ediciones():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    out = service.update(
+        odoo, get_settings(), r["sesion"], 204067,
+        [_cambio(goods_id=None, new_goods_name="PIEDRA NUEVA")],
+    )
+    assert out["bultos_modificados"] == 1
+    assert odoo.goods_creates == [{"id": 6, "name": "PIEDRA NUEVA"}]
+    assert odoo.writes == [(287102, {"goods_id": 6})]
+
+
+def test_dry_run_no_crea_mercancia(monkeypatch):
+    monkeypatch.setenv("DRY_RUN", "true")
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    service.update(
+        odoo, get_settings(), r["sesion"], 204067,
+        [_cambio(goods_id=None, new_goods_name="mineral de hierro", number_of_packages=13)],
+    )
+    assert odoo.goods_creates == [] and odoo.writes == [] and odoo.task_writes == []
 
 
 
@@ -162,7 +303,7 @@ def _sesion(odoo, **kw):
 
 
 def _cambio(**kw):
-    base = {"package_id": 287102, "goods_id": 2, "number_of_packages": 12, "euro_pallet_qty": 10, "shipping_weight": 8450.0}
+    base = {"package_id": 287102, "goods_id": 2, "number_of_packages": 12, "shipping_weight": 8450.0}
     base.update(kw)
     return base
 
@@ -182,7 +323,6 @@ def test_update_ok_genera_pdf_y_cambia_datos():
 
 @pytest.mark.parametrize("cambio, code", [
     ({"number_of_packages": -1}, "dato_invalido"),
-    ({"euro_pallet_qty": -5}, "dato_invalido"),
     ({"shipping_weight": 0}, "dato_invalido"),
     ({"shipping_weight": -3.0}, "dato_invalido"),
     ({"shipping_weight": float("nan")}, "dato_invalido"),
@@ -226,6 +366,15 @@ def test_update_detecta_cambios_hechos_por_otro():
     assert e.value.code == "datos_cambiados" and e.value.status == 409
 
 
+def test_update_revalida_write_date_de_la_tarea():
+    odoo = MockOdoo()
+    r = _sesion(odoo)
+    odoo.tasks[204067]["write_date"] = "2026-01-05 11:00:00"
+    with pytest.raises(AppError) as e:
+        service.update(odoo, get_settings(), r["sesion"], 204067, [_cambio(number_of_packages=13)])
+    assert e.value.code == "datos_cambiados" and e.value.status == 409
+
+
 def test_update_rechaza_tarea_no_editable():
     odoo = MockOdoo()
     r = service.resolve(odoo, get_settings(), order_name="S2621473", company="transargi")
@@ -247,7 +396,7 @@ def test_api_update_y_pdf():
     from app.main import app
     c = TestClient(app)
     r = c.post("/api/resolve-qr", json={"order_name": "S2621473", "company": "transargi"}).json()
-    body = {"task_id": r["tarea"]["id"], "sesion": r["sesion"], "cambios": [_cambio(euro_pallet_qty=11)]}
+    body = {"task_id": r["tarea"]["id"], "sesion": r["sesion"], "cambios": [_cambio(number_of_packages=13)]}
     u = c.post("/api/update", json=body)
     assert u.status_code == 200, u.text
     p = c.get(u.json()["pdf_url"])
@@ -255,6 +404,11 @@ def test_api_update_y_pdf():
     assert c.get("/api/pdf/1?token=x").status_code == 404
     bad = c.post("/api/update", json={"task_id": "x"})
     assert bad.status_code == 400 and "error" in bad.json()
+    bad_euro = c.post("/api/update", json={
+        "task_id": r["tarea"]["id"], "sesion": r["sesion"],
+        "cambios": [{"package_id": 287102, "euro_pallet_qty": 12}],
+    })
+    assert bad_euro.status_code == 400
 import json
 
 import httpx
@@ -270,7 +424,7 @@ def test_update_publica_nota_con_antes_y_ahora_y_imprime_una_vez():
     assert odoo.prints == [204067] and len(odoo.notes) == 1
     note = odoo.notes[0][1]
     assert "Modificado desde la app de conductores" in note and "PK2627486" in note
-    assert "Elementos: 12 → 20" in note and "Peso: 8.450 kg → 9.000 kg" in note and "Mercancía: Cartón y papel → Bebidas" in note
+    assert "Bultos: 12 → 20" in note and "Kilos: 8.450 kg → 9.000 kg" in note and "Mercancía: Cartón y papel → Bebidas" in note
     assert "sin QR" in note  # abierta por número de pedido
     assert out["adjunto_id"] == odoo.tasks[204067]["tms_transport_order_attachment_id"][0]
 
@@ -347,6 +501,8 @@ class FakeOdooServer:
             model, method, args, kw = p["args"][3], p["args"][4], p["args"][5], p["args"][6]
             self.calls.append((model, method, args, kw))
             result = True
+            if (model, method) == ("tms.goods", "create"):
+                result = 42
             if (model, method) == ("project.task", "read"):
                 result = [{"id": 204067, "tms_transport_order_attachment_id": [555, "x.pdf"]}]
             if (model, method) == ("ir.attachment", "read"):
@@ -377,12 +533,35 @@ def _real_client(monkeypatch):
 
 def test_cliente_real_escribe_solo_campos_permitidos(monkeypatch):
     c, srv = _real_client(monkeypatch)
-    for bad in [{"state": "done"}, {"name": "x"}, {}, {"number_of_packages": 1, "state": "done"}]:
+    for bad in [{"state": "done"}, {"name": "x"}, {}, {"number_of_packages": 1, "state": "done"},
+                {"euro_pallet_qty": 3}]:
         with pytest.raises(PermissionError):
             c.write_package(1, bad)
     assert srv.calls == []
     c.write_package(287102, {"number_of_packages": 5})
     assert srv.calls[-1][:3] == ("tms.package", "write", [[287102], {"number_of_packages": 5}])
+
+
+def test_cliente_real_escribe_vehiculos_y_crea_solo_nombre_de_mercancia(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    with pytest.raises(PermissionError):
+        c.write_task_vehicles(204067, {"name": "no"})
+    with pytest.raises(ValueError):
+        c.create_goods(" ")
+    c.write_task_vehicles(204067, {"tractor_id": 6273, "trailer_id": False})
+    assert srv.calls[-1][:3] == ("project.task", "write", [[204067], {"tractor_id": 6273, "trailer_id": False}])
+    assert c.create_goods("MADERA") == 42
+    assert srv.calls[-1][:3] == ("tms.goods", "create", [{"name": "MADERA"}])
+
+
+def test_cliente_real_busca_vehiculos_con_domino_limitado(monkeypatch):
+    c, srv = _real_client(monkeypatch)
+    c.search_vehicles("%0%0%1%9%L%M%L%", 7)
+    model, method, args, kwargs = srv.calls[-1]
+    assert (model, method) == ("fleet.vehicle", "search_read")
+    assert args[0] == ["&", ["license_plate", "ilike", "%0%0%1%9%L%M%L%"], "|",
+                        ["company_id", "=", False], ["company_id", "=", 7]]
+    assert kwargs["limit"] == 50 and "model_id" in kwargs["fields"]
 
 
 def test_cliente_real_nota_interna_en_la_tarea(monkeypatch):
@@ -611,6 +790,7 @@ def test_tarea_con_bultos_pero_sin_orden_generada_ni_marca_se_acepta():
     """Como el pedido S2621553 tras recrearse la tarea: en «Nuevo», con su bulto, sin PDF de orden todavía."""
     odoo = MockOdoo()
     odoo.tasks[300004]["tms_package_ids"] = [287103]
+    odoo.tasks[300004]["tractor_id"] = [6273, "0019LML"]
     odoo.orders[("S2600010", 7)] = [300004]
     r = service.resolve(odoo, get_settings(), order_name="S2600010", company="transargi")
     assert r["tarea"]["id"] == 300004 and r["editable"] is True and len(r["bultos"]) == 1

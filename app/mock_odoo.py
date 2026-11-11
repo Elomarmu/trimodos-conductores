@@ -1,5 +1,6 @@
 """Odoo simulado con los mismos métodos que OdooClient. Datos basados en el pedido de prueba S2621473."""
 import copy
+import re
 import uuid
 from datetime import datetime
 
@@ -20,32 +21,43 @@ GOODS = [
 class MockOdoo:
     def __init__(self):
         self.pdfs = {}
-        self.writes, self.notes, self.prints = [], [], []  # registro de lo que se "escribe", para los tests
+        self.writes, self.task_writes, self.goods_creates, self.notes, self.prints = [], [], [], [], []
+        self.goods = copy.deepcopy(GOODS)
         self.tasks = {
             204067: {
                 "id": 204067, "name": "S2621473", "company_id": [7, "TRANSARGI S.L.U"], "stage_id": [7, "En desarrollo"],
                 "is_transport_order": True, "tms_package_ids": [287102, 287103], "tms_transport_order_attachment_id": [900002, "Orden de transporte - S2621473 - 20260105101500.pdf"],
+                "write_date": "2026-01-05 10:15:00", "tractor_id": [6273, "0019LML"], "trailer_id": [6272, "R6006BCL"],
             },
             300001: {
                 "id": 300001, "name": "CAMION COMPLETO FRANCIA", "company_id": [1, "STINSA"], "stage_id": [1, "Nuevo"],
                 "is_transport_order": True, "tms_package_ids": [287103], "tms_transport_order_attachment_id": [900003, "Orden de transporte - S2621473 - 20260106090000.pdf"],
+                "write_date": "2026-01-06 09:00:00", "tractor_id": [6273, "0019LML"], "trailer_id": False,
             },
             300002: {
                 "id": 300002, "name": "ORDEN FACTURADA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [5, "Hecho"],
                 "is_transport_order": True, "tms_package_ids": [287102], "tms_transport_order_attachment_id": [900004, "Orden de transporte - S2600001 - 20260101090000.pdf"],
+                "write_date": "2026-01-01 09:00:00", "tractor_id": [6273, "0019LML"], "trailer_id": [6272, "R6006BCL"],
             },
             300003: {   # como el pedido real S2621553: marca is_transport_order a False pero con su orden generada
                 "id": 300003, "name": "T.I.- COMPLETO INTERNACIONAL", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [7, "En desarrollo"],
                 "is_transport_order": False, "tms_package_ids": [287102], "tms_transport_order_attachment_id": [900005, "Orden de transporte - S2621553 - 20261016151726.pdf"],
+                "write_date": "2026-10-16 15:17:26", "tractor_id": [6273, "0019LML"], "trailer_id": [6272, "R6006BCL"],
             },
             300004: {   # tarea normal del pedido: ni marcada ni con orden de transporte
                 "id": 300004, "name": "TAREA INTERNA", "company_id": [7, "TRANSARGI, S.L.U"], "stage_id": [1, "Nuevo"],
                 "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": False,
+                "write_date": "2026-01-01 09:00:00", "tractor_id": False, "trailer_id": False,
             },
             300005: {   # como las órdenes de contenedor reales: orden de transporte generada pero SIN bultos
                 "id": 300005, "name": "ST TRANSPORTE CONTENEDOR", "company_id": [1, "STINSA"], "stage_id": [1, "Nuevo"],
                 "is_transport_order": False, "tms_package_ids": [], "tms_transport_order_attachment_id": [900006, "Orden de transporte - S26099887 - 20261019152033.pdf"],
+                "write_date": "2026-10-19 15:20:33", "tractor_id": [6273, "0019LML"], "trailer_id": False,
             },
+        }
+        self.vehicles = {
+            6273: {"id": 6273, "license_plate": "0019LML", "display_name": "0019LML", "model_id": [364, "VARIOS/NACIONAL - tractor"], "vehicle_type": "tractor", "company_id": False},
+            6272: {"id": 6272, "license_plate": "R6006BCL", "display_name": "R6006BCL", "model_id": [365, "VARIOS/NACIONAL - trailer"], "vehicle_type": "trailer", "company_id": False},
         }
         # (pedido, id de compañía) -> tareas: el mismo número puede existir en STINSA y en TRANSARGI
         self.orders = {("S2621473", 7): [204067], ("S2621473", 1): [300001], ("S2600001", 7): [300002], ("S2621553", 7): [300003, 300004], ("S26099887", 1): [300005]}
@@ -83,6 +95,21 @@ class MockOdoo:
     def read_task(self, task_id):
         return copy.deepcopy(self.tasks.get(task_id))
 
+    def read_vehicles(self, vehicle_ids):
+        return [copy.deepcopy(self.vehicles[i]) for i in vehicle_ids if i in self.vehicles]
+
+    def search_vehicles(self, pattern, company_id, limit=50):
+        regex = ".*".join(re.escape(part) for part in pattern.split("%"))
+        matches = []
+        for vehicle in self.vehicles.values():
+            company = vehicle.get("company_id")
+            company = company[0] if company else None
+            if company not in (None, company_id):
+                continue
+            if re.search(regex, vehicle.get("license_plate") or "", re.IGNORECASE):
+                matches.append(copy.deepcopy(vehicle))
+        return matches[:limit]
+
     def read_packages(self, package_ids):
         return [copy.deepcopy(self.packages[i]) for i in package_ids if i in self.packages]
 
@@ -91,10 +118,31 @@ class MockOdoo:
 
     def search_goods(self, query, limit=10):
         q = (query or "").lower()
-        return [g for g in GOODS if q in g["name"].lower()][: min(limit, 10)]
+        found = [g for g in self.goods if q in g["name"].lower()]
+        if len(found) < limit and len(q.strip()) >= 4:
+            prefix = q.strip()[:4]
+            found += [g for g in self.goods if prefix in g["name"].lower()]
+        unique = {g["id"]: g for g in found}
+        return list(unique.values())[: min(limit, 10)]
 
     def goods_name(self, goods_id):
-        return next((g["name"] for g in GOODS if g["id"] == goods_id), None)
+        return next((g["name"] for g in self.goods if g["id"] == goods_id), None)
+
+    def create_goods(self, name):
+        goods_id = max(g["id"] for g in self.goods) + 1
+        self.goods.append({"id": goods_id, "name": name})
+        self.goods_creates.append({"id": goods_id, "name": name})
+        return goods_id
+
+    def write_task_vehicles(self, task_id, values):
+        task = self.tasks[task_id]
+        for field, value in values.items():
+            if field == "tractor_id":
+                task[field] = [value, self.vehicles[value]["license_plate"]] if value else False
+            elif field == "trailer_id":
+                task[field] = [value, self.vehicles[value]["license_plate"]] if value else False
+        task["write_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.task_writes.append((task_id, dict(values)))
 
     def write_package(self, package_id, values):
         pkg = self.packages[package_id]
@@ -108,13 +156,22 @@ class MockOdoo:
 
     def _sample_pdf(self, task_id, stamp):
         task = self.tasks[task_id]
-        lines = ["*** DOCUMENTO DE MUESTRA - SIMULACION, NO ES UNA ORDEN REAL ***", f"Generado: {stamp}", ""]
+        tractor = self.vehicles.get((task.get("tractor_id") or [None])[0])
+        trailer = self.vehicles.get((task.get("trailer_id") or [None])[0])
+        lines = [
+            "*** DOCUMENTO DE MUESTRA - SIMULACION, NO ES UNA ORDEN REAL ***",
+            f"Generado: {stamp}",
+            f"Tractora: {tractor['license_plate'] if tractor else '(en blanco)'}",
+            f"Remolque: {trailer['license_plate'] if trailer else '(en blanco)'}",
+            "",
+        ]
         for p in (self.packages[i] for i in task["tms_package_ids"]):
             lines += [
                 f"{p['name']}: {p['shipping_origin_id'][1]} -> {p['shipping_destination_id'][1]}",
                 f"   Mercancia: {(p['goods_id'] or [0, '-'])[1]}   Elementos: {p['number_of_packages']}   Euro: {p['euro_pallet_qty']}   Peso: {p['shipping_weight']:,.0f} kg",
                 "",
             ]
+        self.last_pdf_lines = lines
         return make_sample_pdf(f"Orden de transporte {task['name']}", lines)
 
     def print_order(self, task_id, company_id):

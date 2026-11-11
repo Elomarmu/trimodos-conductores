@@ -2,7 +2,7 @@
 
 En la pantalla principal tienes tres botones:
 
-- **DECA - Trimodos**: corregir la orden de transporte (mercancía, bultos, euro palets o peso) escaneando su código QR.
+- **DECA - Trimodos**: corregir mercancía, bultos, kilos, tractora y remolque de la orden de transporte escaneando su código QR. Los euro palets se muestran en solo lectura.
 - **Carga de PR · foto del albarán**: dar de alta un viaje de papel recuperado (PR) de SAICA haciendo una foto al albarán y al DI de residuos.
 - **Cómo se usa (guía)**: esta guía.
 
@@ -14,19 +14,22 @@ En la pantalla principal tienes tres botones:
 
 ## 1. DECA - Trimodos: corregir la orden de transporte
 
-**Cuándo usarla:** al cargar, si cambia la mercancía, los bultos, los euro palets o el peso respecto a la orden de papel. Ten a mano la orden (en papel o en PDF): lleva un **código QR**.
+**Cuándo usarla:** al cargar, si cambian la mercancía, los bultos, los kilos, la tractora o el remolque respecto a la orden de papel. Ten a mano la orden (en papel o en PDF): lleva un **código QR**.
 
 1. **Pulsa «DECA - Trimodos».**
 2. **Apunta la cámara al código QR de la orden.** Se lee solo, no hace falta pulsar nada.
     - *Si no se lee* (poca luz, papel arrugado): escribe a mano el número de pedido, por ejemplo **S2621473**, y **elige la empresa: TRANSARGI o STINSA**. Después pulsa «Buscar pedido».
-3. **Revisa los datos.** Verás cada lugar de carga y descarga con la mercancía, los elementos, los euro palets y el peso **tal como están ahora en el sistema** (pueden ser distintos al papel).
+3. **Revisa los datos.** La tractora y el remolque aparecen una vez, encima de los lugares de carga y descarga. Debajo verás cada lugar con la mercancía, los bultos, los euro palets y los kilos **tal como están ahora en el sistema** (pueden ser distintos al papel).
 4. **Cambia solo lo que haya cambiado.**
-    - *Mercancía:* escribe el nombre y **elige una de la lista**.
-    - *Elementos, euro palets y peso (kg):* escribe el número. Para decimales usa la coma.
+    - *Tractora:* escribe la matrícula; es obligatoria. Se aceptan espacios, guiones, puntos y minúsculas. Al salir del campo, espera a que aparezca «Encontrada» y comprueba la matrícula que muestra la app.
+    - *Remolque:* igual que la tractora, pero puedes dejarlo en blanco si la orden no lleva remolque. Si la app avisa de que el vehículo parece del tipo contrario, comprueba los datos antes de confirmar.
+    - *Mercancía:* escribe el nombre y **elige una de la lista**. Si no aparece, puedes elegir «Crear mercancía nueva». Comprueba primero las parecidas y confirma el nombre en mayúsculas; se creará solo al guardar la orden.
+    - *Bultos y kilos (kg):* escribe el número. Para decimales usa la coma.
+    - *Euro palets:* se siguen mostrando, pero son **solo lectura**.
     - Debajo de lo que cambies verás **«Antes:»** con el dato que había.
     - Pulsa **«Revisar cambios»**.
 5. **Comprueba el resumen.** Lo que cambia sale resaltado: *Antes → Ahora*. Si algo está mal, pulsa «Volver y corregir».
-6. **Pulsa «Guardar cambios»** y confirma con **«Sí, guardar»**. Si dudas, pulsa «No, volver»: no se guarda nada.
+6. **Pulsa «Guardar cambios»** y confirma con **«Sí, guardar»**. Si dudas, pulsa «No, volver»: no se guarda nada. Una mercancía nueva tampoco se crea si cancelas.
 7. **Descarga o abre la nueva orden de transporte** (PDF) con los datos nuevos. Puedes compartirla con **«Compartir»**. **Usa siempre esta nueva orden**: la de papel ya no vale.
 
 ## 2. Carga de PR: viaje de papel recuperado de SAICA
@@ -56,6 +59,7 @@ En la pantalla principal tienes tres botones:
 | «Esta orden tiene una versión más nueva» | El papel que llevas es antiguo. Trabaja con los datos que ves en pantalla y descarga la orden nueva al terminar. |
 | «Esta orden está en la etapa «…». Solo se puede modificar en «Nuevo» o «En desarrollo»» | La orden ya ha avanzado y no se puede cambiar desde la app. Llama a la oficina. |
 | «Esta orden todavía no tiene creados los lugares de carga y descarga (bultos). Ponte en contacto con tu responsable de tráfico.» | En la oficina aún no han preparado esa orden. Llama a tu responsable de tráfico; desde la app no se puede corregir. |
+| «No encontramos la matrícula…» | Comprueba lo escrito. Si sigue sin aparecer, avisa a tu responsable de tráfico; no se puede guardar una matrícula que no exista en el sistema. |
 | «Es posible que el conjunto supere la MMA autorizada, confirme que es correcto el peso» | El peso es alto y puedes estar cerca del límite de la MMA (masa máxima autorizada). Si es correcto, pulsa **«Sí, es correcto»**. Si te has equivocado, **«No, corregir»**. |
 | «Esta orden ha cambiado mientras la editabas» | Alguien de la oficina la ha modificado. La app la recarga: revisa y repite el cambio. |
 | Carga de PR: «Este albarán ya estaba guardado» | Ese viaje ya se dio de alta (por ti o por la oficina). No hace falta repetirlo. |

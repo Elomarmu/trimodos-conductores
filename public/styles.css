@@ -129,6 +129,7 @@ input[type=text], input[type=password], textarea {
 input[type=text]:focus-visible, input[type=password]:focus-visible, textarea:focus-visible { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 35%, transparent); }
 input::placeholder { color: #8a8a8a; opacity: 1; }
 input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-color: var(--line); -webkit-text-fill-color: var(--muted); opacity: 1; }
+input[type=text][readonly] { color: var(--muted); background: #0a0a0a; border-color: var(--line); }
 
 /* ---- Pantalla 3: datos y edición ---- */
 /* Cada lugar se lee como la orden de papel: cabecera (lugar y bulto), ruta, y casillas con su etiqueta encima. */
@@ -145,6 +146,12 @@ input[type=text]:disabled { color: var(--muted); background: #0a0a0a; border-col
 .sugg { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .sugg:empty { display: none; }
 .sugg .btn { min-height: 52px; justify-content: flex-start; text-align: left; font-weight: 600; border-color: var(--line); }
+.vehicle-status { margin: 6px 0 0; min-height: 1.4em; font-weight: 650; }
+.vehicle-status.found { color: var(--ok); }
+.vehicle-status.warn { color: var(--warn); }
+.vehicle-status.bad { color: var(--bad); }
+.vehicle-confirm { display: flex; flex-wrap: wrap; gap: 8px; }
+.vehicle-confirm .btn { flex: 1 1 170px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* ---- Pantalla 4: resumen y resultado ---- */

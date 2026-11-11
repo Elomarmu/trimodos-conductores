@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from . import service
 from .config import get_settings
@@ -79,17 +79,31 @@ class ResolveBody(BaseModel):
 
 
 class Cambio(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     package_id: int
     goods_id: int | None = None
+    new_goods_name: str | None = None
     number_of_packages: int | None = None
-    euro_pallet_qty: int | None = None
     shipping_weight: float | None = None
 
 
+class VehiculoSeleccionado(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    vehicle_id: int | None = None
+    matricula: str = ""
+    confirmar_tipo_incorrecto: bool = False
+
+
 class UpdateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     task_id: int
     sesion: str
     cambios: list[Cambio]
+    tractora: VehiculoSeleccionado | None = None
+    remolque: VehiculoSeleccionado | None = None
 
 
 @app.exception_handler(RequestValidationError)
@@ -131,7 +145,17 @@ def resolve_qr(body: ResolveBody):
 
 @app.post("/api/update", dependencies=access)
 def update(body: UpdateBody):
-    result = service.update(get_odoo(), get_settings(), body.sesion, body.task_id, [c.model_dump() for c in body.cambios])
+    vehiculos = None
+    if {"tractora", "remolque"} & body.model_fields_set:
+        vehiculos = {}
+        for role in ("tractora", "remolque"):
+            if role in body.model_fields_set:
+                selection = getattr(body, role)
+                vehiculos[role] = selection.model_dump() if selection else {"vehicle_id": None, "matricula": ""}
+    result = service.update(
+        get_odoo(), get_settings(), body.sesion, body.task_id,
+        [c.model_dump() for c in body.cambios], vehiculos=vehiculos,
+    )
     log.info("update tarea=%s bultos=%s", body.task_id, result["bultos_modificados"])
     return result
 
@@ -158,7 +182,21 @@ def pdf(attachment_id: int, token: str = Query("", max_length=80)):
 
 @app.get("/api/goods", dependencies=access)
 def goods(q: str = Query("", max_length=60)):
-    return {"resultados": get_odoo().search_goods(q.strip(), 10)}
+    query = q.strip()
+    resultados = get_odoo().search_goods(query, 10) if query else []
+    nombre_nuevo = service.normalize_goods_name(query)
+    existe = any(service.normalize_goods_name(g["name"]) == nombre_nuevo for g in resultados)
+    return {"resultados": resultados, "crear_nombre": nombre_nuevo if len(nombre_nuevo) >= 2 and not existe else None}
+
+
+@app.get("/api/vehicles", dependencies=access)
+def vehicles(
+    task_id: int,
+    sesion: str = Query(..., max_length=2048),
+    tipo: str = Query(..., pattern="^(tractor|trailer)$"),
+    matricula: str = Query("", max_length=40),
+):
+    return service.lookup_vehicles(get_odoo(), get_settings(), sesion, task_id, tipo, matricula)
 
 
 @app.middleware("http")

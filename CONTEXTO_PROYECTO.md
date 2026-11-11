@@ -4,13 +4,13 @@
 > Fecha: 19/10/2026. Detalle técnico completo en `README.md`; guía para conductores en `GUIA_CONDUCTORES.md`.
 
 ## 1. Qué es
-PWA móvil (HTML/JS sin framework + backend FastAPI) para que los conductores de Grupo Trimodos / TRANSARGI / STINSA **corrijan al cargar la mercancía, elementos (bultos), euro palets y peso** de la orden de transporte y descarguen la **nueva orden en PDF**. Se integra con Odoo por JSON-RPC desde un backend intermedio: **el móvil nunca ve credenciales de Odoo**.
+PWA móvil (HTML/JS sin framework + backend FastAPI) para que los conductores de Grupo Trimodos / TRANSARGI / STINSA corrijan **mercancía, bultos y kilos por lugar**, y **tractora/remolque por orden**, y descarguen la **nueva orden en PDF**. Los euro palets se muestran en solo lectura. Se integra con Odoo por JSON-RPC desde un backend intermedio: **el móvil nunca ve credenciales de Odoo**.
 
 Flujo (4 pantallas): menú → escáner QR (o número de pedido + empresa) → datos actuales y edición → resumen «Antes → Ahora» + «¿Seguro?» → PDF (abrir / descargar / compartir). Todo en español, botones grandes, tema oscuro de alto contraste, instalable en Android e iPhone.
 
 ## 2. Estado (qué está hecho)
-Fases 1-5 completadas: lectura QR/pedido, pantallas, escritura real + nota interna + impresión del PDF, PWA instalable (funciona sin cobertura), publicación en Vercel. Añadido después: franja de marca por empresa, guía dentro de la app, código de acceso compartido, soporte de Odoo 18, mercancía en blanco, aviso de peso por MMA.
-**Calidad:** 91 tests (`pytest`) + prueba de navegador completa con cámara simulada (`scripts/prueba_navegador.py`). Todo subido a GitHub.
+Fases 1-5 completadas: lectura QR/pedido, pantallas, escritura + nota interna + impresión del PDF, PWA instalable (funciona sin cobertura), publicación en Vercel. Añadido después: franja de marca por empresa, guía dentro de la app, código de acceso compartido, soporte de Odoo 18, mercancía en blanco, aviso de peso por MMA, validación de tractora/remolque y creación diferida de mercancías.
+**Calidad:** `pytest -q`: 142 pasados, 27 omitidos; prueba de navegador (`scripts/prueba_navegador.py`) completa, incluidos vehículos y mercancía nueva. Las escrituras reales siguen requiriendo autorización antes de probarlas.
 
 ## 3. Entornos y datos de referencia
 | | |
@@ -24,17 +24,23 @@ Fases 1-5 completadas: lectura QR/pedido, pantallas, escritura real + nota inter
 | Usuario técnico v18 | `agente.trafico@transargi.com` (clave API para datos; contraseña web solo para imprimir) |
 | **Hoy Vercel apunta a** | **la v18 de pruebas**, con `DRY_RUN=false` (los guardados escriben de verdad ahí) |
 
-Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_ids` (`tms.package`). Campos editables (solo esos 4): `goods_id`, `number_of_packages`, `euro_pallet_qty`, `shipping_weight`. Informe: `tms_reporting.tms_transportation_order` (id 412). El QR del PDF lleva `/web/content/<adjunto>?access_token=…`; el token se valida contra el adjunto.
+Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_ids` (`tms.package`). Campos editables por bulto: `goods_id`, `number_of_packages`, `shipping_weight`; `euro_pallet_qty` es solo lectura. La tarea guarda los vehículos en `tractor_id` y `trailer_id` (`fleet.vehicle`); la matrícula está en `license_plate`. En las bases v15 y v18 probadas, el informe 412 (`tms_reporting.tms_transportation_order`) usa esos dos campos para la cabecera «Tractora / Remolque». El QR del PDF lleva `/web/content/<adjunto>?access_token=…`; el token se valida contra el adjunto.
 
 ## 4. Reglas de negocio acordadas
 - **Editable solo si la etapa de la tarea es «Nuevo» o «En desarrollo»** (`EDITABLE_STAGES`). Sustituye a las reglas de cerrada/facturada/bultos.
-- Enteros ≥ 0, peso > 0, mercancía existente. **La mercancía se puede dejar en blanco** (borrar el texto); si se escribe algo hay que elegir de la lista.
+- Bultos entero ≥ 0, peso > 0. Euro palets se muestran sin poder modificarse. **La mercancía se puede dejar en blanco**; si se elige una mercancía existente se selecciona de la lista. La nueva se normaliza a mayúsculas, se confirma y solo se crea al guardar; `tms.goods.name` es el único campo obligatorio conocido.
+- La tractora es obligatoria y el remolque opcional. Se normalizan las matrículas ignorando todo lo que no sea letra o número, se buscan en Odoo y se revalidan en servidor; no se crean vehículos. Se admiten vehículos sin compañía o de la compañía de la tarea. Las matrículas duplicadas requieren selección; el tipo de vehículo se advierte y se puede confirmar.
+- Investigación de flota: `fleet.vehicle.license_plate` guarda la matrícula; `vehicle_type` distingue tractor/remolque (también se ve reflejado en el nombre del modelo). Hay vehículos sin compañía y otros asignados a STINSA o TRANSARGI; la app solo ofrece los de la compañía de la tarea o sin compañía.
+- En las comprobaciones de solo lectura v15 y v18 existen los campos, funciona `name_search`, el informe 412 está instalado y las credenciales de cada entorno abren sesión web. En v18 el usuario técnico tiene los permisos nuevos necesarios (escritura de tarea, creación de mercancía y lectura de flota). Aún conserva permisos sobrantes: `project.task.unlink`, `tms.package.create/unlink`, `tms.goods.write` y `sale.order.write`; solicitar a Tecnativa que los retire.
+- `tms.goods.name` es el único campo obligatorio por metadatos; `adr_id` es opcional. No se imprimió un PDF real porque Odoo crea un adjunto nuevo; el PDF de muestra simulado valida tractora y remolque.
 - **Peso:** no hay límite. Si el peso puesto supera `PESO_AVISO_KG` (27.000 por defecto) sale «Es posible que el conjunto supere la MMA autorizada, confirme que es correcto el peso» y, si confirma, pasa al resumen. 44.000 kg es la MMA del conjunto, **no** el peso de la mercancía (error corregido). El umbral vive solo en el servidor.
 - **Pedido escrito a mano:** hay que elegir empresa (el mismo número puede existir en STINSA y TRANSARGI).
 - Una tarea cuenta como orden de transporte si tiene `is_transport_order`, **o** una orden ya generada, **o** bultos.
 - **Orden sin bultos** (p. ej. contenedor/grupaje): se lee pero no se edita; mensaje «Ponte en contacto con tu responsable de tráfico».
-- Antes de escribir se revalida: sesión firmada, bultos de esa tarea, `write_date` sin cambios, etapa.
-- Cada guardado deja una **nota interna** en la tarea («Modificado desde la app de conductores», antes → ahora). La última pantalla no muestra avisos de peso.
+- Antes de escribir se revalida: sesión firmada, bultos de esa tarea, `write_date` de tarea y bultos, etapa y matrículas actuales en Odoo.
+- Cada guardado deja una **nota interna** en la tarea («Modificado desde la app de conductores», antes → ahora, incluidos vehículos y mercancía nueva). Se conserva esa cabecera para n8n; «Preparar aviso» usa el cuerpo completo de la nota y no requiere cambio.
+- El usuario técnico necesita lectura de `fleet.vehicle`, escritura de `tractor_id`/`trailer_id` en `project.task` y creación de `tms.goods` con `name`. No imprimir un PDF real para validar el cambio sin permiso: imprimir crea un adjunto nuevo.
+- La app de oficina y almacén vive en `/oficina/`; `scripts/generar_oficina.py` la genera desde `public/index.html` y debe ejecutarse tras cambiar la carcasa. Usa `APP_OFICINA_CODE` si está configurado (mínimo 8 caracteres); si no, comparte `APP_ACCESS_CODE`. No modificar ni añadir a git el JSON local de n8n sin permiso.
 - Acceso: **código compartido** obligatorio en modo real (pantalla única la primera vez por dispositivo). Pendiente futuro: PIN por conductor.
 
 ## 5. Lecciones importantes (no redescubrir)
@@ -46,7 +52,7 @@ Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_id
 - El usuario técnico tiene **permisos de más** (borrar tareas/bultos, etc.). La app no puede hacerlo (lista blanca en `odoo_client.py`, con tests), pero conviene recortarlos.
 
 ## 6. Cómo trabajamos (preferencias del usuario)
-- Producción v15 **solo con el pedido S2621473 y con permiso expreso cada vez**; la v18 es entorno de pruebas (aun así, pedir permiso antes de escribir).
+- Producción v15 **solo con el pedido S2621473 y con permiso expreso cada vez**; la v18 es entorno de pruebas (aun así, pedir permiso antes de escribir o imprimir).
 - `DRY_RUN=true` hace todo menos escribir/publicar/imprimir.
 - El usuario **no tiene experiencia con servidores**: instrucciones paso a paso y en español.
 - **Preguntar «¿lo subo?» antes de `git push`** (el push despliega solo en Vercel); el usuario responde «sube».

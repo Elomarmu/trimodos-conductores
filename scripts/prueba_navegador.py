@@ -8,6 +8,7 @@ NAVEGADOR=msedge, NAVEGADOR=chrome o NAVEGADOR=chromium (este último lo descarg
 
 Arranca su propio servidor en modo SIMULADO (puerto 8765): no toca Odoo.
 """
+import json
 import os
 import subprocess
 import sys
@@ -76,11 +77,16 @@ def main():
             ctx = navegador.new_context(viewport={"width": 390, "height": 844}, permissions=["camera"], accept_downloads=True)
             pg = ctx.new_page()
             errores = []
-            pg.on("pageerror", lambda e: errores.append(str(e)))
+            pg.on("pageerror", lambda e: errores.append(f"{e}: {e.stack}"))
             pg.on("console", lambda m: errores.append(m.text) if m.type == "error" else None)
 
             print("Menú")
-            pg.goto(BASE); pg.wait_for_selector("#modo:not([hidden])")
+            pg.goto(BASE)
+            try:
+                pg.wait_for_selector("#modo:not([hidden])")
+            except Exception:
+                print("Errores del navegador:", errores)
+                raise
             titulo = pg.evaluate("() => { const h = document.querySelector('#s-menu h1'); const r = h.getBoundingClientRect(); return [h.textContent, getComputedStyle(h).textAlign, (r.left + r.right) / 2, window.innerWidth / 2]; }")
             comprobar(titulo[0] == "DECA - Trimodos", f"el título del menú es «{titulo[0]}»")
             comprobar(titulo[1] == "center" and abs(titulo[2] - titulo[3]) < 2, f"está centrado (centro del título {titulo[2]:.0f}px, centro de la pantalla {titulo[3]:.0f}px)")
@@ -209,6 +215,45 @@ def main():
             pg.screenshot(path=str(SALIDA / "p4_resultado.png"))
             pg.click("#s-review [data-go=menu]")
             comprobar(pg.is_visible("#s-menu"), "«Volver al menú» limpia y vuelve al inicio")
+
+            print("Campos nuevos: vehículos y mercancía nueva")
+            ctx5 = navegador.new_context(viewport={"width": 390, "height": 844})
+            pg5 = ctx5.new_page()
+            pg5.add_init_script(f"localStorage.setItem('codigo-acceso', '{CODIGO}')")
+            pg5.add_init_script("Object.defineProperty(navigator, 'mediaDevices', {value: undefined})")
+            updates = []
+            pg5.on("request", lambda req: updates.append(json.loads(req.post_data))
+                   if req.url.endswith("/api/update") and req.post_data else None)
+            pg5.goto(BASE); pg5.wait_for_selector("#modo:not([hidden])")
+            pg5.click("#btn-scan"); pg5.click("[data-company=transargi]"); pg5.fill("#order", "S2621473"); pg5.click("#btn-order")
+            pg5.wait_for_selector("#s-edit:not([hidden])")
+            comprobar(pg5.locator("#packages input[aria-readonly=true]").count() == 2, "euro palets se muestran en solo lectura")
+            comprobar(pg5.get_attribute("#vehicle-tractora", "autocapitalize") == "characters", "la matrícula usa autocapitalización")
+            pg5.fill("#vehicle-tractora", "9999 - zzz"); pg5.locator("#vehicle-tractora").press("Tab")
+            pg5.wait_for_function("document.querySelector('[data-key=tractora] .vehicle-status').textContent.includes('No encontramos')")
+            comprobar("9999ZZZ" in pg5.inner_text("[data-key=tractora]"), "una matrícula inexistente muestra un aviso claro al salir del campo")
+            pg5.fill("#vehicle-tractora", "0019 - lml"); pg5.locator("#vehicle-tractora").press("Tab")
+            pg5.wait_for_function("document.querySelector('[data-key=tractora] .vehicle-status').textContent.includes('Encontrada en Odoo')")
+            comprobar("0019LML" in pg5.inner_text("[data-key=tractora]"), "la matrícula normalizada muestra el valor guardado en Odoo")
+            pg5.fill("#vehicle-remolque", ""); pg5.locator("#vehicle-remolque").press("Tab")
+            comprobar("Opcional" in pg5.inner_text("[data-key=remolque]"), "el remolque se puede dejar en blanco")
+            pg5.fill("#g-287102", "piedra nueva")
+            pg5.wait_for_selector("#packages .sugg button")
+            pg5.locator("#packages .sugg button").filter(has_text="Crear mercancía nueva").click()
+            pg5.wait_for_selector("#confirm:not([hidden])")
+            comprobar('Se creará la mercancía "PIEDRA NUEVA"' in pg5.inner_text("#confirm"), "la mercancía nueva pide confirmación explícita")
+            pg5.click("#btn-yes")
+            pg5.click("#btn-review"); pg5.wait_for_selector("#s-review:not([hidden])")
+            comprobar("mercancía nueva creada desde la app" in pg5.inner_text("#review-body"), "el resumen identifica la mercancía que se creará")
+            comprobar("Antes: R6006BCL" in pg5.inner_text("#review-body") and "Ahora: (en blanco)" in pg5.inner_text("#review-body"),
+                      "el resumen incluye el cambio de remolque")
+            pg5.click("#btn-save"); pg5.click("#btn-yes")
+            pg5.wait_for_selector("#done-actions:not([hidden])")
+            comprobar(bool(updates) and updates[0]["cambios"][0]["new_goods_name"] == "PIEDRA NUEVA",
+                      "la mercancía normalizada se envía para crear solo al guardar")
+            comprobar(updates[0]["tractora"]["matricula"] == "0019 - lml" and updates[0]["remolque"]["vehicle_id"] is None,
+                      "el guardado envía las matrículas comprobadas y permite quitar el remolque")
+            ctx5.close()
 
             print("PWA")
             pg.goto(BASE)
