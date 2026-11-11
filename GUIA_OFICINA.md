@@ -65,12 +65,19 @@ Lista de las cargas a las que les falta algo: foto del albarán, DI de residuos,
 - Pulsa **«Completar»** y se abre esa carga en «Modificar una carga».
 - Revísala a menudo, sobre todo antes de cerrar un tren.
 
-### Cargar la composición del tren
+### Composición del tren
+
+Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almacén con su **nº de convoy de entrada** (el del listado de Captrain).
+
+- El **nº de convoy de salida no es el mismo que el de entrada**. Cuando lo sepas, escríbelo en **«Nº convoy de salida»** y pulsa **«Guardar el convoy de salida»**.
+- Se cambia en la Excel del tren, en las cargas ya asignadas y en el correo del tren. Si te equivocas, escríbelo otra vez y guarda.
+
+Para un **tren nuevo**:
 
 1. Pulsa **«Subir el listado del tren»**. Puedes subir el PDF de Captrain o fotos de la primera y la última hoja.
 2. La app lee los vagones y las cajas móviles. Revisa:
     - el **Nº de tren**: es nuestro número correlativo y la app propone el siguiente;
-    - el **Nº convoy** (el de Captrain);
+    - el **Nº convoy de entrada** (el de Captrain) y, si ya lo sabes, el **de salida** (si no, se pone después);
     - la **fecha**;
     - la lista de vagones y cajas.
 3. Pulsa **«Guardar la composición del tren»**.

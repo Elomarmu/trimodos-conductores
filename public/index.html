@@ -156,7 +156,7 @@
   <button id="of-registrar" class="btn primary">Registrar un viaje (foto del albarán)</button>
   <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
   <button id="of-pendientes" class="btn secondary">Cargas con documentos o datos pendientes</button>
-  <button id="of-tren" class="btn secondary">Cargar la composición del tren</button>
+  <button id="of-tren" class="btn secondary">Composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
   <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
@@ -177,7 +177,16 @@
 <!-- Oficina: composición del tren -->
 <main id="s-pr-tren" class="screen" hidden>
   <h1>Composición del tren</h1>
+  <form id="tren-actual" class="pkg" hidden novalidate>
+    <h2>Tren cargado ahora</h2>
+    <p id="tren-actual-txt"></p>
+    <div class="field"><label for="tren-salida">Nº convoy de salida</label>
+      <input id="tren-salida" type="text" autocomplete="off" placeholder="El de salida (no es el mismo que el de entrada)"></div>
+    <button type="submit" class="btn secondary">Guardar el convoy de salida</button>
+    <p id="tren-actual-ok" class="banner info" hidden></p>
+  </form>
   <div id="tren-paso1">
+    <h2>Tren nuevo</h2>
     <p class="hint">Sube el listado de vagones y cajas móviles del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>
     <label class="btn primary huge" for="tren-archivo">Subir el listado del tren</label>
     <input id="tren-archivo" class="oculto" type="file" accept="application/pdf,image/*" multiple>
@@ -186,8 +195,10 @@
     <div class="pkg">
       <div class="row2">
         <div class="field"><label for="tren-num">Nº de tren</label><input id="tren-num" type="text" inputmode="numeric" autocomplete="off"></div>
-        <div class="field"><label for="tren-convoy">Nº convoy</label><input id="tren-convoy" type="text" autocomplete="off"></div>
+        <div class="field"><label for="tren-convoy">Nº convoy de entrada</label><input id="tren-convoy" type="text" autocomplete="off"></div>
       </div>
+      <div class="field"><label for="tren-salida-nuevo">Nº convoy de salida (si ya lo sabes; si no, se pone después)</label>
+        <input id="tren-salida-nuevo" type="text" autocomplete="off"></div>
       <div class="field"><label for="tren-fecha">Fecha</label><input id="tren-fecha" type="date"></div>
     </div>
     <div id="tren-avisos" class="avisos"></div>

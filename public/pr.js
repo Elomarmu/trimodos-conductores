@@ -13,6 +13,32 @@ $("btn-pr-almacen").addEventListener("click", () => abrirAlmacen(false));
 $("of-tren").addEventListener("click", () => {
   $("tren-paso1").hidden = false; $("tren-paso2").hidden = true; $("tren-hecho").hidden = true;
   go("pr-tren");
+  pintarTrenActual();
+});
+
+// Tren cargado ahora: el nº de convoy de entrada (el del listado) no es el de salida; la oficina lo pone o lo corrige aquí.
+async function pintarTrenActual() {
+  $("tren-actual").hidden = true; $("tren-actual-ok").hidden = true;
+  try {
+    const e = await api("/api/pr/tren/actual");
+    $("tren-actual-txt").textContent = `Tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` · convoy de entrada ${e.convoy}` : "") + ".";
+    $("tren-salida").value = e.convoy_salida || "";
+    $("tren-actual").hidden = false;
+  } catch { /* todavía no hay ningún tren */ }
+}
+$("tren-actual").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  clearError();
+  busy("Guardando…");
+  try {
+    const r = await post("/api/pr/tren/salida", { convoy_salida: $("tren-salida").value.trim() });
+    if (r.simulado) showError("Modo de prueba: no se ha guardado nada.");
+    else {
+      $("tren-salida").value = r.convoy_salida || "";
+      $("tren-actual-ok").textContent = r.convoy_salida ? `Convoy de salida ${r.convoy_salida} guardado. La Excel del tren y las cargas ya lo llevan.` : "Convoy de salida borrado.";
+      $("tren-actual-ok").hidden = false;
+    }
+  } catch (e) { showError(e.message); } finally { busy(null); }
 });
 $("of-asignar").addEventListener("click", () => abrirAlmacen(true));
 $("of-completar").addEventListener("click", () => {
@@ -390,6 +416,7 @@ $("tren-archivo").addEventListener("change", async (ev) => {
     composicion = t;
     $("tren-num").value = v.siguiente_tren || "";
     $("tren-convoy").value = t.numero_tren || "";
+    $("tren-salida-nuevo").value = "";
     $("tren-fecha").value = t.fecha || new Date().toISOString().slice(0, 10);
     $("tren-avisos").replaceChildren(...(t.avisos || []).map((a) => h("div", { class: "banner warn" }, a)));
     $("tren-cajas").replaceChildren(...t.cajas.map((c) => h("div", { class: "fila" },
@@ -414,7 +441,7 @@ async function guardarComposicion(num, confirmado = false) {
   try {
     let r;
     try {
-      r = await post("/api/pr/tren/composicion", { tren: num, convoy: val("tren-convoy"), fecha: val("tren-fecha"), cajas: composicion.cajas, confirmado });
+      r = await post("/api/pr/tren/composicion", { tren: num, convoy: val("tren-convoy"), convoy_salida: val("tren-salida-nuevo"), fecha: val("tren-fecha"), cajas: composicion.cajas, confirmado });
     } catch (e) {
       if (e.code !== "tren_repetido") throw e;
       busy(null);   // composición repetida: se enseña el aviso y hay que confirmar otra vez
@@ -490,7 +517,8 @@ async function cargarAlmacen() {
 function pintarAlmacen(e) {
   alm.estado = e;
   $("alm-form").hidden = false;
-  $("alm-tren").textContent = `Está cargado el tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` (convoy ${e.convoy})` : "") + ".";
+  const convoy = e.convoy_salida || e.convoy;
+  $("alm-tren").textContent = `Está cargado el tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (convoy ? ` (convoy ${convoy})` : "") + ".";
   const libres = e.cajas.filter((c) => !c.carga && !c.vacia), llenas = e.cajas.filter((c) => c.carga || c.vacia);
   $("alm-caja").replaceChildren(h("option", { value: "" }, libres.length ? "— Elige la caja —" : "— No quedan cajas libres —"),
     ...libres.map((c) => h("option", { value: c.caja_movil }, textoCaja(c))));

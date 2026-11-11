@@ -386,7 +386,8 @@ class CajaTren(BaseModel):
 class TrenIn(BaseModel):
     confirmado: bool = False         # ya ha visto el aviso de composición repetida y sigue
     tren: int
-    convoy: str = Field("", max_length=20)
+    convoy: str = Field("", max_length=20)            # nº de convoy de entrada (el del listado de Captrain)
+    convoy_salida: str = Field("", max_length=20)     # nº de convoy de salida (si ya se sabe; si no, después)
     fecha: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     cajas: list[CajaTren] = Field(min_length=1, max_length=60)
 
@@ -484,15 +485,40 @@ def tren_composicion(body: TrenIn):
             raise AppError(" ".join(repetida) + " ¿Quieres guardarla igualmente?", 409, "tren_repetido")
     if get_settings().dry_run:
         return {"simulado": True, "tren": body.tren}
-    datos = _pr(O.guardar_composicion, odoo, body.tren, body.convoy, body.fecha, cajas)
-    # El libro CARTON PAJA TREN <n> (cajas aún vacías + hoja COMPOSICION) a SharePoint › Automatizacion (n8n), sin correo.
+    datos = _pr(O.guardar_composicion, odoo, body.tren, body.convoy, body.fecha, cajas, body.convoy_salida)
+    # El libro CARTON PAJA TREN <n> (cajas aún vacías + hoja COMPOSICION) a SharePoint › carpeta del tren, sin correo.
     # Al terminar el tren se vuelve a subir con las cargas.
-    nombre = f"CARTON PAJA TREN {datos['tren']}.xlsx"
-    libro = X.carton_paja_tren(datos["tren"], body.convoy, body.fecha, O.cajas_en_orden(datos), {})
-    enviado = enviar_n8n({"evento": "composicion", "correo": False, "asunto": "", "html": "", "archivos": [
-        {"nombre": nombre, "carpeta": R.carpeta_tren(datos["tren"]), "b64": base64.b64encode(libro).decode()}]})
+    enviado = subir_excel_tren(datos, {})
     log.info("composición del tren %s guardada: %s cajas (SharePoint: %s)", body.tren, len(datos["cajas"]), enviado)
-    return {"tren": datos["tren"], "cajas": len(datos["cajas"]), "excel": nombre, "enviado": enviado}
+    return {"tren": datos["tren"], "cajas": len(datos["cajas"]), "excel": excel_tren(datos), "enviado": enviado}
+
+
+def subir_excel_tren(t: dict, por_caja: dict) -> bool:
+    """Sube (o sustituye) el libro CARTON PAJA TREN <n> en su carpeta de SharePoint, sin correo."""
+    libro = X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], O.cajas_en_orden(t), por_caja, t.get("convoy") or "")
+    return enviar_n8n({"evento": "composicion", "correo": False, "asunto": "", "html": "", "archivos": [
+        {"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]), "b64": base64.b64encode(libro).decode()}]})
+
+
+class Salida(BaseModel):
+    convoy_salida: str = Field("", max_length=20)
+
+
+@oficina.post("/tren/salida")
+def tren_salida(body: Salida):
+    """Oficina: nº de convoy de salida del tren (no es el mismo que el de entrada del listado)."""
+    odoo = odoo_pr()
+    t, lista = _tren(odoo), O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    afectados = _pr(O.cambiar_salida, odoo, t, lista, body.convoy_salida)
+    lista = O.viajes(odoo) if afectados else lista
+    por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
+    subir_excel_tren(t, por_caja)
+    if afectados:
+        subir_registro(odoo, lista)
+    log.info("tren %s: convoy de salida %s (%s cargas)", t["tren"], body.convoy_salida, len(afectados))
+    return O.estado_tren(odoo, t, lista)
 
 
 def _tren(odoo):
@@ -594,13 +620,14 @@ def tren_enviar():
     por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")}
     cajas = O.cajas_en_orden(t)
     archivos = [{"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]),
-                 "b64": base64.b64encode(X.carton_paja_tren(t["tren"], t.get("convoy", ""), t["fecha"], cajas, por_caja)).decode()},
+                 "b64": base64.b64encode(X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], cajas, por_caja,
+                                                            t.get("convoy") or "")).decode()},
                 {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     stock = [v for v in lista if v["estado"] == "En stock"]
     fecha_es = html.escape("-".join(reversed(str(t["fecha"]).split("-"))))
     del_tren = [por_caja[c["caja_movil"]] for c in cajas if c["caja_movil"] in por_caja]
     cuerpo = (botones(del_tren + stock, t)
-              + f"<p style='{LETRA}'><b>Tren {int(t['tren'])}</b> (convoy {html.escape(str(t.get('convoy') or ''))}, "
+              + f"<p style='{LETRA}'><b>Tren {int(t['tren'])}</b> (convoy de salida {html.escape(O.convoy_tren(t))}, "
               f"{fecha_es}): {len(por_caja)} cargas en {len(t['cajas'])} cajas.</p>"
               + tabla_html(["Ord", "Vagón", "Caja", "Código Paper", "Albarán", "Lugar", "Balas", "Peso kg"],
                            [["" if c["segunda"] else c["ord"], "" if c["segunda"] else c["vagon"], c["caja_movil"], v.get("codigo_paper"),
