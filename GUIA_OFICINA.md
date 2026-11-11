@@ -5,7 +5,6 @@ Esta app es para el **personal de oficina y de almacén**. Los conductores usan 
 En la pantalla principal tienes:
 
 - **DECA - Trimodos**: corregir una orden de transporte escaneando su QR (igual que los conductores).
-- **Carga de PR · foto del albarán**: dar de alta un viaje de PR con la foto del albarán y del DI.
 - **Oficina · PR**: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).
 - **Almacén · PR**: cargar las cajas móviles del tren.
 - **Cómo se usa (guía)**: esta guía.

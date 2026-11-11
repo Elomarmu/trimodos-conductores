@@ -563,6 +563,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 }
 $("btn-scan").addEventListener("click", () => go("scan"));
 document.querySelectorAll(".solo-oficina").forEach((b) => { b.hidden = APP !== "oficina"; });
+document.querySelectorAll(".solo-conductor").forEach((b) => { b.hidden = APP === "oficina"; });   // en oficina va dentro de «Oficina · PR»
 (async () => {
   try {
     state.health = await api("/api/health");
