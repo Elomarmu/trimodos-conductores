@@ -268,12 +268,9 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
     # freno de seguridad: si de golpe hubiera que anular muchas líneas, algo raro pasa (Excel a medio editar, hoja
     # movida…). No se anula nada y se avisa en el correo.
     revisadas = sum(1 for l in lineas if l["product_id"] and str(l["pickup_date"] or "")[:10] >= desde.isoformat())
-    if len(res["lineas_anuladas"]) > max(MAX_ANULAR, revisadas * 0.1):
-        n = len(res["lineas_anuladas"])
-        res["errores"].append(f"Habría que anular {n} líneas de {revisadas}: son demasiadas y no se ha anulado ninguna. "
-                              "Revisad si la Excel está bien (filas borradas o movidas) y escribidme.")
-        res["cambios_facturados"].extend(x | {"cambio": "SIN ANULAR (freno de seguridad): " + x["cambio"]}
-                                         for x in res["lineas_anuladas"])
+    if not cfg.get("sin_freno") and len(res["lineas_anuladas"]) > max(MAX_ANULAR, revisadas * 0.1):
+        # se avisan en el correo con un botón para relanzar el proceso y aplicarlas cuando se hayan revisado
+        res["anulaciones_frenadas"] = res["lineas_anuladas"]
         res["lineas_anuladas"] = []
         cambios = {oid: [c for c in cmds if not str(c[2].get("name", "")).startswith(ANULADA)] for oid, cmds in cambios.items()}
         cambios = {oid: c for oid, c in cambios.items() if c}
