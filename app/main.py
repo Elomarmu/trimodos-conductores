@@ -3,6 +3,7 @@ import logging
 import mimetypes
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -130,7 +131,14 @@ def login(x_codigo_acceso: str = Header("")):
 @app.get("/api/health")
 def health():
     s = get_settings()
-    info = {"ok": True, "modo": s.mode, "dry_run": s.dry_run, "requiere_codigo": bool(s.access_code) or s.mode == "real"}
+    odoo_host = urlsplit(s.odoo_url).hostname if s.odoo_url else None
+    info = {
+        "ok": True,
+        "modo": s.mode,
+        "dry_run": s.dry_run,
+        "requiere_codigo": bool(s.access_code) or s.mode == "real",
+        "odoo": odoo_host,
+    }
     if s.mode != "real":  # ayuda para probar sin QR físico
         info["qr_prueba"] = "https://www.stinsa.com/web/content/900002?access_token=11111111-aaaa-bbbb-cccc-000000000001&download=true"
     return info

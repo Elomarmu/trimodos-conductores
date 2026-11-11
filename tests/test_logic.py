@@ -651,6 +651,18 @@ def test_health_es_publico_e_indica_si_hace_falta_codigo(con_codigo):
     assert h["requiere_codigo"] is True and "clave" not in str(h)
 
 
+def test_health_muestra_solo_el_servidor_odoo(monkeypatch):
+    monkeypatch.setenv("ODOO_URL", "https://usuario:secreto@stinsa18.tecnativa.net/base-de-datos/")
+    health = _cliente().get("/api/health").json()
+    assert health["odoo"] == "stinsa18.tecnativa.net"
+    assert "usuario" not in str(health) and "secreto" not in str(health) and "base-de-datos" not in str(health)
+
+
+def test_health_odoo_nulo_si_url_vacia(monkeypatch):
+    monkeypatch.setenv("ODOO_URL", "")
+    assert _cliente().get("/api/health").json()["odoo"] is None
+
+
 def test_sin_codigo_en_modo_simulado_no_se_pide():
     c = _cliente()
     assert c.get("/api/health").json()["requiere_codigo"] is False
