@@ -466,7 +466,10 @@ async function guardarComposicion(num, confirmado = false) {
     $("tren-hecho-cuerpo").replaceChildren(r.simulado ? h("div", { class: "banner info" }, "Modo de prueba: no se ha guardado nada.") : mark,
       h("p", {}, `Tren ${num} guardado (${composicion.cajas.length === 1 ? "1 caja" : composicion.cajas.length + " cajas"}). El almacén ya puede asignar las cargas.`),
       r.simulado ? null : h("p", { class: "hint" }, r.enviado ? `Guardada en SharePoint en ${r.excel} (hoja COMPOSICION).` :
-        "No se ha podido guardar la Excel en SharePoint (el envío automático no está configurado o ha fallado)."));
+        "No se ha podido guardar la Excel en SharePoint (el envío automático no está configurado o ha fallado)."),
+      r.mantenidas ? h("p", {}, `Se mantienen las ${r.mantenidas} cargas que ya estaban asignadas a este tren.`) : null,
+      r.a_stock && r.a_stock.length ? h("div", { class: "banner warn" },
+        `Vuelven a stock porque su caja ya no está en el tren: ${r.a_stock.join(", ")}.`) : null);
     $("tren-paso2").hidden = true; $("tren-hecho").hidden = false;
   } catch (e) { showError(e.message); } finally { busy(null); if ($("confirm").hidden) state.onConfirm = null; }
 }
@@ -530,6 +533,7 @@ function pintarAlmacen(e) {
   $("alm-cerrar").hidden = true;
   $("alm-enviar").hidden = !alm.oficina || fin;
   $("alm-reabrir").hidden = !alm.oficina || !fin;
+  $("alm-rehacer").hidden = !alm.oficina;
   const convoy = e.convoy_salida || e.convoy;
   $("alm-tren").textContent = (fin ? `El tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (convoy ? ` (convoy ${convoy})` : "") +
       " está TERMINADO: las Excel ya se enviaron." + (alm.oficina ? "" : " Espera a que la oficina cargue la composición del siguiente tren.")
@@ -645,6 +649,15 @@ $("alm-enviar").addEventListener("click", () => {
   $("alm-cerrar").scrollIntoView({ block: "center" });
 });
 $("alm-cerrar-no").addEventListener("click", () => { $("alm-cerrar").hidden = true; });
+$("alm-rehacer").addEventListener("click", async () => {
+  clearError();
+  busy("Rehaciendo la Excel y los documentos del tren…");
+  try {
+    const r = await post("/api/pr/tren/rehacer", {});
+    if (r.simulado) showError("Modo de prueba: no se ha guardado nada.");
+    else { pintarAlmacen(r); $("alm-descargas").replaceChildren(h("div", { class: "banner info" }, "Excel del tren y documentos de sus cargas puestos al día en SharePoint.")); }
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
 // Oficina: un tren terminado se puede volver a abrir para corregirlo (hasta que se cargue la composición del siguiente).
 $("alm-reabrir").addEventListener("click", async () => {
   clearError();

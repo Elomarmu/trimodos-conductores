@@ -492,11 +492,27 @@ def tren_composicion(body: TrenIn):
     if get_settings().dry_run:
         return {"simulado": True, "tren": body.tren}
     datos = _pr(O.guardar_composicion, odoo, body.tren, body.convoy, body.fecha, cajas, body.convoy_salida)
-    # El libro CARTON PAJA TREN <n> (cajas aún vacías + hoja COMPOSICION) a SharePoint › carpeta del tren, sin correo.
-    # Al terminar el tren se vuelve a subir con las cargas.
-    enviado = subir_excel_tren(datos, {})
-    log.info("composición del tren %s guardada: %s cajas (SharePoint: %s)", body.tren, len(datos["cajas"]), enviado)
-    return {"tren": datos["tren"], "cajas": len(datos["cajas"]), "excel": excel_tren(datos), "enviado": enviado}
+    # Si se vuelve a cargar la composición del MISMO tren, las cargas ya asignadas se mantienen; las que estaban en una caja
+    # que ya no está en el tren vuelven a stock (y sus documentos salen de la carpeta del tren).
+    lista = O.viajes(odoo)
+    cajas_nuevas = {c["caja_movil"] for c in datos["cajas"]}
+    a_stock = [v for v in lista if v.get("tren") == str(datos["tren"]) and v.get("caja_movil") and v["caja_movil"] not in cajas_nuevas]
+    for v in a_stock:
+        O.quitar(odoo, v["bulto_id"])
+        for _, clave, _, _ in R.DOCUMENTOS.values():
+            if v.get(clave):
+                borrar_foto(v[clave])
+    if a_stock:
+        lista = O.viajes(odoo)
+    # El libro CARTON PAJA TREN <n> (con las cargas que ya tenga + hoja COMPOSICION) a la carpeta del tren, sin correo.
+    por_caja = {v["caja_movil"]: v for v in lista if v.get("tren") == str(datos["tren"]) and v.get("caja_movil")}
+    enviado = subir_excel_tren(datos, por_caja)
+    if a_stock:
+        subir_registro(odoo, lista)
+    log.info("composición del tren %s guardada: %s cajas, %s cargas se mantienen, %s vuelven a stock (SharePoint: %s)",
+             body.tren, len(datos["cajas"]), len(por_caja), len(a_stock), enviado)
+    return {"tren": datos["tren"], "cajas": len(datos["cajas"]), "excel": excel_tren(datos), "enviado": enviado,
+            "mantenidas": len(por_caja), "a_stock": [v.get("codigo_paper") or v.get("albaran") for v in a_stock]}
 
 
 def subir_excel_tren(t: dict, por_caja: dict) -> bool:
@@ -627,6 +643,23 @@ def tren_editar(body: Editar):
                 sincronizar_foto(odoo, v, lista=lista)
         lista = O.viajes(odoo)
     poner_al_dia(odoo, t, lista, registro=bool(afectados))
+    return O.estado_tren(odoo, t, lista)
+
+
+@oficina.post("/tren/rehacer")
+def tren_rehacer():
+    """Oficina: vuelve a dejar la carpeta del tren como dice la app: la Excel del tren rehecha desde Odoo y los documentos
+    (albarán y DI) de cada carga asignada subidos o renombrados. Sirve después de cualquier fallo de SharePoint o n8n."""
+    odoo = odoo_pr()
+    t, lista = _tren(odoo), O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    del_tren = [v for v in lista if v.get("tren") == str(t["tren"]) and v.get("caja_movil")]
+    for v in del_tren:
+        sincronizar_foto(odoo, v, lista=lista)
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista)
+    log.info("tren %s rehecho: Excel y documentos de %s cargas", t["tren"], len(del_tren))
     return O.estado_tren(odoo, t, lista)
 
 

@@ -75,6 +75,7 @@ Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almac
 Para un **tren nuevo**:
 
 - **Solo se puede cargar si el tren actual está terminado.** Si no lo está, la app lo avisa y ofrece **«Ir a terminar el tren»**.
+- Si vuelves a subir la composición del **mismo** tren (mismo número), las cargas ya asignadas **se mantienen**. Las que estaban en una caja que ya no aparece vuelven a stock, y la app te dice cuáles.
 
 1. Pulsa **«Subir el listado del tren»**. Puedes subir el PDF de Captrain o fotos de la primera y la última hoja.
 2. La app lee los vagones y las cajas móviles. Revisa:
@@ -98,7 +99,7 @@ Arriba pone **«Está cargado el tren N de fecha DD-MM-AAAA»**. Comprueba que e
 
 Se entra desde **«Almacén · PR»** (menú principal). La oficina también puede asignar cargas desde **Oficina · PR › «Asignar cargas a cajas»**: es la misma pantalla, pero con los botones de terminar y modificar el tren.
 
-Cada cambio (asignar, quitar, mover o corregir) pone al día **la Excel del tren y la de registro en SharePoint** en ese momento.
+Cada cambio (asignar, quitar, mover o corregir) pone al día **la Excel del tren y la de registro en SharePoint** en ese momento. Si alguna vez no cuadra lo de SharePoint con la app, la oficina tiene el botón **«Rehacer la Excel y los documentos del tren en SharePoint»** en «Asignar cargas a cajas».
 
 ### Asignar una carga a una caja
 

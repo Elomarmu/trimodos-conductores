@@ -263,3 +263,24 @@ def test_no_se_carga_otra_composicion_con_el_tren_abierto(monkeypatch):
     monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
     r = TestClient(app).post("/api/pr/tren/composicion", json={"tren": 87, "convoy": "1", "fecha": "2026-11-12", "cajas": CAJAS})
     assert r.status_code == 409 and r.json()["codigo"] == "tren_abierto" and "El tren 86 todavía no está terminado" in r.json()["error"]
+
+
+def test_volver_a_cargar_la_composicion_mantiene_las_cargas_y_saca_las_de_cajas_que_ya_no_estan(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    _cargar(odoo, 11, "CRPU0910069")
+    _cargar(odoo, 12, "MXMU1450334")
+    enviados, borrados = [], []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "borrar_foto", lambda ruta: borrados.append(ruta))
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    sin_v3 = [A.CajaTren(**c) for c in CAJAS[:3]]                    # la caja MXMU1450334 ya no está
+    r = A.tren_composicion(A.TrenIn(tren=86, convoy="90107", fecha="2026-11-11", cajas=sin_v3, confirmado=True))
+    assert r["mantenidas"] == 1 and r["a_stock"] == ["S261106002151"]
+    assert "Caja móvil" not in odoo.bultos[12]["unload_note"]                       # vuelve a stock
+    assert R.leer_observaciones(odoo.bultos[11]["unload_note"])["caja_movil"] == "CRPU0910069"
+    libro = openpyxl.load_workbook(io.BytesIO(__import__("base64").b64decode(
+        next(d for d in enviados if d["evento"] == "composicion")["archivos"][0]["b64"])))["TREN 86"]
+    assert any(libro.cell(f, 10).value == "CRPU0910069" and libro.cell(f, 7).value for f in range(6, 10))   # la Excel la lleva
