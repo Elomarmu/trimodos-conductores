@@ -562,7 +562,8 @@ function pintarAlmacen(e) {
     ...g.cajas.map((c) => h("div", { class: "fila" },
       h("span", {}, h("b", {}, c.caja_movil), h("br"),
         c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
-          : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía")),
+          : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía"),
+        c.observaciones ? h("br") : null, c.observaciones ? h("span", { class: "nota" }, "⚠ " + c.observaciones) : null),
       fin ? null : h("span", { class: "vagon-mover" },
         h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
         c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null))))));
@@ -577,12 +578,16 @@ async function moverVagon(vagon, hacia) {
 
 // Corregir el nombre de la caja móvil o el número del vagón (el vagón cambia para todas sus cajas).
 function editarCaja(c, donde) {
-  document.querySelectorAll(".editar-caja").forEach((x) => x.remove());
+  document.querySelectorAll(".panel-editar").forEach((x) => x.remove());   // solo los paneles de «Modificar» (no el de cerrar el tren)
   const caja = h("input", { type: "text", value: c.caja_movil, autocapitalize: "characters", autocomplete: "off", spellcheck: "false", "aria-label": "Caja móvil" });
   const vagon = h("input", { type: "text", value: c.vagon, inputmode: "numeric", autocomplete: "off", "aria-label": "Vagón" });
-  const panel = h("form", { class: "editar-caja", novalidate: "" },
+  const obs = h("textarea", { maxlength: "300", "aria-label": "Observaciones", placeholder: "Problemas en la carga de esta caja" });
+  obs.value = c.observaciones || "";
+  const conCarga = !!(c.carga || c.vacia);   // las observaciones son de la carga de la caja
+  const panel = h("form", { class: "editar-caja panel-editar", novalidate: "" },
     h("div", { class: "field" }, h("label", {}, "Caja móvil"), caja),
     h("div", { class: "field" }, h("label", {}, "Vagón (12 cifras; cambia para todas sus cajas)"), vagon),
+    conCarga ? h("div", { class: "field" }, h("label", {}, "Observaciones"), obs) : null,
     h("div", { class: "row2" },
       h("button", { type: "submit", class: "btn primary small" }, "Guardar"),
       h("button", { type: "button", class: "btn ghost small", onclick: () => panel.remove() }, "Cancelar")));
@@ -592,7 +597,8 @@ function editarCaja(c, donde) {
     const nuevaCaja = caja.value.replace(/[\s-]/g, "").toUpperCase(), nuevoVagon = vagon.value.replace(/\D/g, "");
     const cambios = { caja_movil: c.caja_movil, nueva_caja: nuevaCaja !== c.caja_movil ? nuevaCaja : "",
       nuevo_vagon: nuevoVagon !== c.vagon ? nuevoVagon : "" };
-    if (!cambios.nueva_caja && !cambios.nuevo_vagon) return panel.remove();
+    if (conCarga && obs.value.trim() !== (c.observaciones || "")) cambios.observaciones = obs.value.trim();
+    if (!cambios.nueva_caja && !cambios.nuevo_vagon && cambios.observaciones === undefined) return panel.remove();
     if (!nuevaCaja) return showError("Escribe la caja móvil.");
     if (cambios.nuevo_vagon && cambios.nuevo_vagon.length !== 12) return showError("El vagón tiene que tener 12 cifras.");
     busy("Guardando…");
@@ -616,8 +622,8 @@ $("alm-form").addEventListener("submit", async (ev) => {
   if (!carga && !vacia) return showError("Elige la carga (o «Caja vacía»).");
   busy("Guardando…");
   try {
-    const r = await post("/api/pr/tren/asignar", { bulto_id: carga, caja_movil: caja, vacia });
-    if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r);
+    const r = await post("/api/pr/tren/asignar", { bulto_id: carga, caja_movil: caja, vacia, observaciones: $("alm-obs").value.trim() });
+    if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else { $("alm-obs").value = ""; pintarAlmacen(r); }
   } catch (e) { showError(e.message); await cargarAlmacen(); } finally { busy(null); }
 });
 

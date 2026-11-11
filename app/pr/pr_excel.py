@@ -49,8 +49,9 @@ def _cabecera(ws, fila: int, titulos: list[str], anchos: list[int]):
 # ---- CARTON PAJA TREN ---------------------------------------------------------------------------------------------
 
 COLS_TREN = ["ord", "Fecha", "Matrícula", "Balas", "Peso", "Lugar de carga", "ORDEN", "Nº Viaje", "Vagón", "Caja móvil",
-             "Tara C.Movil", "Tipo", "Balas", "Neto C.Movil", "Dist. balas", "Lonas", "Puertas", "Precinto"]
-ANCHOS_TREN = [5, 11, 11, 7, 9, 22, 16, 15, 15, 14, 10, 7, 7, 11, 9, 8, 9, 9]
+             "Tara C.Movil", "Tipo", "Balas", "Neto C.Movil", "Observaciones", "Dist. balas", "Lonas", "Puertas", "Precinto"]
+ANCHOS_TREN = [5, 11, 11, 7, 9, 22, 16, 15, 15, 14, 10, 7, 7, 11, 34, 9, 8, 9, 9]
+COL_OBS = 15   # «Observaciones» del almacén, justo antes de las comprobaciones
 
 
 def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viajes_por_caja: dict[str, dict],
@@ -73,9 +74,9 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     ws["Q1"].font = Font(bold=True, size=14)
     ws["B3"] = "Mercancía recogida"
     ws["B3"].font = Font(bold=True, italic=True)
-    ws.merge_cells("O4:R4")
-    ws["O4"] = "COMPROBACIONES"
-    ws["O4"].fill, ws["O4"].font, ws["O4"].alignment = GRIS, Font(bold=True), CENTRO
+    ws.merge_cells("P4:S4")
+    ws["P4"] = "COMPROBACIONES"
+    ws["P4"].fill, ws["P4"].font, ws["P4"].alignment = GRIS, Font(bold=True), CENTRO
     _cabecera(ws, 5, COLS_TREN, ANCHOS_TREN)
     fila, cargadas, peso = 6, 0, 0
     for c in cajas:
@@ -86,16 +87,18 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
                    v.get("bultos"), v.get("peso_kg")]
         if not v and c.get("vacia"):
             valores[5] = "CAJA VACÍA"
+        valores.append(c.get("observaciones") or "")
         valores += ["OK" if v else "" for _ in R.COMPROBACIONES]
         for col, val in enumerate(valores, start=1):
             celda = ws.cell(fila, col, val if val not in ("", None) else None)
             celda.border = BORDE
-            celda.alignment = Alignment(horizontal="center" if col not in (6,) else "left", vertical="center")
+            celda.alignment = Alignment(horizontal="left" if col in (6, COL_OBS) else "center", vertical="center",
+                                        wrap_text=col == COL_OBS)
             if col == 2:
                 celda.number_format = "DD/MM/YYYY"
             if col in (5, 11, 14):
                 celda.number_format = "#,##0"
-            if col >= 15 and val:
+            if col > COL_OBS and val:
                 celda.fill = VERDE if val == "OK" else ROJO
         if not v:  # caja vacía: se ve de un vistazo
             for col in range(1, 15):

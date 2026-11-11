@@ -307,3 +307,31 @@ def test_cada_cambio_del_tren_pone_al_dia_la_excel_y_los_documentos(monkeypatch)
     enviados.clear()
     A.tren_quitar(A.Asignar(bulto_id=12, caja_movil="MXMU1450334"))        # descargar: Excel + registro
     assert "composicion" in eventos() and "registro" in eventos()
+
+
+def test_observaciones_de_la_carga_en_la_excel_del_tren(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(A, "sincronizar_foto", lambda *a, **k: None)
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: True)
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069", observaciones="  Se rompe la  balanza "))
+    A.tren_asignar(A.Asignar(caja_movil="ICR102043", vacia=True, observaciones="Cucarachas: no se carga"))
+    e = A.tren_actual()
+    obs = {c["caja_movil"]: c["observaciones"] for c in e["cajas"]}
+    assert obs["CRPU0910069"] == "Se rompe la balanza" and obs["ICR102043"] == "Cucarachas: no se carga"
+    A.tren_editar(A.Editar(caja_movil="CRPU0910069", observaciones="Balas mal apretadas"))       # solo la nota
+    A.tren_editar(A.Editar(caja_movil="CRPU0910069", nueva_caja="CRPU0910070"))                  # la nota sigue a la caja
+    t = O.tren_actual(odoo)
+    assert t["notas"] == {"CRPU0910070": "Balas mal apretadas", "ICR102043": "Cucarachas: no se carga"}
+    cajas = O.cajas_en_orden(t)
+    ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "", "2026-11-09", cajas,
+                                                              {v["caja_movil"]: v for v in odoo.viajes() if v["caja_movil"]})))["TREN 86"]
+    assert ws.cell(5, 15).value == "Observaciones" and ws.cell(5, 16).value == "Dist. balas"
+    filas = {ws.cell(f, 10).value: ws.cell(f, 15).value for f in range(6, 11)}
+    assert filas["CRPU0910070"] == "Balas mal apretadas" and filas["ICR102043"] == "Cucarachas: no se carga"
+    A.tren_quitar(A.Asignar(bulto_id=11, caja_movil="CRPU0910070"))                             # al quitar la carga, fuera
+    A.tren_quitar(A.Asignar(caja_movil="ICR102043", vacia=True))
+    assert O.tren_actual(odoo).get("notas") == {}

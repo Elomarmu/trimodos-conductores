@@ -113,9 +113,9 @@ def test_excel_carton_paja_tren_siempre_ok():
     assert ws["Q1"].value == 86 and ws["Q2"].value == "90107"
     fila = [c.value for c in ws[6]]
     assert fila[0] == 1 and fila[2] == "8734KDW" and fila[6] == "S261104001499" and fila[9] == "CRPU0910069"
-    assert fila[14:18] == ["OK", "OK", "OK", "OK"]
+    assert fila[14] is None and fila[15:19] == ["OK", "OK", "OK", "OK"]   # 15 = Observaciones
     vacia = [c.value for c in ws[7]]
-    assert vacia[0] == "“" and vacia[9] == "CTEA25000377" and vacia[2] is None and vacia[14] is None
+    assert vacia[0] == "“" and vacia[9] == "CTEA25000377" and vacia[2] is None and vacia[15] is None
 
 
 def test_excel_registro():

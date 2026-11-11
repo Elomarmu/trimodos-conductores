@@ -405,6 +405,7 @@ class Asignar(BaseModel):
     bulto_id: int = 0                # 0 con «vacia»: la caja va vacía
     caja_movil: str = Field("", max_length=20)
     vacia: bool = False
+    observaciones: str = Field("", max_length=300)   # problemas en la carga (columna «Observaciones» de la Excel del tren)
 
 
 class Mover(BaseModel):
@@ -416,6 +417,7 @@ class Editar(BaseModel):
     caja_movil: str = Field(min_length=1, max_length=20)
     nueva_caja: str = Field("", max_length=20)
     nuevo_vagon: str = Field("", max_length=20)
+    observaciones: str | None = Field(None, max_length=300)   # None = no se tocan
 
 
 URL_EXCEL_TREN = "__URL_EXCEL_TREN__"   # n8n lo cambia por el enlace de la Excel del tren en SharePoint
@@ -582,12 +584,14 @@ def tren_asignar(body: Asignar):
         return {"simulado": True}
     if body.vacia:
         _pr(O.marcar_vacia, odoo, t, lista, body.caja_movil)
+        O.poner_nota(odoo, t, body.caja_movil, body.observaciones)
         log.info("tren %s: caja %s vacía", t["tren"], body.caja_movil)
         poner_al_dia(odoo, t, lista, registro=False)
         return O.estado_tren(odoo, t, lista)
     if not body.bulto_id:
         raise AppError("Elige la carga.", 400, "sin_carga")
     bulto = _pr(O.asignar, odoo, t, lista, body.bulto_id, body.caja_movil)
+    O.poner_nota(odoo, t, body.caja_movil, body.observaciones)
     log.info("tren %s: %s → caja %s", t["tren"], bulto, body.caja_movil)
     lista = O.viajes(odoo)
     viaje = next((v for v in lista if v["bulto_id"] == body.bulto_id), None)
@@ -607,10 +611,13 @@ def tren_quitar(body: Asignar):
     lista = O.viajes(odoo)
     if body.vacia:
         _pr(O.quitar_vacia, odoo, t, lista, body.caja_movil)
+        O.poner_nota(odoo, t, body.caja_movil, "")
         poner_al_dia(odoo, t, lista, registro=False)
         return O.estado_tren(odoo, t, lista)
     previo = next((v for v in lista if v["bulto_id"] == body.bulto_id), None)
     _pr(O.quitar, odoo, body.bulto_id, t, lista)
+    if previo and previo.get("caja_movil"):
+        O.poner_nota(odoo, t, previo["caja_movil"], "")   # las observaciones eran de esa carga en esa caja
     for _, clave, _, _ in R.DOCUMENTOS.values():
         if previo and previo.get(clave):
             borrar_foto(previo[clave])
@@ -635,13 +642,17 @@ def tren_mover(body: Mover):
 @oficina.post("/tren/editar")
 def tren_editar(body: Editar):
     """Almacén y oficina: corrige el nombre de una caja móvil o el número de su vagón."""
-    if not (body.nueva_caja.strip() or body.nuevo_vagon.strip()):
+    if not (body.nueva_caja.strip() or body.nuevo_vagon.strip() or body.observaciones is not None):
         raise AppError("No has cambiado nada.", 400, "sin_cambios")
     odoo = odoo_pr()
     t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
-    afectados = _pr(O.editar, odoo, t, lista, body.caja_movil, body.nueva_caja, body.nuevo_vagon)
+    afectados = _pr(O.editar, odoo, t, lista, body.caja_movil, body.nueva_caja, body.nuevo_vagon) \
+        if (body.nueva_caja.strip() or body.nuevo_vagon.strip()) else []
+    if body.observaciones is not None:
+        caja = R.matricula(body.nueva_caja) or body.caja_movil
+        O.poner_nota(odoo, t, caja, body.observaciones)
     log.info("tren %s: caja %s corregida (caja=%s vagón=%s)", t["tren"], body.caja_movil, body.nueva_caja, body.nuevo_vagon)
     lista = O.viajes(odoo)
     if body.nueva_caja.strip():   # la foto se llama «código Paper - caja móvil»: se renombra
@@ -700,11 +711,11 @@ def tren_enviar():
     cuerpo = (botones(del_tren + stock, t)
               + f"<p style='{LETRA}'><b>Tren {int(t['tren'])}</b> (convoy de salida {html.escape(O.convoy_tren(t))}, "
               f"{fecha_es}): {len(por_caja)} cargas en {len(t['cajas'])} cajas.</p>"
-              + tabla_html(["Ord", "Vagón", "Caja", "Código Paper", "Albarán", "Lugar", "Balas", "Peso kg"],
+              + tabla_html(["Ord", "Vagón", "Caja", "Código Paper", "Albarán", "Lugar", "Balas", "Peso kg", "Observaciones"],
                            [["" if c["segunda"] else c["ord"], "" if c["segunda"] else c["vagon"], c["caja_movil"], v.get("codigo_paper"),
-                             tarea(v), v.get("lugar"), v.get("bultos"), v.get("peso_kg")] if (v := por_caja.get(c["caja_movil"]))
+                             tarea(v), v.get("lugar"), v.get("bultos"), v.get("peso_kg"), c["observaciones"]] if (v := por_caja.get(c["caja_movil"]))
                             else ["" if c["segunda"] else c["ord"], "" if c["segunda"] else c["vagon"], c["caja_movil"],
-                                  "CAJA VACÍA" if c["vacia"] else "sin asignar", "", "", "", ""] for c in cajas])
+                                  "CAJA VACÍA" if c["vacia"] else "sin asignar", "", "", "", "", c["observaciones"]] for c in cajas])
               + f"<p style='{LETRA}'><b>Quedan en stock para el siguiente tren: {len(stock)}</b></p>"
               + tabla_html(["Fecha", "Código Paper", "Albarán", "Lugar"], [[v["fecha"], v["codigo_paper"], tarea(v), v["lugar"]] for v in stock]))
     fotos, sin_docs = [], []

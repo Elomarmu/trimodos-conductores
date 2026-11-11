@@ -106,7 +106,10 @@ Cada cambio (asignar, quitar, mover o corregir) pone al día **la Excel del tren
 1. En **«Caja móvil»** elige la caja. Salen como «caja - vagón», y solo las que están libres.
 2. En **«Carga»** elige lo que va dentro: «código Paper - balas - kilos». Si a una carga le falta un documento, lo verás al lado (por ejemplo «· falta DI de residuos»).
     - Si la caja va **vacía**, elige **«Caja vacía»** (la última opción).
-3. Pulsa **«Asignar»**.
+3. Si ha habido algún problema, escríbelo en **«Observaciones»**: por ejemplo, se rompe una balanza durante la carga, aparecen cucarachas o hay balas mal apretadas. Si no, déjalo en blanco.
+4. Pulsa **«Asignar»**.
+
+Las observaciones salen debajo de la caja en «Ya cargadas» (con ⚠), en la columna **«Observaciones»** de la Excel del tren (antes de las comprobaciones) y en el correo del tren.
 
 ### El orden del tren
 
@@ -118,7 +121,7 @@ La lista **«Ya cargadas»** está en el orden del tren: **arriba los vagones pe
 
 ### Corregir y quitar
 
-- **Modificar**: cambia el nombre de la caja móvil o el número del vagón. El vagón tiene 12 cifras y la app comprueba su dígito de control. Al cambiar el vagón, cambia en todas sus cajas.
+- **Modificar**: cambia el nombre de la caja móvil, el número del vagón o las **observaciones** de esa carga. El vagón tiene 12 cifras y la app comprueba su dígito de control. Al cambiar el vagón, cambia en todas sus cajas.
     - Para corregir una caja antes de cargarla, elígela en el desplegable y pulsa **«Modificar la caja elegida»**.
 - **Quitar**: la carga vuelve a stock. En una caja marcada como vacía, quita esa marca.
 

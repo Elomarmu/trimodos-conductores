@@ -530,8 +530,23 @@ def cajas_en_orden(tren: dict) -> list[dict]:
     res, vacias = [], set(tren.get("vacias") or [])
     for i, vagon in enumerate(orden_final(tren), start=1):
         for j, c in enumerate(c for c in tren["cajas"] if c["vagon"] == vagon):
-            res.append(dict(c, ord=i, segunda=j > 0, vacia=c["caja_movil"] in vacias))
+            res.append(dict(c, ord=i, segunda=j > 0, vacia=c["caja_movil"] in vacias,
+                            observaciones=(tren.get("notas") or {}).get(c["caja_movil"], "")))
     return res
+
+
+def poner_nota(odoo, tren: dict, caja_movil: str, texto: str | None) -> None:
+    """Observaciones del almacén sobre la carga de una caja (balanza rota, cucarachas, balas mal apretadas…).
+    Van en la columna «Observaciones» de la Excel del tren. Texto vacío = se borran."""
+    notas = dict(tren.get("notas") or {})
+    texto = " ".join((texto or "").split())[:300]
+    if texto:
+        notas[caja_movil] = texto
+    else:
+        notas.pop(caja_movil, None)
+    if notas != (tren.get("notas") or {}):
+        tren["notas"] = notas
+        escribir_tren(odoo, tren)
 
 
 def _poner_arriba(tren: dict, vagon: str) -> None:
@@ -628,6 +643,8 @@ def editar(odoo, tren: dict, lista: list[dict], caja_movil: str, nueva_caja: str
             raise ErrorPR(f"La caja {nueva} ya está en este tren.")
         caja["caja_movil"], caja["tara_kg"] = nueva, R.tara_caja(nueva) or caja.get("tara_kg")
         tren["vacias"] = [nueva if c == caja_movil else c for c in tren.get("vacias") or []]
+        if caja_movil in (tren.get("notas") or {}):
+            tren["notas"] = {(nueva if k == caja_movil else k): v for k, v in tren["notas"].items()}
         for v in del_tren:
             if v["caja_movil"] == caja_movil:
                 _cambiar_obs(odoo, v["bulto_id"], {"caja_movil": nueva})
