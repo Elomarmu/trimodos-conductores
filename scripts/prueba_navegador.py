@@ -66,7 +66,10 @@ comprobar.fallos = 0
 def main():
     video = Path(tempfile.gettempdir()) / "qr_camara.y4m"
     crear_video_qr(video, QR_TEXT)
-    env = {**os.environ, "ODOO_MODE": "mock", "DRY_RUN": "false", "APP_ACCESS_CODE": CODIGO}
+    env = {
+        **os.environ, "ODOO_MODE": "mock", "DRY_RUN": "false",
+        "APP_ACCESS_CODE": CODIGO, "APP_OFICINA_CODE": "codigo-oficina-de-prueba",
+    }
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -88,8 +91,10 @@ def main():
                 print("Errores del navegador:", errores)
                 raise
             titulo = pg.evaluate("() => { const h = document.querySelector('#s-menu h1'); const r = h.getBoundingClientRect(); return [h.textContent, getComputedStyle(h).textAlign, (r.left + r.right) / 2, window.innerWidth / 2]; }")
-            comprobar(titulo[0] == "DECA - Trimodos", f"el título del menú es «{titulo[0]}»")
+            comprobar(titulo[0] == "Conductores", f"el título del menú es «{titulo[0]}»")
             comprobar(titulo[1] == "center" and abs(titulo[2] - titulo[3]) < 2, f"está centrado (centro del título {titulo[2]:.0f}px, centro de la pantalla {titulo[3]:.0f}px)")
+            comprobar(all(pg.is_visible(selector) for selector in ("#btn-scan", "#btn-pr", "#btn-guia")),
+                      "el menú conserva los botones DECA, Carga de PR y guía")
             pg.screenshot(path=str(SALIDA / "p4_menu.png"))
 
             print("Código de acceso")
@@ -111,6 +116,23 @@ def main():
             comprobar(True, "si el código guardado deja de valer, lo vuelve a pedir")
             pg.fill("#access-code", CODIGO); pg.click("#access-form button")
             pg.wait_for_selector("#access", state="hidden")
+
+            print("Código y botones de oficina")
+            ctx_oficina = navegador.new_context(viewport={"width": 390, "height": 844})
+            pg_oficina = ctx_oficina.new_page()
+            pg_oficina.goto(f"{BASE}/oficina/")
+            pg_oficina.wait_for_selector("#access:not([hidden])")
+            pg_oficina.fill("#access-code", CODIGO); pg_oficina.click("#access-form button")
+            pg_oficina.wait_for_selector("#access-err:not([hidden])")
+            comprobar("código de los conductores" in pg_oficina.inner_text("#access-err"),
+                      "la app de oficina rechaza el código de conductores si tiene código propio")
+            pg_oficina.fill("#access-code", "codigo-oficina-de-prueba")
+            pg_oficina.click("#access-form button")
+            pg_oficina.wait_for_selector("#access", state="hidden")
+            comprobar(all(pg_oficina.is_visible(selector) for selector in ("#btn-scan", "#btn-pr-oficina", "#btn-pr-almacen", "#btn-guia"))
+                      and pg_oficina.is_hidden("#btn-pr"),
+                      "oficina muestra DECA, Oficina PR, Almacén PR y guía; oculta Carga de PR de conductores")
+            ctx_oficina.close()
 
             print("Escáner con cámara simulada")
             pg.click("#btn-scan")
@@ -274,10 +296,21 @@ def main():
             print("Guía dentro de la app")
             pg.wait_for_selector("#btn-guia")
             comprobar(pg.is_visible("#btn-guia"), "el menú tiene el botón «Cómo se usa (guía)»")
-            grande = pg.evaluate("() => document.getElementById('btn-scan').getBoundingClientRect().height > 2 * document.getElementById('btn-guia').getBoundingClientRect().height")
-            comprobar(grande, "el botón principal sigue siendo el grande y el de la guía es secundario")
+            ctx_tactil = navegador.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+            pg_tactil = ctx_tactil.new_page()
+            pg_tactil.goto(BASE)
+            pg_tactil.wait_for_selector("#btn-guia")
+            botones_grandes = pg_tactil.evaluate("""() => {
+                const principal = document.getElementById('btn-scan');
+                const guia = document.getElementById('btn-guia');
+                return matchMedia('(pointer: coarse)').matches
+                    && principal.classList.contains('primary') && guia.classList.contains('ghost')
+                    && principal.getBoundingClientRect().height >= 56 && guia.getBoundingClientRect().height >= 56;
+            }""")
+            comprobar(botones_grandes, "DECA es el botón principal y los botones, incluida la guía, tienen altura táctil")
+            ctx_tactil.close()
             pg.click("#btn-guia"); pg.wait_for_selector(".guia h1")
-            comprobar("Cómo corregir" in pg.inner_text(".guia h1"), "el botón abre la guía: «" + pg.inner_text(".guia h1") + "»")
+            comprobar("Guía de la app" in pg.inner_text(".guia h1"), "el botón abre la guía: «" + pg.inner_text(".guia h1") + "»")
             comprobar(pg.locator(".guia tbody tr").count() >= 6 and pg.locator(".guia tbody tr").first.is_visible() and pg.locator(".guia thead").first.is_hidden(), f"la tabla de avisos se ve como tarjetas ({pg.locator('.guia tbody tr').count()} avisos)")
             comprobar(pg.evaluate("document.documentElement.scrollWidth") <= 390, "la guía cabe en el móvil sin scroll horizontal")
             pg.screenshot(path=str(SALIDA / "p4_guia.png"), full_page=True)
@@ -288,7 +321,7 @@ def main():
             pg.wait_for_selector("#btn-scan")
             comprobar(pg.is_visible("#btn-scan"), "sin conexión la app abre igualmente")
             pg.goto(BASE + "/guia.html"); pg.wait_for_selector(".guia h1")
-            comprobar("Cómo corregir" in pg.inner_text(".guia h1"), "la guía también se lee sin conexión")
+            comprobar("Guía de la app" in pg.inner_text(".guia h1"), "la guía también se lee sin conexión")
             pg.goto(BASE); pg.wait_for_selector("#btn-scan")
             pg.click("#btn-scan"); pg.fill("#order", "S2621473"); pg.click("[data-company=transargi]"); pg.click("#btn-order")
             pg.wait_for_selector("#err:not([hidden])")
