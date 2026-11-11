@@ -254,6 +254,17 @@
   <div class="actions">
     <button id="alm-recargar" class="btn ghost">Actualizar</button>
     <button id="alm-enviar" class="btn secondary" hidden>Terminar el tren y enviar las Excel</button>
+    <form id="alm-cerrar" class="editar-caja" hidden novalidate>
+      <h2>Cerrar el tren</h2>
+      <p id="alm-cerrar-txt"></p>
+      <div class="field"><label for="alm-cerrar-convoy">Nº convoy de salida</label>
+        <input id="alm-cerrar-convoy" type="text" autocomplete="off"></div>
+      <p class="hint">Comprueba que es el de salida (no el de entrada). Si no es correcto, cámbialo antes de enviar.</p>
+      <div class="row2">
+        <button type="submit" class="btn primary small">Confirmar y enviar</button>
+        <button type="button" id="alm-cerrar-no" class="btn ghost small">Cancelar</button>
+      </div>
+    </form>
   </div>
   <div id="alm-descargas" class="actions"></div>
   <button id="alm-volver" class="btn ghost">Volver</button>

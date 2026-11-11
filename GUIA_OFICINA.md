@@ -117,7 +117,12 @@ La lista **«Ya cargadas»** está en el orden del tren: **arriba los vagones pe
 
 ### Terminar el tren
 
-Cuando esté todo cargado, pulsa **«Terminar el tren y enviar las Excel»** y confirma. Se hacen tres cosas:
+Cuando esté todo cargado, pulsa **«Terminar el tren y enviar las Excel»**. La app enseña el **nº de convoy de salida** (si todavía no se había puesto, el de entrada):
+
+- Si es correcto, pulsa **«Confirmar y enviar»**.
+- Si no lo es, **escribe el bueno** y pulsa «Confirmar y enviar»: se guarda en el tren y en sus cargas antes de enviar.
+
+Al enviar se hacen tres cosas:
 
 - se generan las Excel **CARTON PAJA TREN N** y **REGISTRO VIAJES PR**, que también se pueden descargar;
 - se guardan en SharePoint;

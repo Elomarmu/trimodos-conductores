@@ -617,12 +617,32 @@ async function quitarCarga(c) {
   $("btn-no").focus();
 }
 
+// Al cerrar el tren se confirma (o se corrige) el nº de convoy de salida, que no es el de entrada del listado.
 $("alm-enviar").addEventListener("click", () => {
   clearError();
-  state.onConfirm = enviarTren;
-  $("confirm-txt").textContent = `Se generarán las dos Excel del tren ${alm.estado ? alm.estado.tren : ""}, se guardarán en SharePoint y se enviarán por correo.`;
-  $("confirm").hidden = false;
-  $("btn-no").focus();
+  const e = alm.estado;
+  if (!e) return showError("No hay ningún tren cargado.");
+  $("alm-cerrar-txt").textContent = `Tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` · convoy de entrada ${e.convoy}` : "") +
+    ". Se generarán las dos Excel, se guardarán en SharePoint y se enviarán por correo.";
+  $("alm-cerrar-convoy").value = e.convoy_salida || e.convoy || "";
+  $("alm-cerrar").hidden = false;
+  $("alm-cerrar-convoy").focus();
+  $("alm-cerrar").scrollIntoView({ block: "center" });
+});
+$("alm-cerrar-no").addEventListener("click", () => { $("alm-cerrar").hidden = true; });
+$("alm-cerrar").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  clearError();
+  const convoy = $("alm-cerrar-convoy").value.trim();
+  if (!convoy) return showError("Escribe el nº de convoy de salida.");
+  if (convoy !== (alm.estado.convoy_salida || "")) {
+    busy("Guardando el convoy de salida…");
+    try { const r = await post("/api/pr/tren/salida", { convoy_salida: convoy }); if (!r.simulado) pintarAlmacen(r); }
+    catch (e) { busy(null); return showError(e.message); }
+    busy(null);
+  }
+  $("alm-cerrar").hidden = true;
+  enviarTren();
 });
 async function enviarTren() {
   $("confirm").hidden = true;
