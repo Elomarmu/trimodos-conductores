@@ -22,7 +22,7 @@ from openpyxl.utils import get_column_letter
 sys.path.insert(0, str(Path(__file__).parent))
 import argon_lector as L  # noqa: E402
 
-LLEGADAS = ("SITUACION", "DISPONIBLE", "CARGA", "DESCARGA", "TRAYECTO")
+LLEGADAS = ("SITUACION", "DISPONIBLE", "CARGA", "CARGA_FALLIDA", "DESCARGA", "TRAYECTO")
 
 
 @dataclass
@@ -361,10 +361,18 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 nuevo(m, "CARGA", None, m["ubicacion"])
                 if m.get("horas_espera"):
                     nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
+            elif t == "CARGA_FALLIDA":
+                # sombreado amarillo con letra roja: fue a cargar y no pudo. Se factura con el código «CARGA FALLIDA»
+                # de PRODUCTOS (si no está, queda pendiente en el correo)
+                nuevo(m, "CARGA FALLIDA", None, m["ubicacion"])
+                if m.get("horas_espera"):
+                    nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
             elif t == "DESCARGA":
                 nuevo(m, "DESCARGA", None, m["ubicacion"])
                 # «DESCARGA» a secas: el cliente se lleva el contenedor por sus medios y no sabemos dónde descarga
-                res[-1].sitio_escrito = not re.fullmatch(r"DESCARGA\W*", L.norm(m["texto"] or "").replace("\xa0", " ").strip())
+                res[-1].sitio_escrito = not re.fullmatch(r"DESCARGA\W*(\d+\s*H\W*)?", L.norm(m["texto"] or "").replace("\xa0", " ").strip())
+                if m.get("horas_espera"):  # «DESCARGA 3H»: paralización de 3 horas en la descarga
+                    nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
             # códigos pactados escritos en la celda (TRASVASE, PESAR…) se añaden en tarificar()
             if t not in ("SALIDA_TREN", "CIRCULANDO") and m["ubicacion"]:
                 ultimo_sitio = m["ubicacion"]

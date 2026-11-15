@@ -132,7 +132,7 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
                 sit = "Taller / bloqueo"
             elif tren:
                 sit = "Tren cargado" if tren[2] else "Tren vacío"
-            elif e and e.tipo == "CARGA":
+            elif e and e.tipo in ("CARGA", "CARGA_FALLIDA"):
                 sit = "Carga"
             elif e and e.tipo == "DESCARGA":
                 sit = "Descarga"
