@@ -8,6 +8,7 @@ Aquí no hay llamadas a Odoo ni a Claude: solo tablas fijas y funciones puras (f
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -177,9 +178,14 @@ MESES = ("ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO
          "NOVIEMBRE", "DICIEMBRE")
 
 
+def sufijo_pedido() -> str:
+    """Sufijo opcional de la referencia (env PR_PEDIDO_SUFIJO, p. ej. « APP»): permite un pedido aparte para probar en paralelo."""
+    return os.environ.get("PR_PEDIDO_SUFIJO", "").rstrip()
+
+
 def referencia_pedido(fecha: str) -> str:
-    """Referencia del pedido mensual: «PR NOVIEMBRE» (como los pedidos que ya existen: «PR OCTUBRE»)."""
-    return f"PR {MESES[dt.date.fromisoformat(fecha).month - 1]}"
+    """Referencia del pedido mensual: «PR NOVIEMBRE» (como los pedidos que ya existen: «PR OCTUBRE») más el sufijo opcional."""
+    return f"PR {MESES[dt.date.fromisoformat(fecha).month - 1]}{sufijo_pedido()}"
 
 
 # ---- viaje: lo leído, ya limpio y comprobado --------------------------------------------------------------------

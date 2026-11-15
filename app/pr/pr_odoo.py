@@ -310,7 +310,7 @@ def desde_defecto() -> str:
 
 
 def pedidos_pr(odoo, desde: str) -> list[dict]:
-    refs = [f"PR {m}" for m in R.MESES]
+    refs = [f"PR {m}{R.sufijo_pedido()}" for m in R.MESES]
     return odoo("sale.order", "search_read", [[["partner_id", "=", R.CLIENTE_ID], ["company_id", "=", R.EMPRESA_ID],
                                                ["client_order_ref", "in", refs], ["date_order", ">=", f"{desde[:7]}-01 00:00:00"],
                                                ["state", "!=", "cancel"]]], fields=["name"], order="id")
