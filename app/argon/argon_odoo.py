@@ -75,7 +75,7 @@ def llamadas_rotacion(rot: str, servs: list[F.Servicio], cfg: dict) -> list[dict
     origin = f"ARGON|{cont}|ROT {inicio}"
     pedido = {"partner_id": cfg["cliente_id"], "company_id": cfg["empresa_id"], "origin": origin,
               "client_order_ref": f"{cont} · desde {dt.date.fromisoformat(inicio):%d/%m/%Y} hasta la descarga",
-              "type_id": cfg.get("tipo_pedido_id")}
+              "type_id": cfg.get("tipo_pedido_id"), "user_id": cfg.get("comercial_id")}
     pedido = {k: v for k, v in pedido.items() if v not in (None, "")}
     res = [{"paso": "equipo (contenedor) en TMS", "model": "tms.equipment", "method": "search",
             "args": [[["name", "=", cont.replace(" ", "").replace("-", "")]]], "kwargs": {"limit": 1}},

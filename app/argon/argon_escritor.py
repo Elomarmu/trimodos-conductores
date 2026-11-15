@@ -136,7 +136,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             if abierto:
                 if real:
                     odoo("sale.order", "write", [[abierto["id"]], {"order_line": [(0, 0, l) for l in nuevas]}])
-                    if abierto["state"] in ("draft", "sent"):
+                    if abierto["state"] in ("draft", "sent") and cfg.get("confirmar", True):
                         odoo("sale.order", "action_confirm", [[abierto["id"]]])
                 res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas),
                                                  "url": enlace(odoo, abierto["id"])})
@@ -147,10 +147,13 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                           "order_line": [(0, 0, l) for l in nuevas]}
                 if cfg.get("tipo_pedido_id"):
                     pedido["type_id"] = cfg["tipo_pedido_id"]
+                if cfg.get("comercial_id"):
+                    pedido["user_id"] = cfg["comercial_id"]  # comercial del pedido: distingue los del proceso de los manuales
                 nombre, oid = "(prueba)", None
                 if real:
                     oid = odoo("sale.order", "create", [pedido])
-                    odoo("sale.order", "action_confirm", [[oid]])
+                    if cfg.get("confirmar", True):  # confirmar=false: se deja en presupuesto (sin compras ni facturas)
+                        odoo("sale.order", "action_confirm", [[oid]])
                     nombre = odoo("sale.order", "search_read", [[["id", "=", oid]]], fields=["name"])[0]["name"]
                 res["pedidos_creados"].append({"pedido": nombre, "contenedor": cont, "lineas": len(nuevas),
                                                "url": enlace(odoo, oid) if oid else None,
