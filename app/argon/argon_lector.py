@@ -34,7 +34,11 @@ FUERA_SERVICIO = ("OFF HIRED", "OUT OF TRAFFIC", "OUT")
 RE_HORA = re.compile(r"\b(\d{1,2})[:.](\d{2})\b")
 RE_REF = re.compile(r"\b(\d{6})\b")            # nº de expedición / reserva de tren (p. ej. 914616)
 RE_CHASIS = re.compile(r"^(?:R)?(\d{4})(?:[A-Z]{3})?\b")  # 4154 PK ALG, R4154BBZ ...
-RE_DURACION = re.compile(r"\b(\d+)\s*H\b")      # GENT W 2h -> tiempo de carga
+RE_DURACION = re.compile(r"\b(\d+)\s*H\b")      # GENT W 2h -> horas de paralización en la carga o descarga
+RE_ADR = re.compile(r"^ADR\b")                   # «ADR 21/09»: próxima revisión ADR (en rojo, pero no bloquea)
+RE_SOLO_CHASIS = re.compile(r"^R?(\d{4,5})(?:[A-Z]{3})?$")  # solo el remolque: el contenedor está encima
+# «X -- Y» o «X - Y»: dos informaciones en la misma celda
+RE_DOBLE = re.compile(r"\s*--+\s*|\s+-\s+")
 
 
 def sin_acentos(t: str) -> str:
@@ -64,7 +68,7 @@ class Estado:
     contenedor: str
     codigo_corto: str
     texto: str
-    tipo: str                 # SITUACION | TRAYECTO | DISPONIBLE | SALIDA_TREN | CIRCULANDO | CARGA | DESCARGA | FUERA_SERVICIO
+    tipo: str                 # SITUACION | TRAYECTO | DISPONIBLE | SALIDA_TREN | CIRCULANDO | CARGA | CARGA_FALLIDA | DESCARGA | FUERA_SERVICIO
     ubicacion: str | None
     hora: str | None
     referencia: str | None
@@ -81,6 +85,28 @@ class Estado:
     forzar: str | None = None  # «FACT» = facturar aunque esté cancelada o en rojo · «NOFACT» = no facturar
     llegada: str | None = None  # «LLAG/ SL LLAGOSTA»: llega a LA LLAGOSTA y ese mismo día sale en otro tren
     reexpedicion: bool = False  # «MORROT REX» / «(REX)» / «-REX» / «REEXP»: en esa terminal coge otro tren (tramo nuevo)
+    info: list = field(default_factory=list)  # lo informativo de la celda que no cuenta («ADR 21/09»)
+
+
+def _gris(rgb: str | None) -> bool:
+    """Sombreado gris = sábado, domingo o festivo: no significa nada para el proceso."""
+    if not rgb:
+        return False
+    r, g, b = (int(rgb[i:i + 2], 16) for i in (2, 4, 6))
+    return max(r, g, b) - min(r, g, b) <= 0x10 and max(r, g, b) < 0xF8
+
+
+def separar_info(texto: str) -> tuple[str, list]:
+    """Quita de la celda lo que es solo informativo:
+    · «???»: indicación para los planificadores, no aporta nada.
+    · «ADR 21/09»: fecha de la próxima revisión ADR (va en rojo, pero el contenedor no está bloqueado).
+    Las indicaciones separadas por guion («MORELL -- ADR 21/09») son dos informaciones: se mira cada una por separado.
+    Devuelve (texto que cuenta, informaciones quitadas)."""
+    t = re.sub(r"\?+", " ", str(texto).replace("\xa0", " "))
+    partes = [x.strip() for x in RE_DOBLE.split(t)]
+    info = [x for x in partes if RE_ADR.match(norm(x))]
+    quedan = [x for x in partes if x and x not in info]
+    return " - ".join(quedan).strip(), info
 
 
 def color_rgb(color, tema: dict) -> str | None:
@@ -188,9 +214,9 @@ def _limpia(t: str) -> str:
     t = RE_HORA.sub("", t)
     t = RE_REF.sub("", t)
     t = RE_DURACION.sub("", t)
-    t = re.sub(r"^(SL|CR)\s+(A\s+)?", "", t)
+    t = re.sub(r"^(SL|CR|LL)\s+(A\s+)?", "", t)   # LL = llegada
     t = re.sub(r"\(.*?\)|\*", "", t)
-    t = re.sub(r"^DESCARGA\s*", "", t)
+    t = re.sub(r"^(DESCARGA|CARGA)\b\s*", "", t)
     return re.sub(r"\s+", " ", t).strip(" -/")
 
 
@@ -278,15 +304,18 @@ def interpretar(texto: str, celda, tema, alias) -> tuple[str, str | None, str | 
         tipo = "SALIDA_TREN"
     elif t.startswith("CR ") or t.startswith("CR-"):
         tipo = "CIRCULANDO"  # «CR A PORT BOU» = circulando a: el tren pasa por ahí, no es un servicio
-    elif fondo in AMARILLO_CARGA:
-        tipo = "CARGA"
+    elif fondo in AMARILLO_CARGA or re.match(r"CARGA\b", t):
+        tipo = "CARGA"   # «CARGA» a secas: carga pero no se sabe dónde
     elif fondo in NARANJA_DESCARGA or t.startswith("DESCARGA"):
         tipo = "DESCARGA"
     elif RE_HORA.search(t):
         tipo = "DISPONIBLE"
     else:
         tipo = "SITUACION"
-    ubic, origen, ini = (None, None, None) if tipo == "FUERA_SERVICIO" else ubicacion_de(t, alias)
+    if RE_SOLO_CHASIS.match(t):
+        ubic, origen, ini = None, None, None   # solo el remolque: el contenedor está encima (el color dice cómo va)
+    else:
+        ubic, origen, ini = (None, None, None) if tipo == "FUERA_SERVICIO" else ubicacion_de(t, alias)
     if origen and tipo == "SITUACION":
         tipo = "TRAYECTO"
 
@@ -294,7 +323,7 @@ def interpretar(texto: str, celda, tema, alias) -> tuple[str, str | None, str | 
     if (m := RE_HORA.search(t)):
         hora = f"{int(m.group(1)):02d}:{m.group(2)}"
     ref = (m.group(1) if (m := RE_REF.search(t)) else None)
-    chasis = (m.group(1) if (m := RE_CHASIS_PREF.match(t)) else None)
+    chasis = (m.group(1) if (m := RE_CHASIS_PREF.match(t) or RE_SOLO_CHASIS.match(t)) else None)
 
     if es_verde(letra):
         carga = "CARGADO"
@@ -303,11 +332,14 @@ def interpretar(texto: str, celda, tema, alias) -> tuple[str, str | None, str | 
     else:
         carga = "SIN_COLOR"
     bloqueado = letra in ROJO_BLOQUEO or _rojizo(letra)   # letra roja (negrita o no) = bloqueado
+    if bloqueado and fondo in AMARILLO_CARGA and tipo == "CARGA":
+        # sombreado amarillo con letra roja = carga fallida: fue a cargar y no pudo (no es un bloqueo)
+        tipo, bloqueado, carga = "CARGA_FALLIDA", False, "VACIO"
     if bloqueado:
         carga = "SIN_COLOR"
     if tipo == "CARGA" and carga == "VACIO":
         avisos.append("Carga marcada con letra de vacío")
-    if fondo and fondo not in AMARILLO_CARGA | NARANJA_DESCARGA and not fondo.startswith("FFBF") and fondo != "FFFFFFFF":
+    if fondo and fondo not in AMARILLO_CARGA | NARANJA_DESCARGA and not _gris(fondo) and fondo != "FFFFFFFF":
         avisos.append(f"Fondo no reconocido {fondo}")
     return tipo, ubic, hora, ref, chasis, origen, ini, carga, bloqueado, avisos
 
@@ -327,9 +359,14 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
             celda = ws[f"{k.columna}{r}"]
             if celda.value is None or not str(celda.value).strip():
                 continue
-            llegada, texto_int = llega_y_sale(str(celda.value), alias)
+            valor, info = separar_info(celda.value)
+            if not valor:
+                continue  # solo «ADR …» o «???»: informativo; sigue valiendo la situación anterior
+            llegada, texto_int = llega_y_sale(valor, alias)
             tipo, ubic, hora, ref, chasis, origen, ini, carga, bloq, avisos = interpretar(texto_int, celda, tema, alias)
-            if llegada and interpretar(str(celda.value), celda, tema, alias)[0] != "SALIDA_TREN" and \
+            if info and bloq:
+                bloq = False  # el rojo es por la fecha ADR, no un bloqueo
+            if llegada and interpretar(valor, celda, tema, alias)[0] != "SALIDA_TREN" and \
                     (relleno := (celda.fill.fgColor if celda.fill and celda.fill.fill_type == "solid" else None)) is not None \
                     and color_rgb(relleno, tema) in AMARILLO_CARGA:
                 # «GENT MBA - SL AMBERES» en una celda de carga: carga en GENT MBA y ese mismo día sale en tren de
@@ -349,11 +386,12 @@ def leer(ruta: str | Path, desde: dt.date | None = None, hasta: dt.date | None =
                 fecha=f.isoformat(), contenedor=k.matricula, codigo_corto=k.codigo_corto,
                 texto=str(celda.value).strip(), tipo=tipo, ubicacion=ubic, hora=hora, referencia=ref,
                 chasis=chasis, origen=origen, iniciales=ini,
-                horas_espera=(int(m.group(1)) if tipo == "CARGA" and (m := RE_DURACION.search(norm(celda.value))) else None),
+                horas_espera=(int(m.group(1)) if tipo in ("CARGA", "CARGA_FALLIDA", "DESCARGA")
+                              and (m := RE_DURACION.search(norm(valor))) else None),
                 carga=carga, bloqueado=bloq, cancelada=marcas(celda.value)[0], forzar=marcas(celda.value)[1],
                 comentario=(celda.comment.text.split(":", 1)[-1].strip() if celda.comment else None),
                 celda=celda.coordinate, avisos=avisos,
-                reexpedicion=bool(RE_REEX.search(norm(celda.value))), llegada=llegada))
+                reexpedicion=bool(RE_REEX.search(norm(valor))), llegada=llegada, info=info))
     return conts, estados
 
 

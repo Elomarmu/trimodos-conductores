@@ -676,3 +676,70 @@ def test_correo_freno_con_boton():
     av = {k: [] for k in ("bloqueados", "sin_anotar", "sl_sin_numero", "revisar", "vencimientos")}
     h = A.correo(dt.date(2026, 11, 11), res, av, None, "https://n8n/webhook/x")
     assert "PENDIENTE DE CONFIRMAR: 7" in h and "https://n8n/webhook/x" in h and "Revisado: relanzar y aplicar" in h
+
+
+# ------------------------------------------------------------------ reglas de anotación de la Excel (15/11/2026)
+def _celda(texto, letra=None, fondo=None):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    c = Workbook().active["B10"]
+    c.value = texto
+    if letra:
+        c.font = Font(color=letra)
+    if fondo:
+        c.fill = PatternFill("solid", fgColor=fondo)
+    return c
+
+
+ALIAS = {"MORELL": "MORELL", "GENT": "GENT", "MADRID": "MADRID", "LLAGOSTA": "LA LLAGOSTA", "NEG": "LA NEGRILLA"}
+
+
+def _interpreta(texto, letra=None, fondo=None):
+    from app.argon import argon_lector as L
+    valor, info = L.separar_info(texto)
+    if not valor:
+        return None, info
+    r = L.interpretar(valor, _celda(texto, letra, fondo), {}, ALIAS)
+    return r, info
+
+
+def test_adr_en_rojo_no_bloquea_y_las_interrogaciones_no_cuentan():
+    r, info = _interpreta("ADR 21/09", letra="FFFF0000")
+    assert r is None and info == ["ADR 21/09"]             # solo informativo: sigue la situación anterior
+    r, info = _interpreta("MORELL -- ADR 21/09", letra="FFFF0000")
+    assert r[1] == "MORELL" and info                        # doble información separada por guion
+    r, _ = _interpreta("MORELL ???")
+    assert r[1] == "MORELL"
+    assert _interpreta("???")[0] is None
+
+
+def test_ll_es_llegada_y_carga_sin_sitio():
+    r, _ = _interpreta("LL MADRID")
+    assert r[0] == "SITUACION" and r[1] == "MADRID"
+    r, _ = _interpreta("LL MADRID 14:00")
+    assert r[0] == "DISPONIBLE" and r[1] == "MADRID" and r[2] == "14:00"
+    r, _ = _interpreta("CARGA")
+    assert r[0] == "CARGA" and r[1] is None
+
+
+def test_carga_fallida_y_paralizacion_en_carga_y_descarga():
+    r, _ = _interpreta("GENT W", letra="FFFF0000", fondo="FFFFFF00")
+    assert r[0] == "CARGA_FALLIDA" and r[8] is False and r[7] == "VACIO"
+    r, _ = _interpreta("MORELL", letra="FFFF0000")
+    assert r[8] is True                                     # rojo sin sombreado amarillo: bloqueado
+    r, _ = _interpreta("GENT", fondo="FFBFBFBF")            # gris = festivo, sin aviso
+    assert r[0] == "SITUACION" and not r[9]
+    r, _ = _interpreta("4154BBZ", letra="FF006600")         # solo el remolque: contenedor encima, cargado
+    assert r[1] is None and r[4] == "4154" and r[7] == "CARGADO"
+
+
+def test_construir_carga_fallida_y_espera_en_descarga():
+    from app.argon import argon_facturacion as F
+    movs = [_mov("2026-11-02", "CARGA_FALLIDA", "GENT", "GENT 2H", horas_espera=2, carga="VACIO"),
+            _mov("2026-11-05", "DESCARGA", "MORELL", "DESCARGA 3H", horas_espera=3)]
+    s = F.construir(movs, {})
+    assert [(x.servicio, x.cantidad) for x in s] == [("CARGA", 1.0), ("ESPERA", 2), ("DESCARGA", 1.0), ("ESPERA", 3)]
+    assert s[0].detalle == "fallida" and s[3].detalle == "descarga" and s[2].sitio_escrito is False
+    from app.argon import argon_odoo as O
+    assert O.linea_de(s[0], {})["name"].startswith("Carga fallida en GENT")
+    assert O.linea_de(s[3], {})["name"].startswith("Espera en descarga")
