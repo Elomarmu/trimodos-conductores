@@ -83,7 +83,7 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
         ultima = max(x.fecha_fin or x.fecha for x in lst)
         if (fin or ultima) < d0:
             continue  # acabó antes del periodo
-        cargas = [x for x in lst if x.servicio == "CARGA"]
+        cargas = [x for x in lst if x.servicio == "CARGA" and x.detalle != "fallida"]
         trenes = [x for x in lst if x.servicio == "TREN"]
         previas = [f for f in descargas_por_cont[cont] if fin and f < fin]
         ciclo = (_d(fin) - _d(previas[-1])).days if fin and previas else None
@@ -194,7 +194,7 @@ def datos(ruta, hoy: dt.date, desde: dt.date = dt.date(2026, 1, 1)) -> dict:
     # ---------------------------------------------------------------- lugares
     lu = defaultdict(Counter)
     for s in servs:
-        if s.servicio in ("CARGA", "DESCARGA") and d0 <= s.fecha <= d1:
+        if s.servicio in ("CARGA", "DESCARGA") and s.detalle != "fallida" and d0 <= s.fecha <= d1:
             lu[s.destino or s.origen or "?"][s.servicio] += 1
     lugares = [{"lugar": k, "cargas": v["CARGA"], "descargas": v["DESCARGA"]} for k, v in lu.items()]
     lugares.sort(key=lambda r: (-(r["cargas"] + r["descargas"]), r["lugar"]))

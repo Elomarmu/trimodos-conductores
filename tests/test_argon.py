@@ -738,5 +738,8 @@ def test_construir_carga_fallida_y_espera_en_descarga():
     movs = [_mov("2026-11-02", "CARGA_FALLIDA", "GENT", "GENT 2H", horas_espera=2, carga="VACIO"),
             _mov("2026-11-05", "DESCARGA", "MORELL", "DESCARGA 3H", horas_espera=3)]
     s = F.construir(movs, {})
-    assert [(x.servicio, x.cantidad) for x in s] == [("CARGA FALLIDA", 1.0), ("ESPERA", 2), ("DESCARGA", 1.0), ("ESPERA", 3)]
-    assert s[2].sitio_escrito is False
+    assert [(x.servicio, x.cantidad) for x in s] == [("CARGA", 1.0), ("ESPERA", 2), ("DESCARGA", 1.0), ("ESPERA", 3)]
+    assert s[0].detalle == "fallida" and s[3].detalle == "descarga" and s[2].sitio_escrito is False
+    from app.argon import argon_odoo as O
+    assert O.linea_de(s[0], {})["name"].startswith("Carga fallida en GENT")
+    assert O.linea_de(s[3], {})["name"].startswith("Espera en descarga")
