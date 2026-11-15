@@ -27,6 +27,7 @@ PERMITIDO = {
     ("sale.order", "action_unlock"), ("sale.order", "action_lock"),  # corregir líneas de pedidos bloqueados
     ("product.product", "search_read"), ("res.partner", "search_read"),  # referencias de la Excel (solo lectura)
     ("account.analytic.account", "search_read"), ("fleet.vehicle", "search_read"),
+    ("account.analytic.distribution.model", "search_read"),  # analítica por producto (solo lectura)
 }
 
 
@@ -303,6 +304,22 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
     res["lineas_anuladas"] = [x for x in res["lineas_anuladas"] if x["pedido"] in nombres]
 
 
+def distribuciones_de_productos(odoo, servicios, cfg: dict) -> dict:
+    """producto → analytic_distribution de su modelo de distribución (sin contacto, de la empresa o compartido)."""
+    ids = sorted({s.producto_id for s in servicios if s.producto_id})
+    if not ids:
+        return {}
+    modelos = odoo("account.analytic.distribution.model", "search_read",
+                   [[["product_id", "in", ids], ["partner_id", "=", False]]],
+                   fields=["product_id", "company_id", "analytic_distribution"], order="id")
+    res = {}
+    for m in modelos:
+        if m["company_id"] and m["company_id"][0] != cfg["empresa_id"]:
+            continue
+        res.setdefault(m["product_id"][0], dict(m["analytic_distribution"] or {}))
+    return res
+
+
 def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0,
              hoy: dt.date | None = None):
     """Solo lleva a Odoo lo que ya ha pasado (celdas anteriores a hoy); lo demás es planificación."""
@@ -316,7 +333,10 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
         odoo = Odoo(os.environ["ARGON_ODOO_URL"], os.environ["ARGON_ODOO_DB"], os.environ["ARGON_ODOO_USER"],
                     os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
     # 60 días antes: para saber dónde empieza cada rotación. Productos y proveedores desde su referencia en Odoo.
+    F.ANALITICA_OPCIONAL = bool(cfg.get("analitica_por_producto"))
     servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo), hoy=hoy)
+    if cfg.get("analitica_por_producto"):
+        cfg = dict(cfg, _dist_producto=distribuciones_de_productos(odoo, servicios, cfg))
     rot = preparar(servicios, desde)
     # días de cada contenedor con algún servicio sin datos: sus líneas de Odoo no se anulan mientras tanto
     # si a una rotación le falta algún dato (tren sin tarifa, destino raro…), no se anula nada de esa rotación hasta

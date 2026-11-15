@@ -48,3 +48,11 @@ def test_por_defecto_confirma_y_sin_comercial(monkeypatch):
     o = _lanza(monkeypatch, {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41})
     assert "user_id" not in o.creados[0]
     assert len(o.confirmados) == 1
+
+
+def test_analitica_por_producto_con_etiqueta():
+    cfg = {"analitica_por_producto": True, "etiqueta_ids": [95389], "_dist_producto": {1309: {"95674": 100}}}
+    assert AO.analitica_de_producto(1309, cfg) == {"95674,95389": 100}
+    assert AO.analitica_de_producto(999, cfg) == {"95389": 100}   # sin modelo: solo la etiqueta
+    assert AO.analitica_de_producto(1309, {"_dist_producto": {1309: {"95674": 100}}}) == {"95674": 100}
+    assert AO.analitica_de_producto(5, {}) is None

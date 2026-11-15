@@ -74,6 +74,8 @@ class Servicio:
 
 
 # ------------------------------------------------------------------ tablas de la Excel
+ANALITICA_OPCIONAL = False  # lo fija argon_escritor.procesar según ARGON_CONFIG (analitica_por_producto)
+
 def _num(v):
     try:
         return None if v in (None, "") else float(v)
@@ -571,7 +573,7 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
             falta.append("pactar si se factura")
         if not s.producto_id:
             falta.append("producto")
-        if not s.analitica:
+        if not s.analitica and not ANALITICA_OPCIONAL:   # opcional si la analítica la pone el producto en Odoo
             falta.append("cuenta analítica")
         if s.precio is None:
             falta.append("precio")

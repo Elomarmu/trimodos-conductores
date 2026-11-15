@@ -37,6 +37,19 @@ def marca(s: F.Servicio) -> str:
     return "ARGON-" + hashlib.sha1(s.id_servicio.encode()).hexdigest()[:10]
 
 
+def analitica_de_producto(producto_id, cfg: dict) -> dict | None:
+    """Analítica de la línea cuando se deja que la ponga el producto: la de su modelo de distribución en Odoo
+    (cfg["_dist_producto"], cargada al empezar) más las etiquetas de cfg["etiqueta_ids"] (p. ej. LAR) en cada fila.
+    Sin modelo para el producto: solo las etiquetas."""
+    etiquetas = [str(i) for i in cfg.get("etiqueta_ids") or []]
+    base = (cfg.get("_dist_producto") or {}).get(producto_id) or {}
+    if not base and not etiquetas:
+        return None
+    if not base:
+        return {",".join(etiquetas): 100}
+    return {",".join([k, *[e for e in etiquetas if e not in k.split(",")]]): v for k, v in base.items()}
+
+
 def linea_de(s: F.Servicio, cfg: dict) -> dict:
     nombre = {"TREN": f"Tramo ferroviario {s.origen} → {s.destino}", "CARRETERA": f"Sale por carretera de {s.origen or ''} a {s.destino} (CVA)",
               "DESCARGA": "Descarga por medios del cliente" + (f" en {s.destino}" if s.sitio_escrito and s.destino else ""),
@@ -59,7 +72,7 @@ def linea_de(s: F.Servicio, cfg: dict) -> dict:
              "purchase_price": s.coste, "vendor_id": s.proveedor_id,
              "shipping_origin_id": s.origen_id, "shipping_destination_id": s.destino_id,
              "pickup_date": utc_mediodia(s.fecha), "forecast_unload_date": utc_mediodia(s.fecha_fin or s.fecha),
-             "analytic_distribution": s.analitica}
+             "analytic_distribution": analitica_de_producto(s.producto_id, cfg) if cfg.get("analitica_por_producto") else s.analitica}
     if s.servicio == "TRAYECTO" and s.estado != "INFORMATIVO" and (s.tractora_id or s.conductor_id):
         # acarreo que contratamos nosotros: tractora, remolque y conductor (el de la tractora en Odoo)
         linea.update({"tractor_id": s.tractora_id, "trailer_id": s.remolque_id, "driver_id": s.conductor_id,
