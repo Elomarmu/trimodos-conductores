@@ -258,6 +258,7 @@ def buscar(q: str = Query("", max_length=40)):
     if not p:
         raise AppError("No encuentro ese viaje.", 404, "no_encontrado")
     odoo = odoo_pr()
+    _pr(O.comprobar_de_app, odoo, p)
     tarea = (p.get("task_ids") or [None])[0]
     return {"bulto": p, "datos": R.leer_observaciones(p.get("unload_note")),
             "documentos": O.documentos(odoo, [tarea]).get(tarea, {d: False for d in R.DOCUMENTOS})}
@@ -271,6 +272,7 @@ def actualizar(body: Actualizar):
               fields=["name", "task_ids", "sale_line_ids", "unload_note", "shipping_origin_id"])
     if not ps:
         raise AppError("No encuentro ese viaje.", 404, "no_encontrado")
+    _pr(O.comprobar_de_app, odoo, ps[0])
     if s.dry_run:
         return {"simulado": True, "bulto": ps[0]["name"]}
     hechos = _pr(O.actualizar, odoo, ps[0], body.cambios) if body.cambios else []
