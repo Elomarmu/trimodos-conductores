@@ -228,7 +228,7 @@ def test_convoy_de_salida():
     e = O.estado_tren(odoo, t, odoo.viajes())
     assert e["convoy"] == "90107" and e["convoy_salida"] == "91234"
     ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "91234", "2026-11-09", O.cajas_en_orden(t), {}, "90107")))
-    assert ws["TREN 86"]["Q2"].value == "91234" and "de entrada: 90107" in ws["COMPOSICION"]["A2"].value
+    assert ws["TREN 86"]["Q2"].value == "91234" and "de entrada: 90107" in ws["COMPOSICION"]["D2"].value
 
 
 
@@ -335,3 +335,89 @@ def test_observaciones_de_la_carga_en_la_excel_del_tren(monkeypatch):
     A.tren_quitar(A.Asignar(bulto_id=11, caja_movil="CRPU0910070"))                             # al quitar la carga, fuera
     A.tren_quitar(A.Asignar(caja_movil="ICR102043", vacia=True))
     assert O.tren_actual(odoo).get("notas") == {}
+
+
+# ---- PR_PEDIDO_SUFIJO: solo los pedidos «PR <MES> APP» -------------------------------------------------------------
+
+class OdooSufijo:
+    """Dos bultos: uno del pedido manual S26100555 y otro del pedido «PR NOVIEMBRE APP»."""
+    LINEAS = {1: {"id": 1, "order_id": [100, "S26100555"]}, 2: {"id": 2, "order_id": [200, "S26100700"]}}
+    ORDENES = {100: {"id": 100, "client_order_ref": "PR NOVIEMBRE"}, 200: {"id": 200, "client_order_ref": "PR NOVIEMBRE APP"}}
+    BULTOS = {11: {"id": 11, "name": "PK2630626", "sale_line_ids": [1], "task_ids": [], "unload_note": "[PR SAICA]\nAlbarán salida: A1"},
+              12: {"id": 12, "name": "PK2630700", "sale_line_ids": [2], "task_ids": [], "unload_note": "[PR SAICA]\nAlbarán salida: A2"}}
+
+    def __call__(self, modelo, metodo, args, **kw):
+        assert (modelo, metodo) in O.PERMITIDO, (modelo, metodo)
+        dom = args[0]
+        if modelo == "sale.order.line":
+            return [self.LINEAS[i] for i in dom[0][2] if i in self.LINEAS]
+        if modelo == "sale.order":
+            if any(c[0] == "client_order_ref" for c in dom if isinstance(c, list)):   # pedidos_pr
+                refs = next(c[2] for c in dom if isinstance(c, list) and c[0] == "client_order_ref")
+                return [dict(o, name=f"S{o['id']}") for o in self.ORDENES.values() if o["client_order_ref"] in refs]
+            return [self.ORDENES[i] for i in dom[0][2] if i in self.ORDENES]
+        if modelo == "tms.package":
+            ids = [c[2] for c in dom if isinstance(c, list) and c[0] == "id"]
+            if ids:
+                return [self.BULTOS[ids[0]]] if ids[0] in self.BULTOS else []
+            return [self.BULTOS[11]]   # búsqueda por texto: siempre «encuentra» el bulto del pedido manual
+        raise AssertionError((modelo, metodo))
+
+
+def test_comprobar_de_app_sin_sufijo_no_consulta_nada(monkeypatch):
+    monkeypatch.delenv("PR_PEDIDO_SUFIJO", raising=False)
+    O.comprobar_de_app(lambda *a, **k: pytest.fail("no debería consultar Odoo"), {"id": 11})
+
+
+def test_comprobar_de_app_rechaza_el_pedido_manual(monkeypatch):
+    monkeypatch.setenv("PR_PEDIDO_SUFIJO", " APP")
+    odoo = OdooSufijo()
+    with pytest.raises(O.ErrorPR, match="Esta carga no es de la app"):
+        O.comprobar_de_app(odoo, odoo.BULTOS[11])
+    with pytest.raises(O.ErrorPR, match="Esta carga no es de la app"):
+        O.comprobar_de_app(odoo, {"id": 11})          # solo el id del bulto
+    O.comprobar_de_app(odoo, odoo.BULTOS[12])         # el de «PR NOVIEMBRE APP» pasa
+
+
+def test_pedidos_pr_solo_los_de_la_app(monkeypatch):
+    odoo = OdooSufijo()
+    monkeypatch.setenv("PR_PEDIDO_SUFIJO", " APP")
+    assert [p["id"] for p in O.pedidos_pr(odoo, "2026-11-01")] == [200]
+    monkeypatch.delenv("PR_PEDIDO_SUFIJO")
+    assert [p["id"] for p in O.pedidos_pr(odoo, "2026-11-01")] == [100]
+
+
+def test_buscar_y_actualizar_rechazan_cargas_ajenas(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    odoo = OdooSufijo()
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setenv("PR_PEDIDO_SUFIJO", " APP")
+    monkeypatch.setenv("ODOO_MODE", "mock")
+    monkeypatch.setenv("APP_ACCESS_CODE", "")
+    monkeypatch.setenv("APP_OFICINA_CODE", "")
+    c = TestClient(app)
+    for r in (c.get("/api/pr/buscar?q=PK2630626"),
+              c.post("/api/pr/actualizar", json={"bulto_id": 11, "cambios": {"peso_kg": 20000}})):
+        assert r.status_code == 409 and "Esta carga no es de la app" in r.json()["error"], r.text
+    for func, args in ((O.quitar, (11,)), (O.asignar, ({"tren": 1, "cajas": []}, [], 11, "X"))):   # tren/quitar y tren/asignar
+        with pytest.raises(O.ErrorPR, match="Esta carga no es de la app"):
+            func(odoo, *args)
+
+
+def test_registrar_buscar_pendientes_viajes_y_tren_usan_la_misma_referencia(monkeypatch):
+    """Con el sufijo « APP» todo usa «PR NOVIEMBRE APP», nunca «PR NOVIEMBRE»."""
+    monkeypatch.setenv("PR_PEDIDO_SUFIJO", " APP")
+    assert R.referencia_pedido("2026-11-09") == "PR NOVIEMBRE APP"          # registrar (crea el pedido del mes)
+    refs = []
+    class Espia:
+        def __call__(self, modelo, metodo, args, **kw):
+            if modelo == "sale.order":
+                valor = next(c[2] for c in args[0] if isinstance(c, list) and c[0] == "client_order_ref")
+                refs.extend(valor if isinstance(valor, list) else [valor])
+            return []
+    O.viajes(Espia())                                                       # viajes, pendientes y tren leen de aquí
+    assert "PR NOVIEMBRE APP" in refs and "PR NOVIEMBRE" not in refs
+    O.buscar_pedido_mes(Espia(), "2026-11-09")                              # donde registrar busca el pedido del mes
+    assert refs[-1] == "PR NOVIEMBRE APP"
+    assert O.ref_de_app("PR NOVIEMBRE APP") and not O.ref_de_app("PR NOVIEMBRE")

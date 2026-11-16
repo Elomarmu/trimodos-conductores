@@ -22,7 +22,7 @@ from openpyxl.utils import get_column_letter
 sys.path.insert(0, str(Path(__file__).parent))
 import argon_lector as L  # noqa: E402
 
-LLEGADAS = ("SITUACION", "DISPONIBLE", "CARGA", "DESCARGA", "TRAYECTO")
+LLEGADAS = ("SITUACION", "DISPONIBLE", "CARGA", "CARGA_FALLIDA", "DESCARGA", "TRAYECTO")
 
 
 @dataclass
@@ -71,9 +71,12 @@ class Servicio:
     ir: dict = field(default_factory=dict)  # dato que falta → celda de la Excel donde rellenarlo («'HOJA'!B5»)
     paradas: list = field(default_factory=list)  # tren: terminales por las que pasa sin «SL» [(sitio, fecha), …]
     sitio_escrito: bool = True  # DESCARGA: False si la celda pone «DESCARGA» sin sitio (por medios del cliente)
+    detalle: str | None = None  # «fallida»: CARGA que no se pudo hacer · «descarga»: ESPERA (paralización) en la descarga
 
 
 # ------------------------------------------------------------------ tablas de la Excel
+ANALITICA_OPCIONAL = False  # lo fija argon_escritor.procesar según ARGON_CONFIG (analitica_por_producto)
+
 def _num(v):
     try:
         return None if v in (None, "") else float(v)
@@ -359,10 +362,21 @@ def construir(movs: list[dict], tipos: dict | None = None) -> list[Servicio]:
                 nuevo(m, "CARGA", None, m["ubicacion"])
                 if m.get("horas_espera"):
                     nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
+            elif t == "CARGA_FALLIDA":
+                # sombreado amarillo con letra roja: fue a cargar y no pudo. Se factura como si se hubiera hecho (la
+                # carga, con su tarifa: el coste del acarreo), pero el contenedor sigue vacío
+                nuevo(m, "CARGA", None, m["ubicacion"])
+                res[-1].detalle = "fallida"
+                res[-1].notas.append("carga fallida: se factura como si se hubiera hecho")
+                if m.get("horas_espera"):
+                    nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
             elif t == "DESCARGA":
                 nuevo(m, "DESCARGA", None, m["ubicacion"])
                 # «DESCARGA» a secas: el cliente se lleva el contenedor por sus medios y no sabemos dónde descarga
-                res[-1].sitio_escrito = not re.fullmatch(r"DESCARGA\W*", L.norm(m["texto"] or "").replace("\xa0", " ").strip())
+                res[-1].sitio_escrito = not re.fullmatch(r"DESCARGA\W*(\d+\s*H\W*)?", L.norm(m["texto"] or "").replace("\xa0", " ").strip())
+                if m.get("horas_espera"):  # «DESCARGA 3H»: paralización de 3 horas en la descarga
+                    nuevo(m, "ESPERA", None, m["ubicacion"], cantidad=m["horas_espera"], unidad="hora")
+                    res[-1].detalle = "descarga"
             # códigos pactados escritos en la celda (TRASVASE, PESAR…) se añaden en tarificar()
             if t not in ("SALIDA_TREN", "CIRCULANDO") and m["ubicacion"]:
                 ultimo_sitio = m["ubicacion"]
@@ -571,7 +585,7 @@ def tarificar(servicios: list[Servicio], tablas: dict) -> list[Servicio]:
             falta.append("pactar si se factura")
         if not s.producto_id:
             falta.append("producto")
-        if not s.analitica:
+        if not s.analitica and not ANALITICA_OPCIONAL:   # opcional si la analítica la pone el producto en Odoo
             falta.append("cuenta analítica")
         if s.precio is None:
             falta.append("precio")

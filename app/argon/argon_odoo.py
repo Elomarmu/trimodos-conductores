@@ -37,11 +37,24 @@ def marca(s: F.Servicio) -> str:
     return "ARGON-" + hashlib.sha1(s.id_servicio.encode()).hexdigest()[:10]
 
 
+def analitica_de_producto(producto_id, cfg: dict) -> dict | None:
+    """Analítica de la línea cuando se deja que la ponga el producto: la de su modelo de distribución en Odoo
+    (cfg["_dist_producto"], cargada al empezar) más las etiquetas de cfg["etiqueta_ids"] (p. ej. LAR) en cada fila.
+    Sin modelo para el producto: solo las etiquetas."""
+    etiquetas = [str(i) for i in cfg.get("etiqueta_ids") or []]
+    base = (cfg.get("_dist_producto") or {}).get(producto_id) or {}
+    if not base and not etiquetas:
+        return None
+    if not base:
+        return {",".join(etiquetas): 100}
+    return {",".join([k, *[e for e in etiquetas if e not in k.split(",")]]): v for k, v in base.items()}
+
+
 def linea_de(s: F.Servicio, cfg: dict) -> dict:
     nombre = {"TREN": f"Tramo ferroviario {s.origen} → {s.destino}", "CARRETERA": f"Sale por carretera de {s.origen or ''} a {s.destino} (CVA)",
               "DESCARGA": "Descarga por medios del cliente" + (f" en {s.destino}" if s.sitio_escrito and s.destino else ""),
-              "CARGA": f"Carga en {s.destino or ''}",
-              "TRAYECTO": f"Traslado {s.origen} → {s.destino}", "ESPERA": f"Espera en carga {s.destino}: {s.cantidad:g} h",
+              "CARGA": ("Carga fallida en " if s.detalle == "fallida" else "Carga en ") + (s.destino or ""),
+              "TRAYECTO": f"Traslado {s.origen} → {s.destino}", "ESPERA": f"Espera en {'descarga' if s.detalle == 'descarga' else 'carga'} {s.destino}: {s.cantidad:g} h",
               "BLOQUEO": f"Bloqueado (taller, reparación…): {s.texto}"}.get(
         s.servicio, f"{s.producto or s.servicio} {s.destino or ''}")
     if s.servicio == "TREN" and s.via:
@@ -59,7 +72,7 @@ def linea_de(s: F.Servicio, cfg: dict) -> dict:
              "purchase_price": s.coste, "vendor_id": s.proveedor_id,
              "shipping_origin_id": s.origen_id, "shipping_destination_id": s.destino_id,
              "pickup_date": utc_mediodia(s.fecha), "forecast_unload_date": utc_mediodia(s.fecha_fin or s.fecha),
-             "analytic_distribution": s.analitica}
+             "analytic_distribution": analitica_de_producto(s.producto_id, cfg) if cfg.get("analitica_por_producto") else s.analitica}
     if s.servicio == "TRAYECTO" and s.estado != "INFORMATIVO" and (s.tractora_id or s.conductor_id):
         # acarreo que contratamos nosotros: tractora, remolque y conductor (el de la tractora en Odoo)
         linea.update({"tractor_id": s.tractora_id, "trailer_id": s.remolque_id, "driver_id": s.conductor_id,
@@ -75,7 +88,7 @@ def llamadas_rotacion(rot: str, servs: list[F.Servicio], cfg: dict) -> list[dict
     origin = f"ARGON|{cont}|ROT {inicio}"
     pedido = {"partner_id": cfg["cliente_id"], "company_id": cfg["empresa_id"], "origin": origin,
               "client_order_ref": f"{cont} · desde {dt.date.fromisoformat(inicio):%d/%m/%Y} hasta la descarga",
-              "type_id": cfg.get("tipo_pedido_id")}
+              "type_id": cfg.get("tipo_pedido_id"), "user_id": cfg.get("comercial_id")}
     pedido = {k: v for k, v in pedido.items() if v not in (None, "")}
     res = [{"paso": "equipo (contenedor) en TMS", "model": "tms.equipment", "method": "search",
             "args": [[["name", "=", cont.replace(" ", "").replace("-", "")]]], "kwargs": {"limit": 1}},

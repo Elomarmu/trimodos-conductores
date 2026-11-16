@@ -27,6 +27,7 @@ PERMITIDO = {
     ("sale.order", "action_unlock"), ("sale.order", "action_lock"),  # corregir líneas de pedidos bloqueados
     ("product.product", "search_read"), ("res.partner", "search_read"),  # referencias de la Excel (solo lectura)
     ("account.analytic.account", "search_read"), ("fleet.vehicle", "search_read"),
+    ("account.analytic.distribution.model", "search_read"),  # analítica por producto (solo lectura)
 }
 
 
@@ -136,7 +137,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             if abierto:
                 if real:
                     odoo("sale.order", "write", [[abierto["id"]], {"order_line": [(0, 0, l) for l in nuevas]}])
-                    if abierto["state"] in ("draft", "sent"):
+                    if abierto["state"] in ("draft", "sent") and cfg.get("confirmar", True):
                         odoo("sale.order", "action_confirm", [[abierto["id"]]])
                 res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas),
                                                  "url": enlace(odoo, abierto["id"])})
@@ -147,10 +148,13 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                           "order_line": [(0, 0, l) for l in nuevas]}
                 if cfg.get("tipo_pedido_id"):
                     pedido["type_id"] = cfg["tipo_pedido_id"]
+                if cfg.get("comercial_id"):
+                    pedido["user_id"] = cfg["comercial_id"]  # comercial del pedido: distingue los del proceso de los manuales
                 nombre, oid = "(prueba)", None
                 if real:
                     oid = odoo("sale.order", "create", [pedido])
-                    odoo("sale.order", "action_confirm", [[oid]])
+                    if cfg.get("confirmar", True):  # confirmar=false: se deja en presupuesto (sin compras ni facturas)
+                        odoo("sale.order", "action_confirm", [[oid]])
                     nombre = odoo("sale.order", "search_read", [[["id", "=", oid]]], fields=["name"])[0]["name"]
                 res["pedidos_creados"].append({"pedido": nombre, "contenedor": cont, "lineas": len(nuevas),
                                                "url": enlace(odoo, oid) if oid else None,
@@ -300,6 +304,22 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
     res["lineas_anuladas"] = [x for x in res["lineas_anuladas"] if x["pedido"] in nombres]
 
 
+def distribuciones_de_productos(odoo, servicios, cfg: dict) -> dict:
+    """producto → analytic_distribution de su modelo de distribución (sin contacto, de la empresa o compartido)."""
+    ids = sorted({s.producto_id for s in servicios if s.producto_id})
+    if not ids:
+        return {}
+    modelos = odoo("account.analytic.distribution.model", "search_read",
+                   [[["product_id", "in", ids], ["partner_id", "=", False]]],
+                   fields=["product_id", "company_id", "analytic_distribution"], order="id")
+    res = {}
+    for m in modelos:
+        if m["company_id"] and m["company_id"][0] != cfg["empresa_id"]:
+            continue
+        res.setdefault(m["product_id"][0], dict(m["analytic_distribution"] or {}))
+    return res
+
+
 def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date | None = None, limite_s: float = 20.0,
              hoy: dt.date | None = None):
     """Solo lleva a Odoo lo que ya ha pasado (celdas anteriores a hoy); lo demás es planificación."""
@@ -313,7 +333,10 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
         odoo = Odoo(os.environ["ARGON_ODOO_URL"], os.environ["ARGON_ODOO_DB"], os.environ["ARGON_ODOO_USER"],
                     os.environ["ARGON_ODOO_PASSWORD"], cfg["empresa_id"])
     # 60 días antes: para saber dónde empieza cada rotación. Productos y proveedores desde su referencia en Odoo.
+    F.ANALITICA_OPCIONAL = bool(cfg.get("analitica_por_producto"))
     servicios = F.calcular(ruta_excel, desde - dt.timedelta(days=60), completar=lambda t: R.completar(t, odoo), hoy=hoy)
+    if cfg.get("analitica_por_producto"):
+        cfg = dict(cfg, _dist_producto=distribuciones_de_productos(odoo, servicios, cfg))
     rot = preparar(servicios, desde)
     # días de cada contenedor con algún servicio sin datos: sus líneas de Odoo no se anulan mientras tanto
     # si a una rotación le falta algún dato (tren sin tarifa, destino raro…), no se anula nada de esa rotación hasta

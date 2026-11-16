@@ -134,9 +134,9 @@ def test_libro_del_tren_con_hoja_composicion():
     libro = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "90107", "2026-11-09", CAJAS, {})))
     assert libro.sheetnames == ["TREN 86", "COMPOSICION"]
     ws = libro["COMPOSICION"]
-    assert ws["A1"].value == "COMPOSICIÓN DEL TREN 86" and "09-11-2026" in ws["A2"].value
-    assert [c.value for c in ws[5]] == [1, "388049630055", "CRPU0910069", 5600]
-    assert [c.value for c in ws[6]] == ["“", "“", "CTEA25000377", 4400]
+    assert ws["D1"].value == "COMPOSICIÓN DEL TREN 86" and "09-11-2026" in ws["D2"].value and ws._images   # título junto al logo de STINSA
+    assert [c.value for c in ws[5]][:4] == [1, "388049630055", "CRPU0910069", 5600]
+    assert [c.value for c in ws[6]][:4] == ["“", "“", "CTEA25000377", 4400]
     assert all(libro["TREN 86"].cell(f, 3).value is None for f in (6, 7))   # recién cargado: cajas vacías
 
 
