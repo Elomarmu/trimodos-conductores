@@ -35,7 +35,9 @@ import re
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, Query
+import hmac
+
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
@@ -49,6 +51,7 @@ from . import stock_store as S
 
 log = logging.getLogger("stock")
 router = APIRouter(prefix="/api/stock", tags=["stock"])
+correo = APIRouter(prefix="/api/stock", tags=["stock-correo"])   # n8n: correos del buzón agente.burriana@stinsa.com (clave X-Clave)
 MADRID = ZoneInfo("Europe/Madrid")
 MAX_FOTOS_ALBARAN = 4
 
@@ -119,6 +122,8 @@ class AlbaranIn(BaseModel):
     fecha: str = Field("", max_length=10)
     remitente: str = Field("", max_length=120)
     destinatario: str = Field("", max_length=120)
+    cliente_final: str = Field("", max_length=120)    # el cliente de nuestro cliente (solo informativo, no se factura)
+    codigo_cliente_final: str = Field("", max_length=40)
     transportista: str = Field("", max_length=120)
     matricula: str = Field("", max_length=20)
     total_palets: int | None = None
@@ -132,6 +137,8 @@ class EntradaIn(BaseModel):
     cliente: str = Field(max_length=40)            # código del cliente
     albaran: AlbaranIn
     fotos: list[PA.Archivo] = Field([], max_length=MAX_FOTOS_ALBARAN)
+    esperados: list[dict] = Field([], max_length=600)   # lista de palets del albarán (código, ref, kg, lote), si la trae
+    fecha_entrada: str = Field("", max_length=10)       # día de entrada en el almacén (por defecto, el del albarán)
     confirmado: bool = False                       # ya ha visto los errores y sigue
 
 
@@ -147,6 +154,7 @@ class SalidaIn(BaseModel):
     destino: str = Field("", max_length=120)
     transportista: str = Field("", max_length=120)
     fecha_pedida: str = Field("", max_length=10)
+    esperados: list[dict] = Field([], max_length=600)   # palets pedidos uno a uno (código, ref), si la petición los lista
     lineas: list[LineaPedido] = Field(min_length=1, max_length=60)
     foto: PA.Archivo | None = None                 # la petición del cliente (se guarda y va en el correo)
     confirmado: bool = False
@@ -172,6 +180,15 @@ class Quitar(BaseModel):
 class Cerrar(BaseModel):
     confirmado: bool = False
     nota: str = Field("", max_length=300)
+    observaciones: str | None = Field(None, max_length=1000)   # incidencias de la descarga o la carga (si vienen, sustituyen a las guardadas)
+
+
+class Observaciones(BaseModel):
+    texto: str = Field("", max_length=1000)
+
+
+class FechaEntrada(BaseModel):
+    fecha: str = Field(max_length=10)
 
 
 class ClienteIn(BaseModel):
@@ -179,6 +196,7 @@ class ClienteIn(BaseModel):
     nombre: str = Field(min_length=2, max_length=120)
     alias: list[str] = Field([], max_length=20)
     activo: bool = True
+    referencias: list[dict] | None = Field(None, max_length=600)   # catálogo: [{ref, descripcion}]; None = no tocar
 
 
 # ---- utilidades -------------------------------------------------------------------------------------------------------
@@ -190,8 +208,19 @@ def _leer(func, *args):
         raise AppError(str(e), 502, "lectura_fallo")
 
 
+REFERENCIAS_RAMINATRANS = [
+    ("6030100800103", "TAZA WC TRIPOLI BLANCO DUAL"), ("6030100800222", "CISTERNA ENTRADA SUP WC TRIPOLI / CORINTO"),
+    ("6030100800223", "CISTERNA ENTRADA INF WC TRIPOLI / CORINTO"), ("6030100100223", "CISTERNA ENTRADA INF WC OLIMPIA / CRETA / ATENAS / ESPARTA"),
+    ("6030100111103", "PACK WC OLIMPIA SUSPENDIDO BLANCO"), ("6030100200103", "WC ATENAS"), ("6030100211103", "PACK WC ATENAS SUSPENDIDO BLANCO")]
+# El primer cliente del almacén: así está dado de alta desde el primer día (se puede cambiar en «Clientes del almacén»).
+CLIENTE_INICIAL = {"codigo": "RAMINATRANS", "nombre": "Raminatrans Castellón, S.L.", "activo": True, "odoo_partner_id": None,
+                   "alias": ["RAMINATRANS", "GRUPO RAMINATRANS", "RAMINATRANS CASTELLON"],
+                   "referencias": [{"ref": r, "descripcion": d} for r, d in REFERENCIAS_RAMINATRANS]}
+
+
 def clientes(store) -> list[dict]:
-    return (store.leer("config", "clientes") or {}).get("clientes", [])
+    guardados = store.leer("config", "clientes")
+    return guardados["clientes"] if guardados and guardados.get("clientes") else [dict(CLIENTE_INICIAL)]
 
 
 def _documento(store, tipo: str, ident: str) -> dict:
@@ -207,7 +236,7 @@ def _limpio(nombre: str) -> str:
 
 def _guardar_foto(store, doc: str, nombre: str, archivo: PA.Archivo) -> str:
     datos, tipo = PA._bytes(archivo)
-    nombre = _limpio(nombre) + {"application/pdf": ".pdf", "image/png": ".png"}.get(tipo, ".jpg")
+    nombre = _limpio(nombre) + {"application/pdf": ".pdf", "image/png": ".png", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx"}.get(tipo, ".jpg")
     store.guardar_foto(doc, nombre, datos, tipo)
     return nombre
 
@@ -221,9 +250,19 @@ def _esperar_abierta(op: dict, cerrado: str, que: str) -> None:
         raise AppError(f"Esta {que} ya está {'cerrada' if que == 'entrada' else 'cargada'}.", 409, "cerrada")
 
 
+def _por_revisar(op: dict) -> bool:
+    return op.get("origen") == "correo" and not op.get("revisada")
+
+
+def _exigir_revisada(op: dict) -> None:
+    if _por_revisar(op):
+        raise AppError("Esta operación llegó por correo y la oficina todavía no la ha revisado. Pulsa «Está bien» tras comprobar los datos.", 409, "sin_revisar")
+
+
 def _resumen_entrada(e: dict) -> dict:
     lineas = R.estado_lineas(e)
     return {"id": e["id"], "estado": e["estado"], "cliente": e["cliente"], "albaran": e["albaran"].get("numero"), "fecha": e["albaran"].get("fecha"),
+            "fecha_entrada": R.fecha_entrada(e), "cliente_final": e["albaran"].get("cliente_final") or "", "por_revisar": _por_revisar(e),
             "creada": e["creada"], "cerrada": e.get("cerrada"), "esperados": sum(l["esperados"] for l in lineas),
             "verificados": sum(l["verificados"] for l in lineas), "discrepancias": len(R.discrepancias_entrada(e)) if e["estado"] != R.ENTRADA_CERRADA
             else len(e.get("discrepancias_cierre") or [])}
@@ -232,12 +271,12 @@ def _resumen_entrada(e: dict) -> dict:
 def _detalle_entrada(e: dict) -> dict:
     return {**_resumen_entrada(e), "albaran_datos": e["albaran"], "lineas": R.estado_lineas(e), "palets": R.activos(e),
             "avisos": e.get("avisos") or [], "discrepancias_lista": R.discrepancias_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else e.get("discrepancias_cierre") or [],
-            "nota_cierre": e.get("nota_cierre") or ""}
+            "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or ""}
 
 
 def _resumen_salida(s: dict) -> dict:
     lineas = R.estado_lineas_salida(s)
-    return {"id": s["id"], "estado": s["estado"], "cliente": s["cliente"], "referencia": s.get("referencia"), "destino": s.get("destino"),
+    return {"id": s["id"], "estado": s["estado"], "cliente": s["cliente"], "referencia": s.get("referencia"), "destino": s.get("destino"), "por_revisar": _por_revisar(s),
             "creada": s["creada"], "cargada": s.get("cargada"), "pedidos": sum(l["pedidos"] for l in lineas), "cargados": sum(l["cargados"] for l in lineas),
             "discrepancias": len(R.discrepancias_salida(s)) if s["estado"] != R.SALIDA_CARGADA else len(s.get("discrepancias_cierre") or [])}
 
@@ -246,7 +285,7 @@ def _detalle_salida(s: dict) -> dict:
     return {**_resumen_salida(s), "datos": {k: s.get(k) for k in ("referencia", "destino", "transportista", "fecha_pedida")}, "lineas": R.estado_lineas_salida(s),
             "palets": [p for p in s["palets"] if p.get("estado_alta") != "quitado"], "avisos": s.get("avisos") or [],
             "discrepancias_lista": R.discrepancias_salida(s) if s["estado"] != R.SALIDA_CARGADA else s.get("discrepancias_cierre") or [],
-            "nota_cierre": s.get("nota_cierre") or ""}
+            "nota_cierre": s.get("nota_cierre") or "", "observaciones": s.get("observaciones") or ""}
 
 
 def _todo(store) -> tuple[list[dict], list[dict], list[dict]]:
@@ -269,10 +308,14 @@ def post_cliente(body: ClienteIn):
     store = get_store()
     lista = clientes(store)
     codigo = (body.codigo or R.norm(body.nombre).split(" ")[0]).upper()
-    c = {"codigo": codigo, "nombre": body.nombre.strip(), "alias": [a.strip() for a in body.alias if a.strip()], "activo": body.activo, "odoo_partner_id": None}
+    c = {"codigo": codigo, "nombre": body.nombre.strip(), "alias": [a.strip() for a in body.alias if a.strip()], "activo": body.activo, "odoo_partner_id": None,
+         "referencias": [{"ref": str(r.get("ref") or "").strip(), "descripcion": str(r.get("descripcion") or "").strip()}
+                         for r in body.referencias or [] if str(r.get("ref") or "").strip()]}
     previo = R.cliente_por_codigo(lista, codigo)
     if previo:
         c["odoo_partner_id"] = previo.get("odoo_partner_id")
+        if body.referencias is None:
+            c["referencias"] = previo.get("referencias") or []
         lista = [c if x["codigo"] == codigo else x for x in lista]
     else:
         lista.append(c)
@@ -284,14 +327,40 @@ def post_cliente(body: ClienteIn):
 
 @router.post("/entradas/leer")
 def entradas_leer(body: Archivos):
+    return _preparar_entrada([PA._bytes(a) for a in body.archivos])
+
+
+def _preparar_entrada(todos: list[tuple[bytes, str]]) -> dict:
+    """Albarán (fotos, PDF y/o Excel del cliente) → datos leídos, cliente recomendado y conflictos. Lo usan la pantalla y el correo."""
     store = get_store()
-    archivos = [PA._bytes(a) for a in body.archivos]
-    albaran = R.limpiar_albaran(_leer(L.leer_albaran, archivos))
+    excels = [a for a in todos if L.es_excel(*a)]
+    archivos = [a for a in todos if a not in excels]
+    leido = _leer(L.leer_albaran, archivos) if archivos else {"lineas": [], "dudas": []}
+    if excels:   # el Excel del cliente (una fila por palet) manda sobre lo que lea la IA del PDF
+        ex = _leer(L.leer_excel_albaran, excels[0][0])
+        leido_pdf = leido
+        lotes = {R.sscc(x.get("codigo")): x.get("entrada") for x in leido_pdf.get("palets_detalle") or [] if x.get("entrada")}
+        detalle = [{**x, "entrada": x.get("entrada") or lotes.get(R.sscc(x["codigo"]), "")} for x in ex["palets_detalle"]]   # el lote («Entrada») sale del PDF
+        leido = {**leido, "lineas": ex["lineas"], "palets_detalle": detalle, "total_palets": ex["total_palets"],
+                 "total_kg": ex["total_kg"], "dudas": list(leido_pdf.get("dudas") or [])}
+        en_pdf = {R.sscc(x.get("codigo")) for x in leido_pdf.get("palets_detalle") or []}
+        if en_pdf and en_pdf != {R.sscc(x["codigo"]) for x in ex["palets_detalle"]}:
+            leido["dudas"].append("El PDF y el Excel no listan exactamente los mismos palets: manda el Excel (es el que se usa).")
+        if leido_pdf.get("total_palets") and leido_pdf["total_palets"] != ex["total_palets"]:
+            leido["dudas"].append(f"El PDF dice {leido_pdf['total_palets']} palets y el Excel trae {ex['total_palets']}.")
+        if not archivos:
+            leido["dudas"].append("Solo has subido el Excel: faltan el número y la fecha del albarán (están en el PDF); escríbelos.")
+    albaran = R.limpiar_albaran(leido)
+    esperados = R.limpiar_esperados(leido.get("palets_detalle"))
+    if esperados and not any(l["palets"] for l in albaran["lineas"]):   # albarán que solo lista palets: se cuentan
+        for l in albaran["lineas"]:
+            l["palets"] = sum(1 for x in esperados if R.referencia(x["ref"]) == R.referencia(l["ref"]))
     cli = clientes(store)
-    sugeridos = R.sugerir_clientes(cli, albaran["remitente"], albaran["destinatario"])
+    sugeridos = R.sugerir_clientes(cli, *R.textos_cliente(albaran))
     elegido = sugeridos[0][0] if sugeridos and (len(sugeridos) == 1 or sugeridos[0][1] > sugeridos[1][1]) else None
     entradas = store.listar("entrada")
-    return {"albaran": albaran, "cliente_sugerido": elegido["codigo"] if elegido else None,
+    return {"albaran": albaran, "esperados": esperados, "fecha_entrada": albaran["fecha"] or dt.datetime.now(MADRID).date().isoformat(),
+            "cliente_sugerido": elegido["codigo"] if elegido else None,
             "candidatos": [{"codigo": c["codigo"], "nombre": c["nombre"], "puntos": p} for c, p in sugeridos[:3]],
             "avisos": R.conflictos_entrada(albaran, elegido, cli, entradas), "clientes": cli}
 
@@ -304,7 +373,7 @@ def entradas_crear(body: EntradaIn):
     if not cliente:
         raise AppError("Elige el cliente de la lista (si es nuevo, dalo de alta primero).", 400, "sin_cliente")
     albaran = R.limpiar_albaran({"numero_albaran": body.albaran.numero, "fecha": body.albaran.fecha, "remitente": body.albaran.remitente,
-                                 "destinatario": body.albaran.destinatario, "transportista": body.albaran.transportista, "matricula": body.albaran.matricula,
+                                 "destinatario": body.albaran.destinatario, "cliente_final": body.albaran.cliente_final, "codigo_cliente_final": body.albaran.codigo_cliente_final, "transportista": body.albaran.transportista, "matricula": body.albaran.matricula,
                                  "total_palets": body.albaran.total_palets, "total_kg": body.albaran.total_kg, "observaciones": body.albaran.observaciones,
                                  "lineas": [{"referencia": l.ref, "descripcion": l.descripcion, "palets": l.palets, "bultos": l.bultos, "kg": l.kg, "lote": l.lote}
                                             for l in body.albaran.lineas], "dudas": body.albaran.dudas})
@@ -315,8 +384,9 @@ def entradas_crear(body: EntradaIn):
         raise AppError(" ".join(errores) + " ¿Quieres guardarla igualmente?", 409, "entrada_conflicto")
     ident = R.siguiente_id("E", [e["id"] for e in entradas], dt.datetime.now(MADRID).year)
     e = {"id": ident, "estado": R.ENTRADA_PENDIENTE, "creada": ahora(), "cliente": {"codigo": cliente["codigo"], "nombre": cliente["nombre"]},
-         "albaran": {k: albaran[k] for k in ("numero", "fecha", "remitente", "destinatario", "transportista", "matricula", "total_palets", "total_kg", "observaciones")},
-         "lineas": albaran["lineas"], "avisos": avisos, "palets": []}
+         "albaran": {k: albaran[k] for k in ("numero", "fecha", "remitente", "destinatario", "cliente_final", "codigo_cliente_final", "transportista", "matricula", "total_palets", "total_kg", "observaciones")},
+         "fecha_entrada": R.fecha(body.fecha_entrada) or albaran["fecha"] or dt.datetime.now(MADRID).date().isoformat(),
+         "lineas": albaran["lineas"], "esperados": R.limpiar_esperados(body.esperados), "avisos": avisos, "palets": []}
     store.escribir("entrada", ident, e)
     for i, f in enumerate(body.fotos, start=1):
         try:
@@ -390,12 +460,13 @@ def entrada_quitar(ident: str, body: Quitar):
     return _detalle_entrada(e)
 
 
-def _cuerpo_correo(titulo: str, cabecera: str, filas_cab: list[str], tabla: str, disc: list[str], nota: str) -> str:
+def _cuerpo_correo(titulo: str, cabecera: str, filas_cab: list[str], tabla: str, disc: list[str], nota: str, observaciones: str = "") -> str:
     estilo = "font:11pt Calibri,Arial"
+    inc = (f"<p style='{estilo};color:#C00000'><b>Incidencias en el almacén:</b><br>" + html.escape(observaciones).replace("\n", "<br>") + "</p>") if observaciones else ""
     d = (f"<p style='{estilo};color:#C00000'><b>Discrepancias aceptadas:</b><br>" + "<br>".join(html.escape(x) for x in disc)
          + (f"<br><i>{html.escape(nota)}</i>" if nota else "") + "</p>") if disc else f"<p style='{estilo}'>Sin discrepancias.</p>"
     return (f"<p style='{estilo}'><b>{html.escape(titulo)}</b></p><p style='{estilo}'>{cabecera}</p>"
-            + "".join(f"<p style='{estilo}'>{x}</p>" for x in filas_cab) + tabla + d
+            + "".join(f"<p style='{estilo}'>{x}</p>" for x in filas_cab) + inc + tabla + d
             + f"<p style='{estilo};color:#595959'>Se adjuntan la Excel y las fotos para reenviar al cliente. {html.escape(R.ALMACEN)}.</p>")
 
 
@@ -414,8 +485,9 @@ def _enviar_entrada(store, e: dict) -> tuple[bool, list[dict]]:
                            f"Albarán <b>{html.escape(a.get('numero') or '—')}</b> del {html.escape('-'.join(reversed((a.get('fecha') or '').split('-'))))} · "
                            f"{html.escape(a.get('matricula') or '')} · {html.escape(a.get('transportista') or '')}",
                            [f"{sum(l['verificados'] for l in lineas)} de {sum(l['esperados'] for l in lineas)} palets verificados con su etiqueta."],
-                           tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "")
-    ok = enviar_n8n({"evento": "entrada_cerrada", "carpeta": carpeta, "asunto": f"Almacén Burriana · Entrada {e['id']} · {e['cliente']['nombre']} · albarán {a.get('numero') or ''}".strip(),
+                           tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "", e.get("observaciones") or "")
+    ok = enviar_n8n({"evento": "entrada_cerrada", "carpeta": carpeta,
+                     "asunto": ("⚠ " if e.get("observaciones") else "") + f"Almacén Burriana · Entrada {e['id']} · {e['cliente']['nombre']} · albarán {a.get('numero') or ''}".strip(),
                      "html": html_, "archivos": archivos, "fotos": fotos})
     return ok, archivos[:1]
 
@@ -425,6 +497,7 @@ def entrada_cerrar(ident: str, body: Cerrar):
     store = get_store()
     e = _documento(store, "entrada", ident)
     _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
+    _exigir_revisada(e)
     if not R.activos(e):
         raise AppError("Todavía no hay ningún palet verificado.", 409, "sin_palets")
     disc = R.discrepancias_entrada(e)
@@ -433,11 +506,47 @@ def entrada_cerrar(ident: str, body: Cerrar):
     for p in R.activos(e):
         if p["estado"] == "discrepancia":
             p["aceptado"] = True
+    if body.observaciones is not None:
+        e["observaciones"] = body.observaciones.strip()
     e.update(estado=R.ENTRADA_CERRADA, cerrada=ahora(), discrepancias_cierre=disc, nota_cierre=body.nota.strip())
     store.escribir("entrada", e["id"], e)   # primero el estado: el envío nunca lo deshace
     enviado, archivos = _enviar_entrada(store, e)
     log.info("entrada %s cerrada: %s palets, %s discrepancias, enviado=%s", e["id"], len(R.activos(e)), len(disc), enviado)
     return {"entrada": _detalle_entrada(e), "enviado": enviado, "para": destinatarios(), "archivos": archivos}
+
+
+@router.post("/entradas/{ident}/fecha")
+def entrada_fecha(ident: str, body: FechaEntrada):
+    """Cambia el día de entrada en el almacén (p. ej. el camión se cargó un día y se descarga al siguiente). Solo antes de cerrarla."""
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
+    f = R.fecha(body.fecha)
+    if not f:
+        raise AppError("La fecha no es válida.", 400, "fecha_invalida")
+    e["fecha_entrada"] = f
+    store.escribir("entrada", e["id"], e)
+    return _detalle_entrada(e)
+
+
+@router.post("/entradas/{ident}/revisar")
+def entrada_revisar(ident: str):
+    """La oficina da por buena una entrada preparada desde un correo."""
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    e["revisada"] = True
+    store.escribir("entrada", e["id"], e)
+    return _detalle_entrada(e)
+
+
+@router.post("/entradas/{ident}/observaciones")
+def entrada_observaciones(ident: str, body: Observaciones):
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
+    e["observaciones"] = body.texto.strip()
+    store.escribir("entrada", e["id"], e)
+    return _detalle_entrada(e)
 
 
 @router.post("/entradas/{ident}/reenviar")
@@ -454,11 +563,22 @@ def entrada_reenviar(ident: str):
 
 @router.post("/salidas/leer")
 def salidas_leer(body: Archivos):
+    return _preparar_salida([PA._bytes(a) for a in body.archivos])
+
+
+def _preparar_salida(todos: list[tuple[bytes, str]]) -> dict:
     store = get_store()
-    pet = R.limpiar_peticion(_leer(L.leer_peticion, [PA._bytes(a) for a in body.archivos]))
+    excels = [a for a in todos if L.es_excel(*a)]
+    resto = [a for a in todos if a not in excels]
+    leido = _leer(L.leer_peticion, resto) if resto else {"lineas": [], "dudas": []}
+    if excels:   # Excel con una fila por palet: da las líneas y la lista exacta de códigos pedidos
+        ex = _leer(L.leer_excel_albaran, excels[0][0])
+        leido = {**leido, "lineas": ex["lineas"], "palets_detalle": ex["palets_detalle"]}
+    pet = R.limpiar_peticion(leido)
+    esperados = R.limpiar_esperados(leido.get("palets_detalle"))
     cli = clientes(store)
     sugeridos = R.sugerir_clientes(cli, pet["cliente_texto"])
-    return {"peticion": pet, "cliente_sugerido": sugeridos[0][0]["codigo"] if sugeridos else None,
+    return {"peticion": pet, "esperados": esperados, "cliente_sugerido": sugeridos[0][0]["codigo"] if sugeridos else None,
             "candidatos": [{"codigo": c["codigo"], "nombre": c["nombre"], "puntos": p} for c, p in sugeridos[:3]], "clientes": cli}
 
 
@@ -473,8 +593,13 @@ def salidas_crear(body: SalidaIn):
     s = {"id": ident, "estado": R.SALIDA_PEDIDA, "creada": ahora(), "cliente": {"codigo": cliente["codigo"], "nombre": cliente["nombre"]},
          "referencia": body.referencia.strip(), "destino": body.destino.strip(), "transportista": body.transportista.strip(),
          "fecha_pedida": R.fecha(body.fecha_pedida), "lineas": [{"ref": l.ref.strip(), "descripcion": l.descripcion.strip(), "palets": l.palets} for l in body.lineas],
-         "palets": [], "avisos": []}
-    s["avisos"] = R.conflictos_salida(s, R.stock(entradas, salidas))
+         "esperados": R.limpiar_esperados(body.esperados), "palets": [], "avisos": []}
+    existencias = R.stock(entradas, salidas)
+    s["avisos"] = R.conflictos_salida(s, existencias)
+    en_stock = {p["sscc"] for p in existencias if p.get("sscc")}
+    ausentes = [x["codigo"] for x in s["esperados"] if x["codigo"] not in en_stock]
+    if ausentes:
+        s["avisos"].append(R.aviso("error", f"{len(ausentes)} palets de la petición no están en el stock del almacén ({', '.join(ausentes[:5])}{'…' if len(ausentes) > 5 else ''})."))
     errores = [a["texto"] for a in s["avisos"] if a["nivel"] == "error"]
     if errores and not body.confirmado:
         raise AppError(" ".join(errores) + " ¿Quieres cargar la petición igualmente?", 409, "salida_conflicto")
@@ -562,8 +687,8 @@ def _enviar_salida(store, s: dict) -> tuple[bool, list[dict]]:
     html_ = _cuerpo_correo(f"Salida {s['id']} · {s['cliente']['nombre']}",
                            f"Pedido <b>{html.escape(s.get('referencia') or '—')}</b> · destino {html.escape(s.get('destino') or '—')} · {html.escape(s.get('transportista') or '')}",
                            [f"{sum(l['cargados'] for l in lineas)} de {sum(l['pedidos'] for l in lineas)} palets cargados."],
-                           tabla, s.get("discrepancias_cierre") or [], s.get("nota_cierre") or "")
-    ok = enviar_n8n({"evento": "salida_cargada", "carpeta": carpeta, "asunto": f"Almacén Burriana · Salida {s['id']} · {s['cliente']['nombre']}"
+                           tabla, s.get("discrepancias_cierre") or [], s.get("nota_cierre") or "", s.get("observaciones") or "")
+    ok = enviar_n8n({"evento": "salida_cargada", "carpeta": carpeta, "asunto": ("⚠ " if s.get("observaciones") else "") + f"Almacén Burriana · Salida {s['id']} · {s['cliente']['nombre']}"
                      + (f" · pedido {s['referencia']}" if s.get("referencia") else ""), "html": html_, "archivos": archivos, "fotos": fotos})
     return ok, archivos[:1]
 
@@ -573,6 +698,7 @@ def salida_cerrar(ident: str, body: Cerrar):
     store = get_store()
     s = _documento(store, "salida", ident)
     _esperar_abierta(s, R.SALIDA_CARGADA, "salida")
+    _exigir_revisada(s)
     if not [p for p in s["palets"] if p.get("estado_alta") != "quitado"]:
         raise AppError("Todavía no hay ningún palet cargado.", 409, "sin_palets")
     disc = R.discrepancias_salida(s)
@@ -581,11 +707,32 @@ def salida_cerrar(ident: str, body: Cerrar):
     for p in s["palets"]:
         if p.get("estado_alta") != "quitado" and p["estado"] == "discrepancia":
             p["aceptado"] = True
+    if body.observaciones is not None:
+        s["observaciones"] = body.observaciones.strip()
     s.update(estado=R.SALIDA_CARGADA, cargada=ahora(), discrepancias_cierre=disc, nota_cierre=body.nota.strip())
     store.escribir("salida", s["id"], s)
     enviado, archivos = _enviar_salida(store, s)
     log.info("salida %s cargada: %s discrepancias, enviado=%s", s["id"], len(disc), enviado)
     return {"salida": _detalle_salida(s), "enviado": enviado, "para": destinatarios(), "archivos": archivos}
+
+
+@router.post("/salidas/{ident}/revisar")
+def salida_revisar(ident: str):
+    store = get_store()
+    s = _documento(store, "salida", ident)
+    s["revisada"] = True
+    store.escribir("salida", s["id"], s)
+    return _detalle_salida(s)
+
+
+@router.post("/salidas/{ident}/observaciones")
+def salida_observaciones(ident: str, body: Observaciones):
+    store = get_store()
+    s = _documento(store, "salida", ident)
+    _esperar_abierta(s, R.SALIDA_CARGADA, "salida")
+    s["observaciones"] = body.texto.strip()
+    store.escribir("salida", s["id"], s)
+    return _detalle_salida(s)
 
 
 @router.post("/salidas/{ident}/reenviar")
@@ -634,3 +781,100 @@ def facturacion(desde: str = Query(pattern=r"^\d{4}-\d{2}-\d{2}$"), hasta: str =
     """Preparación de la facturación en Odoo: movimientos del periodo convertidos en líneas (sin tarifas, sin importe)."""
     entradas, salidas, _ = _todo(get_store())
     return {"desde": desde, "hasta": hasta, "lineas": F.lineas_facturables(entradas, salidas, desde, hasta)}
+
+
+# ---- correos del buzón agente.burriana@stinsa.com (los manda n8n) ------------------------------------------------------
+
+PALABRAS_SALIDA = ("SALIDA", "RECOGER", "RECOGIDA", "RETIRAR", "RETIRADA", "PEDIDO DE CARGA")
+
+
+def require_correo(x_clave: str = Header("")):
+    """n8n manda la clave secreta del flujo en X-Clave (STOCK_CORREO_CLAVE, mínimo 8 caracteres). Sin clave configurada, no hay acceso."""
+    clave = os.environ.get("STOCK_CORREO_CLAVE", "")
+    if len(clave) >= 8 and hmac.compare_digest(x_clave.encode(), clave.encode()):
+        return
+    raise AppError("No autorizado.", 401, "codigo_invalido")
+
+
+class Adjunto(BaseModel):
+    nombre: str = Field("", max_length=200)
+    tipo: str = Field("", max_length=100)
+    archivo_b64: str = Field(max_length=6_000_000)
+
+
+class CorreoIn(BaseModel):
+    mensaje_id: str = Field("", max_length=400)      # id del correo: si n8n repite el envío, no se duplica la operación
+    de: str = Field("", max_length=200)
+    asunto: str = Field("", max_length=300)
+    cuerpo: str = Field("", max_length=8000)
+    adjuntos: list[Adjunto] = Field([], max_length=8)
+
+
+def _tipo_adjunto(a: Adjunto) -> str:
+    n = a.nombre.lower()
+    if n.endswith(".xlsx"):
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if n.endswith(".pdf"):
+        return "application/pdf"
+    if n.endswith(".png"):
+        return "image/png"
+    if n.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    return a.tipo
+
+
+def _resultado(estado: str, **resto) -> dict:
+    return {"resultado": estado, "para": destinatarios(), **resto}
+
+
+@correo.post("/correo", dependencies=[Depends(require_correo)])
+def correo_recibido(body: CorreoIn):
+    """Un correo del cliente con su albarán (PDF, Excel o fotos): se prepara la ENTRADA (o la SALIDA, si el correo habla de
+    recoger o retirar mercancía) para que la oficina la revise en la app. Nunca se cierra nada solo."""
+    store = get_store()
+    if body.mensaje_id:   # el mismo correo otra vez (n8n reintenta): devuelve lo ya creado
+        for tipo in ("entrada", "salida"):
+            previo = next((d for d in store.listar(tipo) if d.get("correo_id") == body.mensaje_id), None)
+            if previo:
+                return _resultado("creada", tipo=tipo, id=previo["id"], cliente=previo["cliente"]["nombre"], avisos=[], repetido=True)
+    adjuntos = []
+    for a in body.adjuntos:
+        tipo = _tipo_adjunto(a)
+        if tipo == "application/pdf" or tipo.startswith("image/") or L.es_excel(b"", tipo):
+            adjuntos.append(PA.Archivo(archivo_b64=a.archivo_b64, tipo=tipo))
+    if not adjuntos:
+        return _resultado("no_procesada", motivo="El correo no trae ningún PDF, Excel ni foto con el albarán o la petición.")
+    texto = " " + R.norm(body.asunto + " " + body.cuerpo) + " "
+    es_salida = any(f" {w} " in texto for w in PALABRAS_SALIDA)
+    try:
+        todos = [PA._bytes(a) for a in adjuntos]
+        if es_salida:
+            prep = _preparar_salida(todos)
+            if not prep["cliente_sugerido"]:
+                return _resultado("no_procesada", tipo="salida", motivo="No reconozco al cliente de la petición de salida: cárgala a mano en la app.")
+            p = prep["peticion"]
+            if not p["lineas"]:
+                return _resultado("no_procesada", tipo="salida", motivo="No he encontrado qué palets piden: cárgala a mano en la app.")
+            op = salidas_crear(SalidaIn(cliente=prep["cliente_sugerido"], referencia=p["referencia"], destino=p["destino"], fecha_pedida=p["fecha"],
+                                        lineas=[LineaPedido(ref=l["ref"], descripcion=l["descripcion"], palets=l["palets"]) for l in p["lineas"]],
+                                        esperados=prep["esperados"], foto=adjuntos[0]))
+            tipo, tabla = "salida", "salida"
+            avisos = [a["texto"] for a in op["avisos"]]
+        else:
+            prep = _preparar_entrada(todos)
+            if not prep["cliente_sugerido"]:
+                return _resultado("no_procesada", tipo="entrada", motivo="No reconozco al cliente del albarán (o encaja con varios): cárgalo a mano en la app.",
+                                  avisos=[a["texto"] for a in prep["avisos"]])
+            op = entradas_crear(EntradaIn(cliente=prep["cliente_sugerido"], albaran=AlbaranIn(**prep["albaran"]), esperados=prep["esperados"],
+                                          fecha_entrada=prep["fecha_entrada"], fotos=adjuntos[:MAX_FOTOS_ALBARAN]))
+            tipo, tabla = "entrada", "entrada"
+            avisos = [a["texto"] for a in prep["avisos"]]
+    except AppError as e:   # albarán repetido, petición con palets que no hay, lectura fallida…: lo ve la oficina por correo
+        return _resultado("no_procesada", tipo="salida" if es_salida else "entrada", motivo=e.message)
+    doc = store.leer(tabla, op["id"])
+    doc.update(origen="correo", revisada=False, correo_id=body.mensaje_id, correo_de=body.de, correo_asunto=body.asunto)
+    store.escribir(tabla, op["id"], doc)
+    log.info("%s %s preparada desde un correo de %s", tipo, op["id"], body.de)
+    extra = {"albaran": prep["albaran"]["numero"], "palets": sum(l.get("palets") or 0 for l in prep["albaran"]["lineas"])} if tipo == "entrada" else {
+        "pedido": prep["peticion"]["referencia"], "palets": sum(l.get("palets") or 0 for l in prep["peticion"]["lineas"])}
+    return _resultado("creada", tipo=tipo, id=op["id"], cliente=doc["cliente"]["nombre"], avisos=avisos, **extra)

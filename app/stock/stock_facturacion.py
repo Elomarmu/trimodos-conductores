@@ -21,7 +21,7 @@ def movimientos(entradas: list[dict], salidas: list[dict]) -> list[dict]:
             continue
         for p in R.activos(e):
             if p["estado"] == "ok" or p.get("aceptado"):
-                res.append({"fecha": e["cerrada"][:10], "tipo": "ENTRADA", "cliente": e["cliente"]["codigo"], "ref": p["ref"], "lote": p["lote"],
+                res.append({"fecha": R.fecha_entrada(e), "tipo": "ENTRADA", "cliente": e["cliente"]["codigo"], "ref": p["ref"], "lote": p["lote"],
                             "sscc": p["sscc"], "palet_id": p["id"], "kg": p["kg"], "documento": e["id"]})
     for s in salidas:
         if s["estado"] != R.SALIDA_CARGADA:

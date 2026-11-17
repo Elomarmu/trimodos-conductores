@@ -401,3 +401,147 @@ def test_excel_libro_vacio():
     wb = openpyxl.load_workbook(io.BytesIO(X.libro_control([], [], CLIENTES, HOY)))
     assert wb.sheetnames == ["RESUMEN STOCK", "STOCK", "ENTRADAS", "SALIDAS", "MOVIMIENTOS", "CLIENTES"]
     assert wb["CLIENTES"]["A5"].value == "KERAKOLL"
+
+
+# ---- primer cliente: Raminatrans Castellón (operador) con albaranes de su cliente BECRISA ------------------------------
+
+def _excel_albaran(codigos, ref="6030100800103", kg=348, entrada=""):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Nº producto", "Descripción", "Cantidad", "SKU", "Nº lote", "kg brutos", "Nº documento entrada"])
+    for c in codigos:
+        ws.append([ref, "TAZA WC TRIPOLI BLANCO DUAL", 12, c, "", kg, entrada])
+    b = io.BytesIO(); wb.save(b)
+    return b.getvalue()
+
+
+def test_excel_del_cliente_se_lee_sin_ia_y_da_la_lista_de_palets_con_su_peso():
+    from app.stock import stock_lector as L
+    ex = L.leer_excel_albaran(_excel_albaran(["2600044888", "2600044889"]))
+    assert ex["lineas"][0]["palets"] == 2 and ex["lineas"][0]["kg"] == 696
+    assert [(p["codigo"], p["kg"]) for p in ex["palets_detalle"]] == [("2600044888", 348), ("2600044889", 348)]
+
+
+def test_etiqueta_de_10_cifras_se_casa_por_codigo_y_no_controla_unidades():
+    cli = {"codigo": "RAMINATRANS", "nombre": "Raminatrans Castellón, S.L.", "alias": ["GRUPO RAMINATRANS"]}
+    esp = R.limpiar_esperados([{"codigo": "2600044888", "referencia": "6030100800103", "kg": 348, "entrada": "ECS26-3266"},
+                               {"codigo": "2600044889", "referencia": "6030100800103", "kg": 348, "entrada": "ECS26-3267"}])
+    e = {"id": "E-1", "cliente": cli, "albaran": {"remitente": "Grupo Raminatrans"}, "esperados": esp, "palets": [],
+         "lineas": [{"ref": "6030100800103", "descripcion": "TAZA", "palets": 2, "kg": 696, "lote": ""}]}
+    def et(cod, entrada=None, uds=12, cliente="Grupo Raminatrans"):
+        return R.limpiar_etiqueta({"sscc": cod, "referencia": "6030100800103", "bultos": uds, "entrada": entrada, "cliente": cliente, "dudas": []})
+    p1 = R.verificar_palet(e, et("2600044888", "ECS26-3266"), set())
+    assert p1["estado"] == "ok" and p1["kg"] == 348 and p1["lote"] == "ECS26-3266"      # el peso sale del albarán, el lote es la «Entrada»
+    e["palets"].append(p1)
+    assert "repetido" in R.verificar_palet(e, et("2600044888", "ECS26-3266"), set())["motivo"]
+    assert "no está en la lista" in R.verificar_palet(e, et("2600051441", "ECS26-3696"), set())["motivo"]
+    assert "entrada ECS26-3267" in R.verificar_palet(e, et("2600044889", "ECS26-3999"), set())["motivo"]
+    assert R.verificar_palet(e, et("2600044889", "ECS26-3267", uds=3), set())["estado"] == "ok"     # las unidades de la etiqueta no se controlan
+    assert R.verificar_palet(e, et("2600044889", "ECS26-3267", cliente="OTRA EMPRESA"), set())["estado"] == "discrepancia"
+    assert any("2600044889" in d for d in R.discrepancias_entrada(e))                              # falta etiquetar el segundo
+
+
+def test_el_cliente_es_el_operador_y_el_cliente_final_es_solo_informativo():
+    cli = [{"codigo": "RAMINATRANS", "nombre": "Raminatrans Castellón, S.L.", "alias": ["RAMINATRANS"]}]
+    alb = R.limpiar_albaran({"numero_albaran": "SRCS26-04809", "fecha": "2026-11-18", "remitente": "Grupo Raminatrans", "destinatario": "STINSA",
+                             "cliente_final": "BECRISA 2011 S.L.U.", "codigo_cliente_final": "03783",
+                             "lineas": [{"referencia": "6030100800103", "descripcion": "TAZA", "palets": 30}]})
+    assert alb["cliente_final"] == "BECRISA 2011 S.L.U."
+    assert R.sugerir_clientes(cli, *R.textos_cliente(alb))[0][0]["codigo"] == "RAMINATRANS"
+    assert R.conflictos_entrada(alb, cli[0], cli, [], dt.date(2026, 11, 17)) == []       # albarán de mañana: sin aviso de fecha
+
+
+def test_catalogo_de_referencias_avisa_de_referencias_desconocidas():
+    cli = {"codigo": "RAMINATRANS", "nombre": "Raminatrans", "referencias": [{"ref": "6030100800103", "descripcion": "TAZA"}]}
+    alb = R.limpiar_albaran({"numero_albaran": "1", "fecha": "2026-11-17", "lineas": [{"referencia": "603010080010", "descripcion": "TAZA", "palets": 3}]})
+    assert any("603010080010" in a["texto"] and "catálogo" in a["texto"] for a in R.conflictos_entrada(alb, cli, [cli], [], dt.date(2026, 11, 17)))
+
+
+def test_primer_cliente_precargado_con_su_catalogo():
+    st = S.MemoriaStore()
+    cs = A.clientes(st)
+    assert cs[0]["codigo"] == "RAMINATRANS" and len(cs[0]["referencias"]) == 7 and "6030100800103" in {r["ref"] for r in cs[0]["referencias"]}
+
+
+def test_entrada_con_pdf_y_excel_fecha_editable_observaciones_y_salida_con_codigos(cliente, monkeypatch, enviados):
+    codigos = ["2600044888", "2600044889", "2600044860"]
+    xlsx = {"archivo_b64": base64.b64encode(_excel_albaran(codigos)).decode(), "tipo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+    pdf = {"archivo_b64": base64.b64encode(b"%PDF-1.4").decode(), "tipo": "application/pdf"}
+    pdf_leido = {"numero_albaran": "SRCS26-04809", "fecha": "2026-11-18", "remitente": "Grupo Raminatrans", "destinatario": "STINSA",
+                 "cliente_final": "BECRISA 2011 S.L.U.", "codigo_cliente_final": "03783", "lineas": [], "total_palets": 3,
+                 "palets_detalle": [{"codigo": c, "entrada": f"ECS26-{3266 + i}"} for i, c in enumerate(codigos)], "dudas": []}
+    etiquetas = [{"sscc": c, "referencia": "6030100800103", "entrada": f"ECS26-{3266 + i}", "cliente": "Grupo Raminatrans", "dudas": []} for i, c in enumerate(codigos)]
+    leer_con(monkeypatch, albaran=pdf_leido, etiquetas=etiquetas)
+    rr = cliente.post("/api/stock/entradas/leer", json={"archivos": [pdf, xlsx]})   # el primer cliente ya viene dado de alta
+    assert rr.status_code == 200, rr.text
+    d = rr.json()
+    assert d["cliente_sugerido"] == "RAMINATRANS" and d["albaran"]["cliente_final"] == "BECRISA 2011 S.L.U." and d["fecha_entrada"] == "2026-11-18"
+    assert [x["lote"] for x in d["esperados"]] == ["ECS26-3266", "ECS26-3267", "ECS26-3268"] and d["albaran"]["lineas"][0]["palets"] == 3
+    assert not d["avisos"]
+    r = cliente.post("/api/stock/entradas", json={"cliente": "RAMINATRANS", "albaran": d["albaran"], "esperados": d["esperados"], "fecha_entrada": "2026-11-19", "fotos": [pdf, xlsx]})
+    assert r.status_code == 200, r.text
+    ident = r.json()["id"]
+    assert r.json()["fecha_entrada"] == "2026-11-19"                                           # se descarga un día después del albarán
+    assert cliente.post(f"/api/stock/entradas/{ident}/fecha", json={"fecha": "2026-11-20"}).json()["fecha_entrada"] == "2026-11-20"
+    for _ in codigos:
+        assert cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO}).json()["palet"]["estado"] == "ok"
+    assert cliente.post(f"/api/stock/entradas/{ident}/observaciones", json={"texto": "Un palet con el film roto"}).status_code == 200
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    assert r.status_code == 200, r.text
+    e = enviados[-1]
+    assert e["asunto"].startswith("⚠ ") and "film roto" in e["html"]
+    st = cliente.get("/api/stock/stock").json()
+    assert sum(p["kg"] for p in st["palets"]) == 3 * 348 and {p["fecha_entrada"] for p in st["palets"]} == {"2026-11-20"}
+    assert {p["cliente_final"] for p in st["palets"]} == {"BECRISA 2011 S.L.U."}
+    # salida con lista de códigos: lo declarado se comprueba contra el stock y al cargar
+    monkeypatch.setattr(A.L, "leer_etiqueta", lambda datos, tipo, cli=None: etiquetas.pop(0))
+    etiquetas[:] = [{"sscc": "2600044888", "referencia": "6030100800103", "cliente": "Grupo Raminatrans", "dudas": []},
+                    {"sscc": "2600044860", "referencia": "6030100800103", "cliente": "Grupo Raminatrans", "dudas": []}]
+    pet = cliente.post("/api/stock/salidas/leer", json={"archivos": [{"archivo_b64": base64.b64encode(_excel_albaran(["2600044888", "2600044889"])).decode(),
+                                                                       "tipo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}]}).json()
+    assert [x["codigo"] for x in pet["esperados"]] == ["2600044888", "2600044889"]
+    s = cliente.post("/api/stock/salidas", json={"cliente": "RAMINATRANS", "lineas": [{"ref": "6030100800103", "palets": 2}], "esperados": pet["esperados"]}).json()
+    assert cliente.post(f"/api/stock/salidas/{s['id']}/etiqueta", json={"foto": FOTO}).json()["palet"]["estado"] == "ok"
+    p2 = cliente.post(f"/api/stock/salidas/{s['id']}/etiqueta", json={"foto": FOTO}).json()["palet"]
+    assert p2["estado"] == "discrepancia" and "no está en la lista de palets de la petición" in p2["motivo"]
+    pedido_falso = cliente.post("/api/stock/salidas", json={"cliente": "RAMINATRANS", "lineas": [{"ref": "6030100800103", "palets": 1}],
+                                                            "esperados": [{"codigo": "2600099999", "referencia": "6030100800103"}]})
+    assert pedido_falso.status_code == 409 and "no están en el stock" in pedido_falso.json()["error"]
+
+
+def test_correo_del_buzon_prepara_la_entrada_para_revisar_y_no_se_duplica(cliente, monkeypatch, enviados):
+    monkeypatch.setenv("STOCK_CORREO_CLAVE", "clave-de-prueba-123")
+    h = {"X-Clave": "clave-de-prueba-123"}
+    codigos = ["2600044888", "2600044889"]
+    xlsx = {"nombre": "TRASLADO.xlsx", "tipo": "application/octet-stream", "archivo_b64": base64.b64encode(_excel_albaran(codigos)).decode()}
+    pdf = {"nombre": "TRASLADO.pdf", "tipo": "application/pdf", "archivo_b64": base64.b64encode(b"%PDF-1.4").decode()}
+    leido = {"numero_albaran": "SRCS26-04809", "fecha": "2026-11-18", "remitente": "Grupo Raminatrans", "destinatario": "STINSA",
+             "cliente_final": "BECRISA 2011 S.L.U.", "lineas": [], "palets_detalle": [], "dudas": []}
+    leer_con(monkeypatch, albaran=leido, etiquetas=[{"sscc": c, "referencia": "6030100800103", "cliente": "Grupo Raminatrans", "dudas": []} for c in codigos],
+             peticion={"cliente": "Raminatrans", "referencia_cliente": "REC-1", "lineas": [{"referencia": "6030100800103", "palets": 1}], "dudas": []})
+    correo = {"mensaje_id": "AAMk-1", "de": "logistica@raminatrans.com", "asunto": "1º traslado STINSA", "cuerpo": "Os remito el albarán.", "adjuntos": [pdf, xlsx]}
+    assert cliente.post("/api/stock/correo", json=correo).status_code == 401                      # sin clave no entra
+    r = cliente.post("/api/stock/correo", json=correo, headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["resultado"] == "creada" and d["tipo"] == "entrada" and d["cliente"] == "Raminatrans Castellón, S.L." and d["palets"] == 2 and d["albaran"] == "SRCS26-04809"
+    ident = d["id"]
+    assert cliente.get(f"/api/stock/entradas/{ident}").json()["por_revisar"] is True
+    assert cliente.post("/api/stock/correo", json=correo, headers=h).json()["id"] == ident          # mismo correo: no duplica
+    assert len(cliente.get("/api/stock/entradas").json()["entradas"]) == 1
+    for _ in codigos:
+        cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    assert r.status_code == 409 and r.json()["codigo"] == "sin_revisar"                              # hasta que la oficina la revise
+    assert cliente.post(f"/api/stock/entradas/{ident}/revisar").json()["por_revisar"] is False
+    assert cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).status_code == 200
+    # el mismo albarán en otro correo → no se crea, se avisa a la oficina
+    r = cliente.post("/api/stock/correo", json={**correo, "mensaje_id": "AAMk-2"}, headers=h).json()
+    assert r["resultado"] == "no_procesada" and "ya está cargado" in r["motivo"]
+    # sin adjuntos útiles
+    r = cliente.post("/api/stock/correo", json={"mensaje_id": "AAMk-3", "asunto": "hola", "adjuntos": [{"nombre": "firma.gif", "tipo": "image/gif", "archivo_b64": "AAAA"}]}, headers=h).json()
+    assert r["resultado"] == "no_procesada"
+    # el correo habla de recoger mercancía → salida, con los palets que no hay en stock avisados
+    r = cliente.post("/api/stock/correo", json={"mensaje_id": "AAMk-4", "de": "x", "asunto": "Recogida mañana", "cuerpo": "", "adjuntos": [pdf]}, headers=h).json()
+    assert r["resultado"] == "creada" and r["tipo"] == "salida" and r["id"].startswith("S-")
+    assert cliente.get(f"/api/stock/salidas/{r['id']}").json()["por_revisar"] is True

@@ -44,3 +44,22 @@ Cada palet verificado/cargado es un movimiento. `stock_facturacion.lineas_factur
 - Fotos guardadas como adjuntos de Odoo (estado) y en SharePoint (documentación).
 - Creación de carpetas por Graph: verificar en la primera prueba de n8n.
 - Columnas y orden de la Excel abiertos a tu revisión.
+
+## Primer cliente: Raminatrans Castellón, S.L. (2026-11-17)
+- **Cliente del almacén** = Raminatrans (el operador que emite el albarán y la etiqueta, «Grupo Raminatrans»); viene dado de alta con su catálogo de 7 referencias. **BECRISA 2011 S.L.U. (03783)** es el cliente de su cliente: se guarda como «Cliente final» (informativo, sale en Excel y correo, no interviene en la facturación).
+- El cliente manda **PDF + Excel** (una fila por palet con su código de 10 cifras y su peso). Botón «Elegir PDF, Excel o fotos»: el Excel se lee sin IA (lista exacta de palets y kg); el PDF aporta número, fecha, cliente final y la «Entrada» (ECS26-xxxx) de cada palet.
+- **Se controla solo el nº de palets y sus códigos individuales** (no los bultos/unidades). Cada etiqueta se casa por código: palet que no está en el albarán, repetido, de otra referencia o de otra «Entrada» → discrepancia. Al cerrar, se listan los códigos que faltan por etiquetar.
+- **Peso**: sale del albarán por palet (la etiqueta no lo trae); se compara el total con el del albarán (tolerancia 2 %).
+- **Lote = código de «Entrada»** (ECS26-xxxx) de la etiqueta.
+- **Fecha de entrada en almacén**: propuesta por el albarán, editable al cargar la entrada y hasta que se cierra (camión cargado un día y descargado al siguiente). Es la que cuenta para el estocaje y la antigüedad (FIFO).
+- **Incidencias**: campo de observaciones en la descarga y en la carga; si se rellena, el correo sale con «⚠» y un bloque rojo de incidencias, y aparece en las Excel.
+- **Catálogo de referencias** por cliente (pantalla Clientes → tocar el cliente): avisa si llega una referencia que no está.
+- **Salidas**: la petición puede venir con Excel de palets; la app comprueba que están en stock, que se cargan exactamente esos códigos y lista los que faltan por cargar.
+
+## Buzón agente.burriana@stinsa.com (correo → app)
+- Segundo flujo de n8n: `n8n/stock-correo.json` (generado con `scripts/generar_n8n_correo.py`). Una ejecución por tanda de correos nuevos.
+- Lee el correo y sus adjuntos (PDF, Excel y fotos de más de 60 kB; las firmas se ignoran) y los manda a `POST /api/stock/correo` (cabecera `X-Clave` = `STOCK_CORREO_CLAVE`).
+- La app prepara la **entrada** (o la **salida**, si el asunto/cuerpo habla de salida, recoger, recogida, retirar, retirada) en estado **POR REVISAR**: la oficina la ve en la lista con 📧, comprueba cliente, fecha de entrada y palets y pulsa «Está bien». Hasta entonces no se puede cerrar.
+- n8n manda a la oficina un correo «preparada» (con los avisos) o «⚠ no he podido procesar» (cliente no reconocido, albarán ya cargado, sin adjuntos…). Nunca se cierra nada solo.
+- Idempotente por id de correo (un reintento no duplica). Límite: ~4 MB de adjuntos por correo (Vercel); lo que no cabe se avisa en el cuerpo.
+- Puesta en marcha: en n8n importar el flujo, conectar la credencial del buzón que recibe el alias (disparador) y «Outlook Agente Trafico» (avisos), pegar URL y clave en «Configuración», activar. En Vercel: `STOCK_CORREO_CLAVE`.

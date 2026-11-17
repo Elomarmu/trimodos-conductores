@@ -191,6 +191,7 @@ app.include_router(pr_api.n8n)                                     # resumen de 
 from .stock import stock_api  # noqa: E402
 
 app.include_router(stock_api.router, dependencies=access_oficina)
+app.include_router(stock_api.correo)                                  # correos del buzón del almacén: clave de n8n (X-Clave)
 
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")

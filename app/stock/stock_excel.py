@@ -100,31 +100,31 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
     ws = _hoja(wb, "STOCK", "PALETS EN EL ALMACÉN", nota, 11)
     por_cli = lambda p: p["cliente_nombre"]
     filas = [dict(p, dias=R.dias_entre(p["fecha_entrada"], hoy.isoformat())) for p in sorted(existencias, key=lambda p: (por_cli(p), p["ref"], p["fecha_entrada"]))]
-    _tabla(ws, 4, [("id", "Palet", 17), ("cliente_nombre", "Cliente", 28), ("ref", "Referencia", 16), ("descripcion", "Descripción", 32), ("lote", "Lote", 14),
-                   ("sscc", "SSCC", 21), ("kg", "Kg", 9), ("bultos", "Bultos", 8), ("entrada", "Entrada", 14), ("albaran", "Albarán", 14),
+    _tabla(ws, 4, [("id", "Palet", 17), ("cliente_nombre", "Cliente", 28), ("ref", "Referencia", 16), ("descripcion", "Descripción", 32), ("lote", "Lote (entrada)", 15),
+                   ("sscc", "Código palet", 21), ("kg", "Kg", 9), ("cliente_final", "Cliente final", 24), ("entrada", "Entrada", 14), ("albaran", "Albarán", 14),
                    ("fecha_entrada", "Fecha entrada", 13), ("dias", "Días", 7)], filas, formatos={"kg": KG})
     _apaisada(ws)
 
     # ENTRADAS: una fila por línea del albarán
-    ws = _hoja(wb, "ENTRADAS", "ENTRADAS", nota, 12)
+    ws = _hoja(wb, "ENTRADAS", "ENTRADAS", nota, 14)
     filas = []
     for e in sorted(entradas, key=lambda e: e["id"], reverse=True):
         if e["estado"] == R.ENTRADA_ANULADA:
             continue
         disc = " | ".join(e.get("discrepancias_cierre") or [])
         for l in R.estado_lineas(e) or [{}]:
-            filas.append({"id": e["id"], "fecha": (e.get("cerrada") or e["creada"])[:10], "cliente": e["cliente"]["nombre"],
-                          "albaran": e["albaran"].get("numero"), "matricula": e["albaran"].get("matricula"), "ref": l.get("ref"),
+            filas.append({"id": e["id"], "fecha": R.fecha_entrada(e), "cliente": e["cliente"]["nombre"], "cliente_final": e["albaran"].get("cliente_final") or "",
+                          "observaciones": e.get("observaciones") or "", "albaran": e["albaran"].get("numero"), "matricula": e["albaran"].get("matricula"), "ref": l.get("ref"),
                           "descripcion": l.get("descripcion"), "palets_albaran": l.get("esperados"), "palets_verificados": l.get("verificados"),
                           "kg_albaran": l.get("kg_albaran"), "kg_etiquetas": l.get("kg_etiquetas"), "estado": e["estado"].upper(), "discrepancias": disc})
-    _tabla(ws, 4, [("id", "Entrada", 14), ("fecha", "Fecha", 11), ("cliente", "Cliente", 26), ("albaran", "Albarán", 14), ("matricula", "Matrícula", 11),
+    _tabla(ws, 4, [("id", "Entrada", 14), ("fecha", "Fecha entrada", 12), ("cliente", "Cliente", 26), ("cliente_final", "Cliente final", 24), ("albaran", "Albarán", 14), ("matricula", "Matrícula", 11),
                    ("ref", "Referencia", 15), ("descripcion", "Descripción", 28), ("palets_albaran", "Palets albarán", 9), ("palets_verificados", "Palets verificados", 11),
-                   ("kg_albaran", "Kg albarán", 10), ("kg_etiquetas", "Kg etiquetas", 10), ("estado", "Estado", 12), ("discrepancias", "Discrepancias", 44)],
+                   ("kg_albaran", "Kg albarán", 10), ("kg_etiquetas", "Kg etiquetas", 10), ("estado", "Estado", 12), ("discrepancias", "Discrepancias", 44), ("observaciones", "Observaciones almacén", 40)],
           filas, relleno=lambda f: X.AMARILLO if f["estado"] != "CERRADA" else (X.ROJO if f["discrepancias"] else None), formatos={"kg_albaran": KG, "kg_etiquetas": KG})
     _apaisada(ws)
 
     # SALIDAS: una fila por línea pedida
-    ws = _hoja(wb, "SALIDAS", "SALIDAS", nota, 10)
+    ws = _hoja(wb, "SALIDAS", "SALIDAS", nota, 11)
     filas = []
     for s in sorted(salidas, key=lambda s: s["id"], reverse=True):
         if s["estado"] == R.SALIDA_ANULADA:
@@ -133,10 +133,11 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
         for l in R.estado_lineas_salida(s):
             filas.append({"id": s["id"], "fecha": (s.get("cargada") or s["creada"])[:10], "cliente": s["cliente"]["nombre"], "pedido": s.get("referencia"),
                           "destino": s.get("destino"), "ref": l["ref"], "descripcion": l["descripcion"], "palets_pedidos": l["pedidos"],
-                          "palets_cargados": l["cargados"], "kg": l["kg"], "estado": s["estado"].upper(), "discrepancias": disc})
+                          "palets_cargados": l["cargados"], "kg": l["kg"], "estado": s["estado"].upper(), "discrepancias": disc,
+                          "observaciones": s.get("observaciones") or ""})
     _tabla(ws, 4, [("id", "Salida", 14), ("fecha", "Fecha", 11), ("cliente", "Cliente", 26), ("pedido", "Pedido cliente", 16), ("destino", "Destino", 24),
                    ("ref", "Referencia", 15), ("descripcion", "Descripción", 28), ("palets_pedidos", "Palets pedidos", 9), ("palets_cargados", "Palets cargados", 9),
-                   ("kg", "Kg", 10), ("estado", "Estado", 12), ("discrepancias", "Discrepancias", 44)], filas,
+                   ("kg", "Kg", 10), ("estado", "Estado", 12), ("discrepancias", "Discrepancias", 44), ("observaciones", "Observaciones almacén", 40)], filas,
           relleno=lambda f: X.AMARILLO if f["estado"] != "CARGADA" else (X.ROJO if f["discrepancias"] else None), formatos={"kg": KG})
     _apaisada(ws)
 
@@ -144,7 +145,7 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
     ws = _hoja(wb, "MOVIMIENTOS", "MOVIMIENTOS · BASE DE LA FACTURACIÓN", "Un movimiento por palet. De aquí saldrán la manipulación de entrada, la de salida y el estocaje.", 9)
     nombres = {c["codigo"]: c["nombre"] for c in clientes}
     filas = [dict(m, cliente=nombres.get(m["cliente"], m["cliente"])) for m in F.movimientos(entradas, salidas)]
-    _tabla(ws, 4, [("fecha", "Fecha", 11), ("tipo", "Tipo", 10), ("cliente", "Cliente", 28), ("ref", "Referencia", 16), ("lote", "Lote", 14), ("sscc", "SSCC", 21),
+    _tabla(ws, 4, [("fecha", "Fecha", 11), ("tipo", "Tipo", 10), ("cliente", "Cliente", 28), ("ref", "Referencia", 16), ("lote", "Lote", 14), ("sscc", "Código palet", 21),
                    ("palet_id", "Palet", 17), ("kg", "Kg", 9), ("documento", "Documento", 14)], filas,
           relleno=lambda f: X.VERDE if f["tipo"] == "ENTRADA" else X.ROJO, formatos={"kg": KG})
     _apaisada(ws)
@@ -176,13 +177,17 @@ def excel_entrada(e: dict) -> bytes:
     wb = Workbook()
     ws = _hoja(wb, "ENTRADA", f"ENTRADA {e['id']} · {e['cliente']['nombre']}", R.ALMACEN, 9, primera=True)
     a = e["albaran"]
-    datos = [("Albarán", a.get("numero")), ("Fecha albarán", _fecha(a.get("fecha"))), ("Remitente", a.get("remitente")), ("Transportista", a.get("transportista")),
-             ("Matrícula", a.get("matricula")), ("Cerrada", (e.get("cerrada") or "")[:16].replace("T", " ")), ("Observaciones", a.get("observaciones"))]
+    datos = [("Albarán", a.get("numero")), ("Fecha albarán", _fecha(a.get("fecha"))), ("Fecha entrada en almacén", _fecha(R.fecha_entrada(e))),
+             ("Remitente", a.get("remitente")), ("Cliente final (informativo)", " · ".join(x for x in (a.get("cliente_final"), a.get("codigo_cliente_final")) if x)),
+             ("Transportista", a.get("transportista")), ("Matrícula", a.get("matricula")), ("Cerrada", (e.get("cerrada") or "")[:16].replace("T", " ")),
+             ("Observaciones del albarán", a.get("observaciones")), ("Incidencias en el almacén", e.get("observaciones"))]
     for i, (k, v) in enumerate(datos, start=4):
         ws.cell(i, 1, k).font = Font(bold=True, color=M.TEAL_OSCURO)
         ws.cell(i, 2, v)
-        if k == "Fecha albarán":
+        if k in ("Fecha albarán", "Fecha entrada en almacén"):
             ws.cell(i, 2).number_format = "DD/MM/YYYY"
+        if k == "Incidencias en el almacén" and v:
+            ws.cell(i, 2).font = Font(bold=True, color="C00000")
         ws.cell(i, 2).alignment = Alignment(horizontal="left")
     fila = _tabla(ws, 4 + len(datos) + 1, [("ref", "Referencia", 18), ("descripcion", "Descripción", 34), ("lote", "Lote", 14), ("esperados", "Palets albarán", 10),
                   ("verificados", "Palets verificados", 11), ("kg_albaran", "Kg albarán", 11), ("kg_etiquetas", "Kg etiquetas", 11)],
@@ -190,8 +195,8 @@ def excel_entrada(e: dict) -> bytes:
     ws.freeze_panes = None
     ws.cell(fila + 1, 1, "Palets verificados con su etiqueta").font = Font(bold=True, color=M.TEAL_OSCURO)
     palets = [dict(p, estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA"), linea_txt=(R.estado_lineas(e)[p["linea"]]["ref"] if p.get("linea") is not None else "")) for p in R.activos(e)]
-    fila = _tabla(ws, fila + 2, [("id", "Palet", 18), ("sscc", "SSCC", 22), ("ref", "Referencia", 18), ("lote", "Lote", 14), ("kg", "Kg", 11),
-                  ("bultos", "Bultos", 9), ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets,
+    fila = _tabla(ws, fila + 2, [("id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote (entrada)", 15), ("kg", "Kg", 11),
+                  ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets,
                   relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
     ws.freeze_panes = None
     ws.auto_filter.ref = None
@@ -206,12 +211,15 @@ def excel_salida(s: dict) -> bytes:
     wb = Workbook()
     ws = _hoja(wb, "SALIDA", f"SALIDA {s['id']} · {s['cliente']['nombre']}", R.ALMACEN, 8, primera=True)
     datos = [("Pedido del cliente", s.get("referencia")), ("Destino", s.get("destino")), ("Transportista / matrícula", s.get("transportista")),
-             ("Fecha pedida", _fecha(s.get("fecha_pedida"))), ("Cargada", (s.get("cargada") or "")[:16].replace("T", " "))]
+             ("Fecha pedida", _fecha(s.get("fecha_pedida"))), ("Cargada", (s.get("cargada") or "")[:16].replace("T", " ")),
+             ("Incidencias en el almacén", s.get("observaciones"))]
     for i, (k, v) in enumerate(datos, start=4):
         ws.cell(i, 1, k).font = Font(bold=True, color=M.TEAL_OSCURO)
         ws.cell(i, 2, v)
         if k == "Fecha pedida":
             ws.cell(i, 2).number_format = "DD/MM/YYYY"
+        if k == "Incidencias en el almacén" and v:
+            ws.cell(i, 2).font = Font(bold=True, color="C00000")
         ws.cell(i, 2).alignment = Alignment(horizontal="left")
     lineas = R.estado_lineas_salida(s)
     fila = _tabla(ws, 4 + len(datos) + 1, [("ref", "Referencia", 18), ("descripcion", "Descripción", 34), ("pedidos", "Palets pedidos", 11), ("cargados", "Palets cargados", 11),
@@ -220,7 +228,7 @@ def excel_salida(s: dict) -> bytes:
     ws.cell(fila, 1, f"TOTAL: {sum(l['cargados'] for l in lineas)} palets · {sum(l['kg'] or 0 for l in lineas):,.0f} kg".replace(",", ".")).font = Font(bold=True, color=M.TEAL_OSCURO)
     ws.cell(fila + 2, 1, "Palets cargados").font = Font(bold=True, color=M.TEAL_OSCURO)
     palets = [dict(p, estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA")) for p in s["palets"] if p.get("estado_alta") != "quitado"]
-    fila = _tabla(ws, fila + 3, [("palet_id", "Palet", 18), ("sscc", "SSCC", 22), ("ref", "Referencia", 18), ("lote", "Lote", 14), ("kg", "Kg", 11),
+    fila = _tabla(ws, fila + 3, [("palet_id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote (entrada)", 15), ("kg", "Kg", 11),
                   ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets, relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
     ws.freeze_panes = None
     ws.auto_filter.ref = None

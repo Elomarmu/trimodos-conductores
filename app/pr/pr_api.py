@@ -137,7 +137,7 @@ def avisar(evento: str, datos: dict, enlaces: list[tuple[str, str]] = ()) -> Non
 
 class Archivo(BaseModel):
     archivo_b64: str = Field(max_length=6_000_000)
-    tipo: str = Field(max_length=40)
+    tipo: str = Field(max_length=100)   # el Excel (.xlsx) tiene un tipo largo
 
 
 class Archivos(BaseModel):

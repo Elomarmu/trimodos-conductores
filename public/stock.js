@@ -37,16 +37,26 @@ async function cargarClientes() {
   const r = await conCarga("Cargando los clientes…", () => api("/api/stock/clientes"));
   if (!r) return;
   stk.clientes = r.clientes;
-  $("sc-lista").replaceChildren(...(r.clientes.length ? r.clientes.map((c) => h("div", { class: "fila" },
-    h("span", {}, h("b", {}, c.nombre), h("br"), h("span", { class: "hint" }, (c.alias || []).join(", ") || "sin otros nombres"))))
+  stk.cliEdit = null;
+  $("sc-lista").replaceChildren(...(r.clientes.length ? r.clientes.map((c) => h("button", { type: "button", class: "btn secondary", onclick: () => editarCliente(c) },
+    `${c.nombre} · ${(c.referencias || []).length} referencias`))
     : [h("p", { class: "hint" }, "Todavía no hay clientes: da de alta el primero para poder cargar entradas.")]));
+}
+function editarCliente(c) {
+  stk.cliEdit = c.codigo;
+  $("sc-nombre").value = c.nombre; $("sc-alias").value = (c.alias || []).join(", ");
+  $("sc-refs").value = (c.referencias || []).map((r) => `${r.ref};${r.descripcion || ""}`).join("\n");
+  $("sc-guardar").textContent = "Guardar los cambios de " + c.nombre;
+  $("sc-nombre").scrollIntoView({ behavior: "smooth" });
 }
 $("sc-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const nombre = $("sc-nombre").value.trim();
   if (nombre.length < 2) return showError("Escribe el nombre del cliente.");
-  const r = await conCarga("Guardando…", () => post("/api/stock/clientes", { nombre, alias: $("sc-alias").value.split(",").map((s) => s.trim()).filter(Boolean) }));
-  if (r) { $("sc-nombre").value = ""; $("sc-alias").value = ""; cargarClientes(); }
+  const referencias = $("sc-refs").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const [ref, ...d] = l.split(";"); return { ref: ref.trim(), descripcion: d.join(";").trim() }; });
+  const r = await conCarga("Guardando…", () => post("/api/stock/clientes", { codigo: stk.cliEdit || "", nombre, referencias,
+    alias: $("sc-alias").value.split(",").map((s) => s.trim()).filter(Boolean) }));
+  if (r) { $("sc-nombre").value = ""; $("sc-alias").value = ""; $("sc-refs").value = ""; $("sc-guardar").textContent = "Guardar el cliente"; cargarClientes(); }
 });
 function opcionesClientes(sel, elegido) {
   sel.replaceChildren(h("option", { value: "" }, "— Elige el cliente —"), ...stk.clientes.map((c) => h("option", { value: c.codigo, selected: c.codigo === elegido }, c.nombre)));
@@ -58,7 +68,7 @@ async function cargarEntradas() {
   if (!r) return;
   $("se-todas").textContent = stk.todas ? "Ver solo las que faltan" : "Ver también las cerradas";
   $("se-lista").replaceChildren(...(r.entradas.length ? r.entradas.map((e) => h("button", { type: "button", class: "btn secondary", onclick: () => abrirEntrada(e.id) },
-    `${e.cliente.nombre} · albarán ${e.albaran || "—"} · ${e.verificados}/${e.esperados} palets · ${tipoTxt[e.estado]}` + (e.discrepancias ? ` · ⚠ ${e.discrepancias}` : "")))
+    `${e.cliente.nombre} · albarán ${e.albaran || "—"} · ${e.verificados}/${e.esperados} palets · ${tipoTxt[e.estado]}` + (e.discrepancias ? ` · ⚠ ${e.discrepancias}` : "") + (e.por_revisar ? " · 📧 POR REVISAR" : "")))
     : [h("p", { class: "hint" }, "No hay entradas pendientes.")]));
 }
 $("se-todas").addEventListener("click", () => { stk.todas = !stk.todas; cargarEntradas(); });
@@ -79,7 +89,7 @@ async function alElegirAlbaran(ev) {
   } catch (e) { return showError(e.message); }
   const r = await conCarga("Leyendo el albarán…", () => post("/api/stock/entradas/leer", { archivos: fotos }));
   if (!r) return;
-  stk.albaran = { datos: r.albaran, fotos };
+  stk.albaran = { datos: r.albaran, fotos, esperados: r.esperados || [], fechaEntrada: r.fecha_entrada };
   stk.clientes = r.clientes;
   pintarAlbaran(r);
   go("stock-entrada-nueva");
@@ -107,6 +117,8 @@ function pintarAlbaran(r) {
   const a = r.albaran;
   $("sen-avisos").replaceChildren(...(r.avisos.length ? avisosHtml(r.avisos) : [h("div", { class: "banner info" }, "Sin conflictos: el albarán parece correcto.")]));
   opcionesClientes($("sen-cliente"), r.cliente_sugerido);
+  $("sen-final").value = [a.cliente_final, a.codigo_cliente_final].filter(Boolean).join(" · ");
+  $("sen-fentrada").value = stk.albaran.fechaEntrada || a.fecha;
   $("sen-numero").value = a.numero; $("sen-fecha").value = a.fecha; $("sen-matricula").value = a.matricula; $("sen-transportista").value = a.transportista;
   $("sen-lineas").replaceChildren(...a.lineas.map((l) => filaLinea(l, CAMPOS_ALBARAN, totalAlbaran)));
   totalAlbaran();
@@ -122,11 +134,11 @@ async function guardarEntrada(confirmado) {
   const cliente = $("sen-cliente").value;
   if (!cliente) return showError("Elige el cliente de la lista (si es nuevo, dalo de alta en «Clientes del almacén»).");
   const base = stk.albaran.datos;
-  const albaran = { ...base, numero: $("sen-numero").value.trim(), fecha: $("sen-fecha").value, matricula: $("sen-matricula").value.trim(),
+  const albaran = { ...base, cliente_final: $("sen-final").value.trim(), numero: $("sen-numero").value.trim(), fecha: $("sen-fecha").value, matricula: $("sen-matricula").value.trim(),
     transportista: $("sen-transportista").value.trim(), lineas: leerFilas("sen-lineas", ["palets", "kg", "bultos"]).map((l) => ({ lote: "", bultos: null, ...l })) };
   clearError(); busy("Guardando la entrada…");
   try {
-    const e = await post("/api/stock/entradas", { cliente, albaran, fotos: stk.albaran.fotos, confirmado });
+    const e = await post("/api/stock/entradas", { cliente, albaran, fotos: stk.albaran.fotos, esperados: stk.albaran.esperados || [], fecha_entrada: $("sen-fentrada").value, confirmado });
     busy(null);
     stk.entrada = e;
     pintarEntrada(e);
@@ -149,9 +161,12 @@ function pintarEntrada(e) {
   stk.entrada = e;
   const cerrada = e.estado === "cerrada";
   $("se-titulo").textContent = `Entrada ${e.id}`;
-  $("se-cabecera").textContent = `${e.cliente.nombre} · albarán ${e.albaran || "—"} del ${fechaEs(e.fecha)} · ${e.verificados} de ${e.esperados} palets verificados` + (cerrada ? " · CERRADA" : "");
+  $("se-cabecera").textContent = `${e.cliente.nombre}${e.cliente_final ? " (para " + e.cliente_final + ")" : ""} · albarán ${e.albaran || "—"} del ${fechaEs(e.fecha)} · entrada en almacén ${fechaEs(e.fecha_entrada)} · ${e.verificados} de ${e.esperados} palets verificados` + (cerrada ? " · CERRADA" : "");
   document.querySelector('label[for="se-etq-camara"]').hidden = cerrada;
   $("se-cierre").hidden = cerrada;
+  $("se-revisar").hidden = !e.por_revisar;
+  $("se-revisar-avisos").replaceChildren(...avisosHtml(e.avisos || []));
+  $("se-fentrada").value = e.fecha_entrada || ""; $("se-obs").value = e.observaciones || "";
   $("se-manual").closest("details").hidden = cerrada;
   $("se-lineas").replaceChildren(...e.lineas.map((l) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, l.ref || l.descripcion), l.ref && l.descripcion ? " · " + l.descripcion : "", h("br"),
@@ -189,12 +204,21 @@ async function quitarPaletEntrada(p) {
     if (e) pintarEntrada(e);
   });
 }
+$("se-fentrada").addEventListener("change", async () => {
+  const e = await conCarga("Guardando la fecha…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/fecha`, { fecha: $("se-fentrada").value }));
+  if (e) pintarEntrada(e);
+});
+$("se-obs").addEventListener("change", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/observaciones`, { texto: $("se-obs").value }).catch((e) => showError(e.message)));
+$("se-revisar-btn").addEventListener("click", async () => {
+  const e = await conCarga("Confirmando…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/revisar`, {}));
+  if (e) pintarEntrada(e);
+});
 $("se-recargar").addEventListener("click", () => abrirEntrada(stk.entrada.id));
 $("se-cerrar").addEventListener("click", () => cerrarEntrada(false));
 async function cerrarEntrada(confirmado) {
   clearError(); busy("Terminando la descarga y mandando la documentación…");
   try {
-    const r = await post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/cerrar`, { confirmado, nota: $("se-nota").value.trim() });
+    const r = await post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/cerrar`, { confirmado, nota: $("se-nota").value.trim(), observaciones: $("se-obs").value.trim() });
     busy(null);
     pintarEntrada(r.entrada);
     $("se-descargas").replaceChildren(
@@ -213,7 +237,7 @@ async function cargarSalidas() {
   if (!r) return;
   $("ss-todas").textContent = stk.ssTodas ? "Ver solo las que faltan" : "Ver también las cargadas";
   $("ss-lista").replaceChildren(...(r.salidas.length ? r.salidas.map((s) => h("button", { type: "button", class: "btn secondary", onclick: () => abrirSalida(s.id) },
-    `${s.cliente.nombre}${s.referencia ? " · pedido " + s.referencia : ""} · ${s.cargados}/${s.pedidos} palets · ${tipoTxt[s.estado]}`))
+    `${s.cliente.nombre}${s.referencia ? " · pedido " + s.referencia : ""} · ${s.cargados}/${s.pedidos} palets · ${tipoTxt[s.estado]}` + (s.por_revisar ? " · 📧 POR REVISAR" : "")))
     : [h("p", { class: "hint" }, "No hay salidas pendientes.")]));
 }
 $("ss-todas").addEventListener("click", () => { stk.ssTodas = !stk.ssTodas; cargarSalidas(); });
@@ -227,7 +251,7 @@ $("ss-nueva").addEventListener("click", async () => {
   $("ssn-form").reset();
   $("ssn-avisos").replaceChildren();
   $("ssn-lineas").replaceChildren(filaLinea({}, CAMPOS_PEDIDO));
-  stk.peticionFoto = null;
+  stk.peticionFoto = null; stk.peticionEsperados = [];
   go("stock-salida-nueva");
 });
 $("ssn-mas").addEventListener("click", () => $("ssn-lineas").append(filaLinea({}, CAMPOS_PEDIDO)));
@@ -238,6 +262,7 @@ $("ss-leer").addEventListener("change", async (ev) => {
   const r = await conCarga("Leyendo la petición…", async () => { const f = await reducir(file); stk.peticionFoto = f; return post("/api/stock/salidas/leer", { archivos: [f] }); });
   if (!r) return;
   const p = r.peticion;
+  stk.peticionEsperados = r.esperados || [];
   opcionesClientes($("ssn-cliente"), r.cliente_sugerido);
   $("ssn-referencia").value = p.referencia; $("ssn-destino").value = p.destino;
   $("ssn-lineas").replaceChildren(...(p.lineas.length ? p.lineas : [{}]).map((l) => filaLinea(l, CAMPOS_PEDIDO)));
@@ -252,7 +277,7 @@ async function guardarSalida(confirmado) {
   clearError(); busy("Cargando la petición…");
   try {
     const s = await post("/api/stock/salidas", { cliente, referencia: $("ssn-referencia").value.trim(), destino: $("ssn-destino").value.trim(),
-      transportista: $("ssn-transportista").value.trim(), lineas, foto: stk.peticionFoto || null, confirmado });
+      transportista: $("ssn-transportista").value.trim(), lineas, esperados: stk.peticionEsperados || [], foto: stk.peticionFoto || null, confirmado });
     busy(null);
     pintarSalida(s);
     go("stock-salida");
@@ -276,6 +301,9 @@ function pintarSalida(s) {
   $("ss-cabecera").textContent = `${s.cliente.nombre}${s.datos.referencia ? " · pedido " + s.datos.referencia : ""}${s.datos.destino ? " · destino " + s.datos.destino : ""} · ${s.cargados} de ${s.pedidos} palets` + (cargada ? " · CARGADA" : "");
   document.querySelector('label[for="ss-etq-camara"]').hidden = cargada;
   $("ss-cierre").hidden = cargada;
+  $("ss-obs").value = s.observaciones || "";
+  $("ss-revisar").hidden = !s.por_revisar;
+  $("ss-revisar-avisos").replaceChildren(...avisosHtml(s.avisos || []));
   $("ss-manual").closest("details").hidden = cargada;
   $("ss-lineas").replaceChildren(...s.lineas.map((l) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, l.ref || l.descripcion), l.ref && l.descripcion ? " · " + l.descripcion : ""),
@@ -312,12 +340,17 @@ function quitarPaletSalida(p) {
     if (s) pintarSalida(s);
   });
 }
+$("ss-obs").addEventListener("change", () => post(`/api/stock/salidas/${encodeURIComponent(stk.salida.id)}/observaciones`, { texto: $("ss-obs").value }).catch((e) => showError(e.message)));
+$("ss-revisar-btn").addEventListener("click", async () => {
+  const s = await conCarga("Confirmando…", () => post(`/api/stock/salidas/${encodeURIComponent(stk.salida.id)}/revisar`, {}));
+  if (s) pintarSalida(s);
+});
 $("ss-recargar").addEventListener("click", () => abrirSalida(stk.salida.id));
 $("ss-cerrar").addEventListener("click", () => cerrarSalida(false));
 async function cerrarSalida(confirmado) {
   clearError(); busy("Terminando la carga y expidiendo la Excel…");
   try {
-    const r = await post(`/api/stock/salidas/${encodeURIComponent(stk.salida.id)}/cerrar`, { confirmado, nota: $("ss-nota").value.trim() });
+    const r = await post(`/api/stock/salidas/${encodeURIComponent(stk.salida.id)}/cerrar`, { confirmado, nota: $("ss-nota").value.trim(), observaciones: $("ss-obs").value.trim() });
     busy(null);
     pintarSalida(r.salida);
     $("ss-descargas").replaceChildren(
