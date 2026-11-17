@@ -15,7 +15,7 @@ import unicodedata
 
 ALMACEN = "STINSA · Almacén de Burriana"
 TOLERANCIA_KG = 0.02          # diferencia de peso admitida entre albarán y etiquetas (2 %)
-MIN_CODIGO = 8                # cifras mínimas para tomar el código de la etiqueta como identificador del palet (SSCC de 18 o código de fábrica de 10)
+MIN_CODIGO = 8                # caracteres mínimos para tomar el código de la etiqueta como identificador del palet (SSCC de 18 o código de fábrica de 10)
 DIAS_ALBARAN_FUTURO = 3       # un albarán fechado como mucho 3 días después de hoy es normal (se emite para el viaje de mañana)
 DIAS_ALBARAN_ANTIGUO = 30     # un albarán más viejo que esto se avisa
 
@@ -57,10 +57,17 @@ def entero(valor) -> int | None:
 
 
 def sscc(texto) -> str:
-    """Código del palet de la etiqueta: SSCC de 18 cifras (puede traer «(00)» o espacios) o código de fábrica más corto
-    (p. ej. 10 cifras bajo el código de barras). Se devuelve solo con cifras; con menos de MIN_CODIGO cifras no sirve de
-    identificador y el palet se reconoce por referencia y lote."""
-    t = re.sub(r"\D", "", str(texto or ""))
+    """Código del palet de la etiqueta, comparable venga como venga: SSCC de 18 cifras (puede traer «(00)» o espacios),
+    código de fábrica de 10 cifras, o código con letras como el «LP26-0236823» de Aliplast. Sin letras se devuelve solo con
+    cifras; con letras, en mayúsculas y sin guiones, espacios ni signos (LP260236823), así que escaneado, escrito a mano o
+    elegido de la lista da lo mismo. Con menos de MIN_CODIGO caracteres no sirve de identificador y el palet se reconoce
+    por referencia y lote. Un texto que es una dirección web (el QR de la etiqueta ambiental) no es un código de palet."""
+    t = str(texto or "").strip()
+    if re.match(r"(?i)(https?://|www\.)", t):
+        return ""
+    if re.search(r"[A-Za-z]", t):
+        return re.sub(r"[^A-Z0-9]", "", t.upper())
+    t = re.sub(r"\D", "", t)
     if len(t) == 20 and t.startswith("00"):
         t = t[2:]
     return t

@@ -22,7 +22,7 @@ Datos que necesito:
   el de las líneas en null. No inventes.
 - total_palets y total_kg si el albarán los declara en un total.
 - palets_detalle: si el albarán lista los palets uno a uno (una fila por palet con su código/SKU/SSCC, columna «Entrada»,
-  cantidad y peso), una entrada por palet con codigo (solo cifras), referencia (la de la línea a la que pertenece),
+  cantidad y peso), una entrada por palet con codigo (tal como se imprime, sin espacios), referencia (la de la línea a la que pertenece),
   entrada (el código de la columna «Entrada», p. ej. ECS26-3266) y kg (peso del palet). No necesito las unidades. Copia los códigos cifra a cifra; si no hay lista, déjalo vacío.
   Las líneas de resumen (referencia con el total de palets) van en «lineas»; no cuentes dos veces.
 - observaciones: anotaciones a mano, incidencias o condiciones especiales.
@@ -55,7 +55,7 @@ ESQUEMA_ALBARAN = {
 
 PROMPT_ETIQUETA = """Esta es la foto de la etiqueta de UN palet de mercancía (etiqueta logística tipo GS1 o de fábrica).
 Lee: sscc = el código que identifica este palet, el número impreso bajo el código de barras (SSCC de 18 cifras, a veces
-tras «(00)», o un código de fábrica más corto, p. ej. 10 cifras); solo cifras. Referencia o código de artículo (suele ir
+tras «(00)», un código de fábrica más corto, p. ej. 10 cifras, o un código con letras, p. ej. «LP26-0236823» bajo «License plate»); cópialo tal cual, sin espacios. Nunca pongas aquí la dirección de un QR. Referencia o código de artículo (suele ir
 en grande arriba, seguido de la descripcion), lote (null si «Lote:» está vacío), entrada (el código tras «Entrada:», p. ej.
 ECS26-3696), kg (peso, solo si la etiqueta lo trae; si no, null), caducidad (AAAA-MM-DD, si hay), cliente = la empresa del
 membrete o logotipo de la etiqueta (p. ej. «Grupo …») y cliente_final = el nombre junto a «Identificador», si hay.
@@ -78,7 +78,7 @@ PROMPT_PETICION = """Esta es una petición de salida de mercancía de un cliente
 o de un pedido). Lee: cliente (quién la pide), referencia_cliente (su nº de pedido o de petición), destino (dónde se envía),
 fecha (AAAA-MM-DD, de la petición o de la recogida) y lineas: una por cada tipo de palet pedido con su referencia o código
 de artículo, descripcion y nº de palets (si lo dan en bultos o kg y no en palets, pon palets null y explícalo en dudas).
-Si la petición lista los palets uno a uno (con su código), ponlos en palets_detalle (codigo solo cifras, referencia).
+Si la petición lista los palets uno a uno (con su código), ponlos en palets_detalle (codigo tal como se imprime, referencia).
 No inventes. En «dudas» anota lo que no se lea con seguridad."""
 
 ESQUEMA_PETICION = {

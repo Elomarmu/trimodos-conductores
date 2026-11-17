@@ -38,6 +38,9 @@ def test_normalizacion():
     assert R.referencia(" kk-100 ") == "KK100"
     assert R.entero("24.800") == 24800 and R.entero("1200,0") == 1200 and R.entero("") is None
     assert R.sscc("(00) 3400 0000 0000 0000 01") == "340000000000000001"
+    # códigos con letras (Aliplast): escaneado, escrito a mano o de la lista dan lo mismo; el QR (una web) no es un código de palet
+    assert R.sscc("LP26-0236823") == R.sscc(" lp26 0236823 ") == "LP260236823"
+    assert R.sscc("https://www.aliplastspa.com/etichettatura-ambientale") == "" and R.sscc("2600051470") == "2600051470"
     assert R.fecha("16/11/26") == "2026-11-16" and R.fecha("32/13/2026") == ""
     assert R.siguiente_id("E", ["E-2026-0001", "E-2026-0007", "E-2025-0099"], 2026) == "E-2026-0008"
     assert R.siguiente_id("S", [], 2026) == "S-2026-0001"
@@ -586,3 +589,19 @@ def test_codigo_de_barras_y_lista_desplegable_en_entradas_y_salidas(cliente, mon
     r = cliente.post(f"/api/stock/salidas/{s['id']}/palet", json={"sscc": "2600044888", "origen": "barras"})
     assert r.status_code == 200 and r.json()["palet"]["estado"] == "ok" and r.json()["palet"]["origen"] == "barras"
     assert {x["codigo"] for x in cliente.get(f"/api/stock/salidas/{s['id']}/disponibles").json()["palets"]} == set(codigos) - {"2600044888"}
+
+
+def test_palets_con_codigo_alfanumerico_tipo_aliplast_se_apuntan_y_se_casan_en_entrada_y_salida(cliente):
+    """«LP26-0236823» (Code128 con letras y guion) se guarda como LP260236823 y se reconoce escrito de cualquier forma."""
+    resp = cliente.post("/api/stock/entradas", json={"cliente": "RAMINATRANS", "albaran": {"numero_albaran": "ALI-1", "fecha": "2026-11-18", "remitente": "Aliplast", "lineas": [], "dudas": []}, "esperados": [], "confirmado": True})
+    assert resp.status_code == 200, resp.text; ident = resp.json()["id"]
+    r = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "LP26-0236823", "ref": "F05182S", "lote": "P03-014037", "kg": 376, "origen": "barras"})
+    assert r.status_code == 200, r.text
+    p = r.json()["palet"]
+    assert p["sscc"] == "LP260236823" and p["kg"] == 376 and p["lote"] == "P03-014037" and p["origen"] == "barras"
+    # el mismo palet escrito de otra forma es el mismo código → repetido
+    p = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "lp26 0236823", "origen": "barras"}).json()["palet"]
+    assert p["estado"] == "discrepancia" and "repetido" in p["motivo"]
+    # un QR (dirección web) no se acepta como código de palet
+    r = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "https://www.aliplastspa.com/etichettatura-ambientale", "origen": "barras"})
+    assert r.status_code == 400

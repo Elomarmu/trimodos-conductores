@@ -4,11 +4,15 @@
 // Usa el lector del propio móvil (BarcodeDetector) si lo tiene; si no (iPhone, ordenadores), ZXing (/vendor/zxing.min.js,
 // se carga solo la primera vez). Si la cámara no se puede abrir, el código se sigue pudiendo escribir o elegir de la lista.
 
-const BAR = { INTERVALO_MS: 200, FORMATOS: ["code_128", "code_39", "code_93", "ean_13", "ean_8", "itf", "codabar", "upc_a", "upc_e", "qr_code", "data_matrix"] };
+const BAR = { INTERVALO_MS: 200, FORMATOS: ["code_128", "code_39", "code_93", "ean_13", "ean_8", "itf", "codabar", "upc_a", "upc_e"] };
 
-// Deja solo las cifras del código; un SSCC de código GS1-128 llega como «00» + 18 cifras (a veces con más datos detrás).
+// Igual que sscc() del servidor: sin letras, solo cifras (un SSCC de GS1-128 llega como «00» + 18 cifras); con letras
+// (p. ej. «LP26-0236823»), en mayúsculas y sin guiones ni espacios. Una dirección web (el QR de la etiqueta ambiental) no es un código.
 function barNormalizar(texto) {
-  let t = String(texto || "").replace(/\D/g, "");
+  let t = String(texto || "").trim();
+  if (/^(https?:\/\/|www\.)/i.test(t)) return "";
+  if (/[A-Za-z]/.test(t)) return t.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  t = t.replace(/\D/g, "");
   if (t.length >= 20 && t.startsWith("00")) t = t.slice(2, 20);
   return t;
 }
@@ -48,7 +52,7 @@ function barMotorZXing() {
   const Z = window.ZXing;
   const hints = new Map();
   hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.CODE_93, Z.BarcodeFormat.EAN_13,
-    Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.QR_CODE, Z.BarcodeFormat.DATA_MATRIX]);
+    Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODABAR, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]);
   hints.set(Z.DecodeHintType.TRY_HARDER, true);
   const lector = new Z.MultiFormatReader();
   lector.setHints(hints);

@@ -417,7 +417,7 @@
         <div class="field"><label for="se-m-lote">Lote</label><input id="se-m-lote" type="text" autocomplete="off"></div>
         <div class="field"><label for="se-m-kg">Kg</label><input id="se-m-kg" type="text" inputmode="numeric" autocomplete="off"></div>
       </div>
-      <div class="field"><label for="se-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="se-m-sscc" type="text" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="se-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="se-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
       <button type="submit" class="btn secondary small">Añadir el palet</button>
     </form>
   </details>
@@ -485,7 +485,7 @@
   <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
     <form id="ss-manual" novalidate>
       <div class="field" id="ss-lista-campo" hidden><label for="ss-m-lista">Palets del almacén que se pueden cargar (los más antiguos primero)</label><select id="ss-m-lista"></select></div>
-      <div class="field"><label for="ss-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="ss-m-sscc" type="text" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="ss-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="ss-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
       <div class="row2">
         <div class="field"><label for="ss-m-ref">Referencia</label><input id="ss-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
         <div class="field"><label for="ss-m-lote">Lote</label><input id="ss-m-lote" type="text" autocomplete="off"></div>
@@ -571,7 +571,7 @@
 <div id="barras" class="overlay escaner" role="dialog" aria-modal="true" aria-labelledby="bar-titulo" hidden>
   <div class="escaner-caja">
     <h2 id="bar-titulo">Escanear códigos de barras</h2>
-    <p class="hint">Apunta la cámara al código de barras de cada palet. Se apunta solo y suena al leerlo; pasa al siguiente palet sin cerrar.</p>
+    <p class="hint">Apunta la cámara al código de barras de cada palet y acércala hasta que la etiqueta llene casi toda la pantalla. Se apunta solo y suena al leerlo; pasa al siguiente palet sin cerrar.</p>
     <video id="bar-video" class="bar-video" playsinline muted autoplay></video>
     <div id="bar-ultimo" class="avisos" aria-live="polite"></div>
     <p id="bar-contador" class="hint"></p>
