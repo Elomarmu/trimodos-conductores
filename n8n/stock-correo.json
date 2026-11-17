@@ -20,7 +20,7 @@
           "downloadAttachments": true
         }
       },
-      "id": "2064c91e-a922-4dd0-895c-71b6ba41afa3",
+      "id": "30cbe43a-7fd5-43e1-b5a2-7ce17bfd5144",
       "name": "Correo nuevo",
       "type": "n8n-nodes-base.microsoftOutlookTrigger",
       "typeVersion": 1,
@@ -37,9 +37,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Ajustes del flujo STOCK BURRIANA · CORREO\nreturn [{ json: {\n  alias: 'agente.burriana@stinsa.com',                                   // solo se procesan los correos dirigidos a este alias\n  urlApp: '<<PONER EN N8N: https://TU-APP.vercel.app/api/stock/correo>>',\n  claveApp: '<<PONER EN N8N: la misma que STOCK_CORREO_CLAVE en Vercel>>',\n  buzonEnvio: 'agente.trafico@transargi.com',                            // buzón de la credencial «Outlook Agente Trafico» (desde donde salen los avisos)\n  paraPorDefecto: 'carmelomartinez@stinsa.com',                          // si la app no dice otra cosa (STOCK_CORREO_PARA)\n  presupuestoB64: 4000000,                                               // Vercel admite cuerpos de 4,5 MB\n}}];\n"
+        "jsCode": "// Ajustes del flujo STOCK BURRIANA · CORREO\nconst cfg = {\n  alias: 'agente.burriana@stinsa.com',                                   // solo se procesan los correos dirigidos a este alias\n  urlApp: '<<PONER EN N8N: https://TU-APP.vercel.app/api/stock/correo>>',\n  claveApp: '<<PONER EN N8N: la misma que STOCK_CORREO_CLAVE en Vercel>>',\n  buzonEnvio: 'agente.trafico@transargi.com',                            // buzón de la credencial «Outlook Agente Trafico» (desde donde salen los avisos)\n  paraPorDefecto: 'carmelomartinez@stinsa.com',                          // si la app no dice otra cosa (STOCK_CORREO_PARA)\n  presupuestoB64: 4000000,                                               // Vercel admite cuerpos de 4,5 MB\n};\n// Deja pasar el correo (datos y adjuntos) y le añade los ajustes: así «Preparar» recibe el correo y $('Configuración') sigue dando los ajustes.\nreturn $input.all().map(it => ({ json: { ...it.json, ...cfg }, binary: it.binary }));\n"
       },
-      "id": "405349a3-e470-478a-ace0-d2c428659efe",
+      "id": "96b6fceb-905b-4543-96b2-e47b9fa94145",
       "name": "Configuración",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -52,7 +52,7 @@
       "parameters": {
         "jsCode": "// Un elemento por correo: comprueba que va al alias y prepara el JSON para la app (adjuntos útiles en base64).\nconst cfg = $('Configuración').first().json;\nconst alias = cfg.alias.toLowerCase();\nconst salida = [];\nfor (let i = 0; i < $input.all().length; i++) {\n  const m = $input.all()[i].json, bin = $input.all()[i].binary || {};\n  const dirs = [...(m.toRecipients || []), ...(m.ccRecipients || []), ...(m.bccRecipients || [])].map(r => String((r.emailAddress || {}).address || '').toLowerCase());\n  if (dirs.length && !dirs.includes(alias)) continue;                    // no es para el alias del almacén\n  const texto = (m.body && m.body.content ? String(m.body.content) : String(m.bodyPreview || ''))\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 4000);\n  const cand = [];\n  for (const k of Object.keys(bin)) {\n    const b = bin[k], nombre = b.fileName || k, n = nombre.toLowerCase();\n    const util = /\\.(pdf|xlsx)$/.test(n) || (/\\.(jpe?g|png)$/.test(n) && Number(b.fileSize ? parseFloat(b.fileSize) * (/mb/i.test(b.fileSize) ? 1e6 : 1e3) : 1e6) >= 60000);   // las firmas (logos pequeños) no cuentan\n    if (util) cand.push({ k, nombre, tipo: b.mimeType || '', peso: /\\.(pdf|xlsx)$/.test(n) ? 0 : 1 });\n  }\n  cand.sort((a, b) => a.peso - b.peso);                                   // primero PDF y Excel, luego fotos\n  const adjuntos = [], omitidos = [];\n  let usado = 0;\n  for (const c of cand) {\n    const buf = await this.helpers.getBinaryDataBuffer(i, c.k);\n    const b64 = buf.toString('base64');\n    if (usado + b64.length > cfg.presupuestoB64 || adjuntos.length >= 8) { omitidos.push(c.nombre); continue; }\n    usado += b64.length;\n    adjuntos.push({ nombre: c.nombre, tipo: c.tipo, archivo_b64: b64 });\n  }\n  const de = (m.from && m.from.emailAddress && m.from.emailAddress.address) || '';\n  salida.push({ json: { payload: { mensaje_id: m.id || '', de, asunto: m.subject || '', adjuntos,\n    cuerpo: texto + (omitidos.length ? ` [Adjuntos no enviados por tamaño: ${omitidos.join(', ')}]` : '') } } });\n}\nreturn salida;\n"
       },
-      "id": "d64aa208-936d-4899-8e14-47ee72d3600e",
+      "id": "22635455-4f2f-4f5b-abd4-37b196943c4a",
       "name": "Preparar",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -86,7 +86,7 @@
           }
         }
       },
-      "id": "14eb19ec-fa04-4ef4-8f42-d58bdfd1bed2",
+      "id": "8cab481c-1687-4152-a852-cee713ee6eaf",
       "name": "Enviar a la app",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -103,7 +103,7 @@
       "parameters": {
         "jsCode": "// Redacta el aviso a la oficina según lo que contesta la app.\nconst cfg = $('Configuración').first().json;\nconst p = $('Preparar').item.json.payload;\nconst r = $json || {};\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lista = a => (a && a.length) ? '<ul>' + a.map(x => `<li>${esc(x)}</li>`).join('') + '</ul>' : '';\nconst estilo = 'font:11pt Calibri,Arial';\nlet asunto, html;\nif (r.resultado === 'creada') {\n  if (r.repetido) return [];                                              // correo ya tratado antes: sin aviso\n  const nom = r.tipo === 'salida' ? 'Salida' : 'Entrada';\n  asunto = `Almacén Burriana · ${nom} ${r.id} preparada desde el correo «${p.asunto}»`;\n  html = `<p style='${estilo}'>He preparado la <b>${nom.toLowerCase()} ${esc(r.id)}</b> de <b>${esc(r.cliente)}</b> con el correo de ${esc(p.de)}`\n    + (r.albaran ? ` (albarán ${esc(r.albaran)})` : '') + (r.pedido ? ` (pedido ${esc(r.pedido)})` : '') + ` · ${esc(r.palets)} palets.</p>`\n    + (r.avisos && r.avisos.length ? `<p style='${estilo};color:#C00000'><b>Avisos:</b></p>${lista(r.avisos)}` : `<p style='${estilo}'>Sin conflictos.</p>`)\n    + `<p style='${estilo}'>Revísala y confírmala en la app (Stock Burriana › ${r.tipo === 'salida' ? 'Salidas' : 'Entradas'}): hasta entonces no se puede cerrar.</p>`;\n} else {\n  const motivo = r.resultado === 'no_procesada' ? r.motivo : `La app no ha contestado bien (${esc(r.error || r.message || 'sin respuesta')}).`;\n  asunto = `⚠ Almacén Burriana · No he podido procesar el correo «${p.asunto}»`;\n  html = `<p style='${estilo}'>No he podido preparar nada con el correo de <b>${esc(p.de)}</b> («${esc(p.asunto)}»).</p>`\n    + `<p style='${estilo};color:#C00000'>${esc(motivo)}</p>` + lista(r.avisos)\n    + `<p style='${estilo}'>Cárgalo a mano en la app (Stock Burriana) con los adjuntos del correo.</p>`;\n}\nconst para = String(r.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nreturn [{ json: { mensaje: { message: { subject: asunto, body: { contentType: 'HTML', content: html },\n  toRecipients: para.map(a => ({ emailAddress: { address: a } })) }, saveToSentItems: true } } }];\n"
       },
-      "id": "48ef4a61-2437-46d1-8ae5-072d6c3920f3",
+      "id": "62e70e0b-0b18-45b1-9d5e-cdfc444ebd22",
       "name": "Redactar aviso",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -123,7 +123,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.mensaje) }}"
       },
-      "id": "eb7412d1-2a2f-4904-9377-425f16eb7e4d",
+      "id": "d2520660-b40c-425f-bb73-4dfc25fde5b2",
       "name": "Avisar a la oficina",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -147,7 +147,7 @@
         "height": 300,
         "width": 460
       },
-      "id": "bae81b65-486d-4f04-bc71-d55f9f14a00f",
+      "id": "ae9912ee-87ad-4624-930f-1fdf5b66e901",
       "name": "Instrucciones",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,

@@ -16,14 +16,16 @@ from pathlib import Path
 DESTINO = Path(__file__).resolve().parent.parent / "n8n" / "stock-correo.json"
 
 JS_CONFIG = """// Ajustes del flujo STOCK BURRIANA · CORREO
-return [{ json: {
+const cfg = {
   alias: 'agente.burriana@stinsa.com',                                   // solo se procesan los correos dirigidos a este alias
   urlApp: '<<PONER EN N8N: https://TU-APP.vercel.app/api/stock/correo>>',
   claveApp: '<<PONER EN N8N: la misma que STOCK_CORREO_CLAVE en Vercel>>',
   buzonEnvio: 'agente.trafico@transargi.com',                            // buzón de la credencial «Outlook Agente Trafico» (desde donde salen los avisos)
   paraPorDefecto: 'carmelomartinez@stinsa.com',                          // si la app no dice otra cosa (STOCK_CORREO_PARA)
   presupuestoB64: 4000000,                                               // Vercel admite cuerpos de 4,5 MB
-}}];
+};
+// Deja pasar el correo (datos y adjuntos) y le añade los ajustes: así «Preparar» recibe el correo y $('Configuración') sigue dando los ajustes.
+return $input.all().map(it => ({ json: { ...it.json, ...cfg }, binary: it.binary }));
 """
 
 JS_PREPARAR = """// Un elemento por correo: comprueba que va al alias y prepara el JSON para la app (adjuntos útiles en base64).
