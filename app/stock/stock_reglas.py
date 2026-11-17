@@ -304,6 +304,28 @@ def activos(entrada: dict) -> list[dict]:
     return [p for p in entrada["palets"] if p.get("estado_alta") != "quitado"]
 
 
+def pendientes_entrada(entrada: dict) -> list[dict]:
+    """Códigos de la lista del albarán que todavía no se han etiquetado (para elegirlos de una lista desplegable)."""
+    hechos = {p.get("sscc") for p in activos(entrada) if p.get("sscc")}
+    return [{"codigo": x["codigo"], "ref": x.get("ref") or "", "kg": x.get("kg"), "lote": x.get("lote") or ""}
+            for x in entrada.get("esperados") or [] if x["codigo"] not in hechos]
+
+
+def disponibles_salida(salida: dict, existencias: list[dict], otras_salidas: list[dict], tope: int = 300) -> list[dict]:
+    """Palets del stock del cliente que se pueden cargar en esta salida (lista desplegable): de las referencias pedidas
+    (o de la lista de códigos de la petición, si la trae), sin los ya cargados ni reservados en otras salidas; los más
+    antiguos primero (FIFO)."""
+    cod = salida["cliente"]["codigo"]
+    tomados = {p.get("palet_id") for p in salida["palets"] if p.get("estado_alta") != "quitado" and p.get("palet_id")} | reservados(otras_salidas, salida["id"])
+    lista = {x["codigo"] for x in salida.get("esperados") or []}
+    refs = {referencia(l.get("ref")) for l in salida["lineas"] if l.get("ref")}
+    res = [p for p in existencias if p["cliente"] == cod and p["id"] not in tomados and p.get("sscc")
+           and ((p["sscc"] in lista) if lista else (not refs or referencia(p["ref"]) in refs))]
+    res.sort(key=lambda p: (p["fecha_entrada"], p["id"]))
+    return [{"codigo": p["sscc"], "ref": p["ref"], "lote": p.get("lote") or "", "kg": p.get("kg"), "palet": p["id"], "fecha_entrada": p["fecha_entrada"]}
+            for p in res[:tope]]
+
+
 def estado_lineas(entrada: dict) -> list[dict]:
     """Por línea del albarán: palets esperados / verificados y kg del albarán / de las etiquetas."""
     res = []

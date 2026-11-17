@@ -150,14 +150,17 @@ El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans
 1. **La oficina** pulsa **Entradas → «Nueva entrada»** y hace foto al albarán, o elige el **PDF y el Excel** que manda el cliente (el Excel trae la lista exacta de palets con su código y su peso). Se pueden elegir hasta 4 archivos.
 2. La app propone el **cliente** y avisa de conflictos (albarán ya cargado, referencia que no está en su catálogo, fecha rara). El «cliente final» (el cliente de tu cliente) es solo informativo.
 3. Revisa los datos y **el día de entrada en el almacén**: la app propone el del albarán, pero **cámbialo** si el camión se cargó un día y se descarga al siguiente (es el día que cuenta para el estocaje). Pulsa **«Guardar la entrada»**.
-4. **El almacén** abre la entrada y, palet a palet, pulsa **«Foto de la etiqueta del palet»**. La app comprueba que ese código está en el albarán y no está repetido. Si la etiqueta no se lee, usa **«Apuntar un palet a mano»**. Un palet mal fotografiado se quita con **«Quitar»**.
+4. **El almacén** abre la entrada y apunta cada palet de una de estas tres formas. La app comprueba que ese código está en el albarán y no está repetido. Un palet mal apuntado se quita con **«Quitar»**.
+   - **«Escanear códigos de barras»**: se abre la cámara y se van pasando los palets uno tras otro sin cerrarla; cada código leído suena, vibra y se apunta solo (sale como «escaneado»). Es lo más rápido y evita errores al teclear.
+   - **«Foto de la etiqueta del palet»**: la app lee la etiqueta de la foto.
+   - **«Elegir un palet de la lista o apuntarlo a mano»**: se elige el código en la lista desplegable (solo salen los del albarán que faltan por apuntar) o se escribe a mano si nada de lo anterior funciona (sale como «a mano»).
 5. Si pasa algo (palet roto, film abierto, falta un palet…), se escribe en **«Incidencias de la descarga»**: la oficina lo verá en el correo.
 6. Al terminar, **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel y las fotos, y se actualiza la Excel de control en SharePoint.
 
 ### Salida de mercancía
 
 1. **La oficina** pulsa **Salidas → «Nueva salida»**, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).
-2. **El almacén** abre la salida y hace **foto a la etiqueta de cada palet que carga**. La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. Avisa si hay un palet más antiguo de la misma referencia (conviene sacar primero el más antiguo).
+2. **El almacén** abre la salida y apunta cada palet que carga, con **«Escanear códigos de barras»**, con la foto de la etiqueta o eligiéndolo en la lista desplegable (salen los palets del cliente que se pueden cargar, los más antiguos primero). La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. Avisa si hay un palet más antiguo de la misma referencia (conviene sacar primero el más antiguo).
 3. Incidencias de la carga en **«Incidencias de la carga»**. Al terminar, **«Terminar la carga y expedir la Excel»**: sale un correo con la Excel de lo cargado y las fotos.
 
 ### Correos que llegan solos (agente.burriana@stinsa.com)

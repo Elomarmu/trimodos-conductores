@@ -545,3 +545,44 @@ def test_correo_del_buzon_prepara_la_entrada_para_revisar_y_no_se_duplica(client
     r = cliente.post("/api/stock/correo", json={"mensaje_id": "AAMk-4", "de": "x", "asunto": "Recogida mañana", "cuerpo": "", "adjuntos": [pdf]}, headers=h).json()
     assert r["resultado"] == "creada" and r["tipo"] == "salida" and r["id"].startswith("S-")
     assert cliente.get(f"/api/stock/salidas/{r['id']}").json()["por_revisar"] is True
+
+
+def test_codigo_de_barras_y_lista_desplegable_en_entradas_y_salidas(cliente, monkeypatch, enviados):
+    """El código leído con la cámara (o elegido de la lista) basta: el resto sale de la lista del albarán / del stock."""
+    codigos = ["2600044888", "2600044889", "2600044860"]
+    xlsx = {"archivo_b64": base64.b64encode(_excel_albaran(codigos)).decode(), "tipo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+    leer_con(monkeypatch, albaran={"numero_albaran": "SRCS26-04809", "fecha": "2026-11-18", "remitente": "Grupo Raminatrans", "lineas": [], "dudas": []})
+    d = cliente.post("/api/stock/entradas/leer", json={"archivos": [xlsx]}).json()
+    ident = cliente.post("/api/stock/entradas", json={"cliente": "RAMINATRANS", "albaran": d["albaran"], "esperados": d["esperados"]}).json()["id"]
+    det = cliente.get(f"/api/stock/entradas/{ident}").json()
+    assert [x["codigo"] for x in det["pendientes"]] == codigos and all(x["ref"] and x["kg"] for x in det["pendientes"])
+    # escaneado: solo llega el código, el resto sale del albarán; no cuenta como «a mano»
+    r = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "2600044888", "origen": "barras"})
+    assert r.status_code == 200, r.text
+    p = r.json()["palet"]
+    assert p["estado"] == "ok" and p["ref"] == "6030100800103" and p["kg"] == 348 and p["origen"] == "barras" and p["manual"] is False
+    assert [x["codigo"] for x in r.json()["entrada"]["pendientes"]] == codigos[1:]
+    # elegido de la lista (sin origen «barras»): cuenta como a mano
+    p = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "2600044889"}).json()["palet"]
+    assert p["estado"] == "ok" and p["manual"] is True
+    # un código que no está en la lista del albarán se anota como discrepancia, no se rechaza
+    p = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "9999999999", "origen": "barras"}).json()["palet"]
+    assert p["estado"] == "discrepancia"
+    assert cliente.post(f"/api/stock/entradas/{ident}/palet", json={}).status_code == 400
+    # el mismo código dos veces → palet repetido
+    p = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "2600044889", "origen": "barras"}).json()["palet"]
+    assert p["estado"] == "discrepancia" and "repetido" in p["motivo"]
+    # cerrar la entrada (con el palet que sobra y el repetido aceptados) para que haya stock
+    cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "2600044860", "origen": "barras"})
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"aceptar": True, "nota": "prueba"})
+    if r.status_code == 409:
+        r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True, "nota": "prueba"})
+    assert r.status_code == 200, r.text
+    assert cliente.get(f"/api/stock/entradas/{ident}").json()["pendientes"] == []
+    # salida: la lista desplegable ofrece los palets del cliente que se pueden cargar (los más antiguos primero)
+    s = cliente.post("/api/stock/salidas", json={"cliente": "RAMINATRANS", "lineas": [{"ref": "6030100800103", "palets": 2}]}).json()
+    disp = cliente.get(f"/api/stock/salidas/{s['id']}/disponibles").json()["palets"]
+    assert {x["codigo"] for x in disp} == set(codigos) and all(x["ref"] and x["kg"] for x in disp)
+    r = cliente.post(f"/api/stock/salidas/{s['id']}/palet", json={"sscc": "2600044888", "origen": "barras"})
+    assert r.status_code == 200 and r.json()["palet"]["estado"] == "ok" and r.json()["palet"]["origen"] == "barras"
+    assert {x["codigo"] for x in cliente.get(f"/api/stock/salidas/{s['id']}/disponibles").json()["palets"]} == set(codigos) - {"2600044888"}

@@ -376,13 +376,15 @@
   </div>
   <label class="btn primary huge" for="se-etq-camara">Foto de la etiqueta del palet</label>
   <input id="se-etq-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <button id="se-barras" type="button" class="btn secondary huge">Escanear códigos de barras</button>
   <div id="se-aviso-palet" class="avisos"></div>
   <h2>Lo que dice el albarán</h2>
   <div id="se-lineas" class="lista"></div>
   <h2 id="se-palets-titulo">Palets verificados</h2>
   <div id="se-palets" class="lista"></div>
-  <details class="manual"><summary>Apuntar un palet a mano (etiqueta ilegible)</summary>
+  <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
     <form id="se-manual" novalidate>
+      <div class="field" id="se-lista-campo" hidden><label for="se-m-lista">Palets del albarán que faltan por apuntar</label><select id="se-m-lista"></select></div>
       <div class="field"><label for="se-m-ref">Referencia</label><input id="se-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
       <div class="row2">
         <div class="field"><label for="se-m-lote">Lote</label><input id="se-m-lote" type="text" autocomplete="off"></div>
@@ -447,13 +449,15 @@
   </div>
   <label class="btn primary huge" for="ss-etq-camara">Foto del palet que cargas</label>
   <input id="ss-etq-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <button id="ss-barras" type="button" class="btn secondary huge">Escanear códigos de barras</button>
   <div id="ss-aviso-palet" class="avisos"></div>
   <h2>Lo que piden</h2>
   <div id="ss-lineas" class="lista"></div>
   <h2 id="ss-palets-titulo">Palets cargados</h2>
   <div id="ss-palets" class="lista"></div>
-  <details class="manual"><summary>Apuntar un palet a mano (etiqueta ilegible)</summary>
+  <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
     <form id="ss-manual" novalidate>
+      <div class="field" id="ss-lista-campo" hidden><label for="ss-m-lista">Palets del almacén que se pueden cargar (los más antiguos primero)</label><select id="ss-m-lista"></select></div>
       <div class="field"><label for="ss-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="ss-m-sscc" type="text" inputmode="numeric" autocomplete="off"></div>
       <div class="row2">
         <div class="field"><label for="ss-m-ref">Referencia</label><input id="ss-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
@@ -537,11 +541,23 @@
   </div>
 </div>
 
+<div id="barras" class="overlay escaner" role="dialog" aria-modal="true" aria-labelledby="bar-titulo" hidden>
+  <div class="escaner-caja">
+    <h2 id="bar-titulo">Escanear códigos de barras</h2>
+    <p class="hint">Apunta la cámara al código de barras de cada palet. Se apunta solo y suena al leerlo; pasa al siguiente palet sin cerrar.</p>
+    <video id="bar-video" class="bar-video" playsinline muted autoplay></video>
+    <div id="bar-ultimo" class="avisos" aria-live="polite"></div>
+    <p id="bar-contador" class="hint"></p>
+    <button id="bar-cerrar" type="button" class="btn primary huge">Terminar</button>
+  </div>
+</div>
+
 <div id="busy" class="overlay" hidden>
   <div class="dialog" role="status" aria-live="polite"><div class="busy-loader" data-trimodos-loader></div><h2 id="busy-msg">Un momento…</h2></div>
 </div>
 <script src="/app.js"></script>
 <script src="/escaner.js"></script>
+<script src="/barras.js"></script>
 <script src="/pr.js"></script>
 <script src="/stock.js"></script>
 </body>

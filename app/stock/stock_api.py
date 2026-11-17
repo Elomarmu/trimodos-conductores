@@ -171,6 +171,7 @@ class PaletManual(BaseModel):
     sscc: str = Field("", max_length=30)
     kg: int | None = Field(None, ge=0)
     bultos: int | None = Field(None, ge=0)
+    origen: str = Field("", max_length=10)   # «barras» si el código se ha leído con la cámara; vacío: escrito o elegido de la lista
 
 
 class Quitar(BaseModel):
@@ -270,7 +271,8 @@ def _resumen_entrada(e: dict) -> dict:
 
 def _detalle_entrada(e: dict) -> dict:
     return {**_resumen_entrada(e), "albaran_datos": e["albaran"], "lineas": R.estado_lineas(e), "palets": R.activos(e),
-            "avisos": e.get("avisos") or [], "discrepancias_lista": R.discrepancias_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else e.get("discrepancias_cierre") or [],
+            "avisos": e.get("avisos") or [], "pendientes": R.pendientes_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else [],
+            "discrepancias_lista": R.discrepancias_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else e.get("discrepancias_cierre") or [],
             "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or ""}
 
 
@@ -409,11 +411,11 @@ def entrada_detalle(ident: str):
     return _detalle_entrada(_documento(get_store(), "entrada", ident))
 
 
-def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool) -> dict:
+def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "") -> dict:
     entradas, salidas = store.listar("entrada"), store.listar("salida")
     palet = R.verificar_palet(e, etiqueta, _sscc_en_stock(entradas, salidas))
     n = max([int(p["id"].rsplit("-", 1)[1]) for p in e["palets"]] or [0]) + 1
-    palet.update(id=f"{e['id']}-{n:02d}", manual=manual, hora=ahora(), foto="")
+    palet.update(id=f"{e['id']}-{n:02d}", manual=manual, hora=ahora(), foto="", origen=origen)
     if foto:
         palet["foto"] = _guardar_foto(store, e["id"], f"{n:02d} {etiqueta.get('ref') or 'palet'}", foto)
     e["palets"].append(palet)
@@ -440,10 +442,14 @@ def entrada_palet_manual(ident: str, body: PaletManual):
     store = get_store()
     e = _documento(store, "entrada", ident)
     _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
-    if not (body.ref or body.descripcion):
-        raise AppError("Escribe al menos la referencia del palet.", 400, "sin_referencia")
-    etiqueta = R.limpiar_etiqueta({"sscc": body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos})
-    palet = _anadir_palet_entrada(store, e, etiqueta, None, True)
+    codigo = R.sscc(body.sscc)
+    if not (body.ref or body.descripcion or codigo):
+        raise AppError("Escribe el código del palet o su referencia.", 400, "sin_referencia")
+    datos = {"sscc": body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos}
+    exp = next((x for x in e.get("esperados") or [] if codigo and x["codigo"] == codigo), None)
+    if exp and not body.ref:   # solo llega el código (leído con la cámara o elegido de la lista): lo demás sale del albarán
+        datos.update(referencia=exp.get("ref") or "", lote=body.lote or exp.get("lote") or "", kg=body.kg if body.kg is not None else exp.get("kg"))
+    palet = _anadir_palet_entrada(store, e, R.limpiar_etiqueta(datos), None, body.origen != "barras", body.origen)
     return {"palet": palet, "entrada": _detalle_entrada(e)}
 
 
@@ -624,11 +630,11 @@ def salida_detalle(ident: str):
     return _detalle_salida(_documento(get_store(), "salida", ident))
 
 
-def _anadir_palet_salida(store, s: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool) -> dict:
+def _anadir_palet_salida(store, s: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "") -> dict:
     entradas, salidas = store.listar("entrada"), store.listar("salida")
     palet = R.cargar_palet(s, etiqueta, R.stock(entradas, salidas), salidas)
     n = len(s["palets"]) + 1
-    palet.update(n=n, manual=manual, hora=ahora(), foto="")
+    palet.update(n=n, manual=manual, hora=ahora(), foto="", origen=origen)
     if foto:
         palet["foto"] = _guardar_foto(store, s["id"], f"{n:02d} {palet['palet_id'] or palet['ref'] or 'palet'}", foto)
     s["palets"].append(palet)
@@ -656,10 +662,21 @@ def salida_palet_manual(ident: str, body: PaletManual):
     s = _documento(store, "salida", ident)
     _esperar_abierta(s, R.SALIDA_CARGADA, "salida")
     if not (body.sscc or body.ref):
-        raise AppError("Escribe el SSCC o la referencia del palet.", 400, "sin_referencia")
+        raise AppError("Escribe el código del palet o su referencia.", 400, "sin_referencia")
     etiqueta = R.limpiar_etiqueta({"sscc": body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos})
-    palet = _anadir_palet_salida(store, s, etiqueta, None, True)
+    palet = _anadir_palet_salida(store, s, etiqueta, None, body.origen != "barras", body.origen)
     return {"palet": palet, "salida": _detalle_salida(s)}
+
+
+@router.get("/salidas/{ident}/disponibles")
+def salida_disponibles(ident: str):
+    """Palets del almacén que se pueden cargar en esta salida (para la lista desplegable)."""
+    store = get_store()
+    s = _documento(store, "salida", ident)
+    if s["estado"] == R.SALIDA_CARGADA:
+        return {"palets": []}
+    entradas, salidas = store.listar("entrada"), store.listar("salida")
+    return {"palets": R.disponibles_salida(s, R.stock(entradas, salidas), salidas)}
 
 
 @router.post("/salidas/{ident}/quitar")

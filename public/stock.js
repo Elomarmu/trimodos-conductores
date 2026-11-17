@@ -163,6 +163,8 @@ function pintarEntrada(e) {
   $("se-titulo").textContent = `Entrada ${e.id}`;
   $("se-cabecera").textContent = `${e.cliente.nombre}${e.cliente_final ? " (para " + e.cliente_final + ")" : ""} · albarán ${e.albaran || "—"} del ${fechaEs(e.fecha)} · entrada en almacén ${fechaEs(e.fecha_entrada)} · ${e.verificados} de ${e.esperados} palets verificados` + (cerrada ? " · CERRADA" : "");
   document.querySelector('label[for="se-etq-camara"]').hidden = cerrada;
+  $("se-barras").hidden = cerrada;
+  pintarListaEntrada(e);
   $("se-cierre").hidden = cerrada;
   $("se-revisar").hidden = !e.por_revisar;
   $("se-revisar-avisos").replaceChildren(...avisosHtml(e.avisos || []));
@@ -175,7 +177,7 @@ function pintarEntrada(e) {
   $("se-palets-titulo").hidden = !e.palets.length;
   $("se-palets").replaceChildren(...e.palets.map((p) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
-      h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.manual ? " · a mano" : "")),
+      h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
     cerrada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletEntrada(p) }, "Quitar"))));
   $("se-descargas").replaceChildren();
@@ -191,6 +193,28 @@ $("se-etq-camara").addEventListener("change", async (ev) => {
   $("se-aviso-palet").replaceChildren(h("div", { class: "banner " + (p.estado === "ok" ? "info" : "warn") },
     p.estado === "ok" ? `✓ ${p.ref} · lote ${p.lote || "—"} · ${n(p.kg)} kg: coincide con el albarán.` : "⚠ " + p.motivo));
 });
+// Lista desplegable: los palets de la lista del albarán que todavía no se han apuntado. Al elegir uno se rellena el formulario.
+function pintarListaEntrada(e) {
+  const pend = e.pendientes || [];
+  $("se-lista-campo").hidden = !pend.length || e.estado === "cerrada";
+  $("se-m-lista").replaceChildren(h("option", { value: "" }, `— Elegir (${pend.length} sin apuntar) —`),
+    ...pend.map((x) => h("option", { value: x.codigo }, `${x.codigo} · ${x.ref || "¿?"}${x.kg ? " · " + n(x.kg) + " kg" : ""}`)));
+}
+$("se-m-lista").addEventListener("change", () => {
+  const x = (stk.entrada.pendientes || []).find((y) => y.codigo === $("se-m-lista").value);
+  if (!x) return;
+  $("se-m-sscc").value = x.codigo; $("se-m-ref").value = x.ref || ""; $("se-m-lote").value = x.lote || ""; $("se-m-kg").value = x.kg ? String(x.kg) : "";
+});
+$("se-barras").addEventListener("click", () => abrirLectorBarras({
+  titulo: `Entrada ${stk.entrada.id}: escanear palets`,
+  yaEsta: (c) => stk.entrada.palets.some((p) => p.sscc === c),
+  alLeer: async (codigo) => {
+    const r = await post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`, { sscc: codigo, origen: "barras" });
+    pintarEntrada(r.entrada);
+    const p = r.palet;
+    return p.estado === "ok" ? { ok: true, texto: `✓ ${p.ref} · ${codigo}${p.kg ? " · " + n(p.kg) + " kg" : ""}: coincide con el albarán.` } : { ok: false, texto: `⚠ ${codigo}: ${p.motivo}` };
+  },
+}));
 $("se-manual").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const kg = parseNum($("se-m-kg").value);
@@ -300,6 +324,8 @@ function pintarSalida(s) {
   $("ss-titulo").textContent = `Salida ${s.id}`;
   $("ss-cabecera").textContent = `${s.cliente.nombre}${s.datos.referencia ? " · pedido " + s.datos.referencia : ""}${s.datos.destino ? " · destino " + s.datos.destino : ""} · ${s.cargados} de ${s.pedidos} palets` + (cargada ? " · CARGADA" : "");
   document.querySelector('label[for="ss-etq-camara"]').hidden = cargada;
+  $("ss-barras").hidden = cargada;
+  pintarListaSalida(s);
   $("ss-cierre").hidden = cargada;
   $("ss-obs").value = s.observaciones || "";
   $("ss-revisar").hidden = !s.por_revisar;
@@ -311,7 +337,7 @@ function pintarSalida(s) {
   $("ss-palets-titulo").hidden = !s.palets.length;
   $("ss-palets").replaceChildren(...s.palets.map((p) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
-      h("span", { class: "hint" }, (p.palet_id || "sin stock") + (p.sscc ? " · " + p.sscc : "")),
+      h("span", { class: "hint" }, (p.palet_id || "sin stock") + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null,
       p.aviso ? h("br") : null, p.aviso ? h("span", { class: "hint" }, "ℹ " + p.aviso) : null),
     cargada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletSalida(p) }, "Quitar"))));
@@ -328,6 +354,33 @@ $("ss-etq-camara").addEventListener("change", async (ev) => {
   $("ss-aviso-palet").replaceChildren(h("div", { class: "banner " + (p.estado === "ok" ? "info" : "warn") },
     p.estado === "ok" ? `✓ ${p.ref} · ${p.palet_id}: es lo que piden.` + (p.aviso ? " " + p.aviso : "") : "⚠ " + p.motivo));
 });
+// Lista desplegable: palets del almacén que se pueden cargar en esta salida (los más antiguos primero).
+async function pintarListaSalida(s) {
+  const campo = $("ss-lista-campo"), sel = $("ss-m-lista");
+  stk.disponibles = [];
+  campo.hidden = true;
+  if (s.estado === "cargada") return;
+  try { stk.disponibles = (await api(`/api/stock/salidas/${encodeURIComponent(s.id)}/disponibles`)).palets; } catch { return; }
+  if (!stk.salida || stk.salida.id !== s.id) return;   // se ha cambiado de salida mientras tanto
+  campo.hidden = !stk.disponibles.length;
+  sel.replaceChildren(h("option", { value: "" }, `— Elegir (${stk.disponibles.length} disponibles) —`),
+    ...stk.disponibles.map((x) => h("option", { value: x.codigo }, `${x.codigo} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""} · entró ${fechaEs(x.fecha_entrada)}`)));
+}
+$("ss-m-lista").addEventListener("change", () => {
+  const x = (stk.disponibles || []).find((y) => y.codigo === $("ss-m-lista").value);
+  if (!x) return;
+  $("ss-m-sscc").value = x.codigo; $("ss-m-ref").value = x.ref || ""; $("ss-m-lote").value = x.lote || "";
+});
+$("ss-barras").addEventListener("click", () => abrirLectorBarras({
+  titulo: `Salida ${stk.salida.id}: escanear palets`,
+  yaEsta: (c) => stk.salida.palets.some((p) => p.sscc === c),
+  alLeer: async (codigo) => {
+    const r = await post(`/api/stock/salidas/${encodeURIComponent(stk.salida.id)}/palet`, { sscc: codigo, origen: "barras" });
+    pintarSalida(r.salida);
+    const p = r.palet;
+    return p.estado === "ok" ? { ok: true, texto: `✓ ${p.ref} · ${codigo}: es lo que piden.` + (p.aviso ? " " + p.aviso : "") } : { ok: false, texto: `⚠ ${codigo}: ${p.motivo}` };
+  },
+}));
 $("ss-manual").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const r = await conCarga("Añadiendo…", () => post(`/api/stock/salidas/${encodeURIComponent(stk.salida.id)}/palet`,
