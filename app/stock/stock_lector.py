@@ -28,7 +28,9 @@ Datos que necesito:
 - observaciones: anotaciones a mano, incidencias o condiciones especiales.
 
 Reglas: los pesos usan punto de miles («24.800» son 24800 kg); da los números enteros. Si un dato no aparece, null.
-En «dudas» explica brevemente cualquier dato que no se lea con seguridad."""
+En «dudas» explica brevemente cualquier dato que no se lea con seguridad. NO anotes como duda: que falten transportista o
+matrícula, que el remitente salga del membrete, ni nada de bultos o unidades (no se controlan). Solo dudas que afecten a
+códigos de palet, referencias, kg, fechas o número de albarán."""
 
 ESQUEMA_ALBARAN = {
     "type": "object",
