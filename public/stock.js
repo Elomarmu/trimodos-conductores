@@ -8,7 +8,14 @@ const stk = { clientes: [], entrada: null, salida: null, albaran: null, todas: f
 const tipoTxt = { pendiente: "Pendiente de descarga", descargando: "Descargando", cerrada: "Cerrada", pedida: "Pedida", preparando: "Preparando", cargada: "Cargada" };
 const n = (x) => (x == null ? "—" : fmtNum(x));
 // descargarXlsx({nombre, b64}) viene de pr.js
-const avisosHtml = (lista) => lista.map((a) => h("div", { class: "banner " + (a.nivel === "error" ? "bad" : "warn") }, a.texto));
+// Los errores se ven siempre; las advertencias (amarillas) van plegadas tras una flechita para que no ocupen la pantalla.
+const avisosHtml = (lista) => {
+  const caja = (a) => h("div", { class: "banner " + (a.nivel === "error" ? "bad" : "warn") }, a.texto);
+  const errores = lista.filter((a) => a.nivel === "error").map(caja), avisos = lista.filter((a) => a.nivel !== "error");
+  if (!avisos.length) return errores;
+  return [...errores, h("details", { class: "avisos-plegados" },
+    h("summary", {}, `⚠ ${avisos.length} advertencia${avisos.length === 1 ? "" : "s"} (toca para ver)`), ...avisos.map(caja))];
+};
 async function conCarga(msg, fn) {
   clearError(); busy(msg);
   try { return await fn(); } catch (e) { showError(e.message); return null; } finally { busy(null); }
