@@ -1,0 +1,403 @@
+"""Control de stock del almacén de Burriana: reglas, almacenamiento, Excel, facturación y la API de punta a punta
+(con la lectura de Claude y n8n simuladas; no se conecta a nada)."""
+import base64
+import datetime as dt
+import io
+
+import openpyxl
+import pytest
+
+from app.stock import stock_api as A
+from app.stock import stock_excel as X
+from app.stock import stock_facturacion as F
+from app.stock import stock_reglas as R
+from app.stock import stock_store as S
+
+HOY = dt.date(2026, 11, 17)
+KERAKOLL = {"codigo": "KERAKOLL", "nombre": "Kerakoll Ibérica, S.A.U.", "alias": ["KERAKOLL", "ALMAZORA"]}
+ALIPLAST = {"codigo": "ALIPLAST", "nombre": "Aliplast, S.A.", "alias": ["ALIPLAST"]}
+CLIENTES = [KERAKOLL, ALIPLAST]
+
+LEIDO_ALBARAN = {"numero_albaran": "AL-5521", "fecha": "2026-11-16", "remitente": "KERAKOLL IBERICA SAU - Almazora", "destinatario": "STINSA Almacén Burriana",
+                 "transportista": "Transportes Gil", "matricula": "1234 ABC", "total_palets": 5, "total_kg": 6000,
+                 "lineas": [{"referencia": "KK-100", "descripcion": "Mortero 25 kg", "palets": 3, "kg": 3600, "lote": "L77"},
+                            {"referencia": "KK-200", "descripcion": "Adhesivo 20 kg", "palets": 2, "kg": 2400}], "dudas": []}
+
+
+def etiqueta(ref, sscc, lote="", kg=1200, cliente="Kerakoll"):
+    return {"sscc": sscc, "referencia": ref, "descripcion": "", "lote": lote, "kg": kg, "bultos": 48, "cliente": cliente, "dudas": []}
+
+
+SSCC = [f"3400000000000000{n:02d}" for n in range(1, 30)]
+
+
+# ---- reglas ---------------------------------------------------------------------------------------------------------
+
+def test_normalizacion():
+    assert R.norm("Kerakoll, S.p.A.") == "KERAKOLL S P A"
+    assert R.referencia(" kk-100 ") == "KK100"
+    assert R.entero("24.800") == 24800 and R.entero("1200,0") == 1200 and R.entero("") is None
+    assert R.sscc("(00) 3400 0000 0000 0000 01") == "340000000000000001"
+    assert R.fecha("16/11/26") == "2026-11-16" and R.fecha("32/13/2026") == ""
+    assert R.siguiente_id("E", ["E-2026-0001", "E-2026-0007", "E-2025-0099"], 2026) == "E-2026-0008"
+    assert R.siguiente_id("S", [], 2026) == "S-2026-0001"
+
+
+def test_sugerir_cliente():
+    res = R.sugerir_clientes(CLIENTES, "KERAKOLL IBERICA SAU - Almazora", "STINSA")
+    assert res[0][0]["codigo"] == "KERAKOLL" and len(res) == 1
+    assert R.sugerir_clientes(CLIENTES, "Empresa desconocida") == []
+
+
+def albaran():
+    return R.limpiar_albaran(LEIDO_ALBARAN, HOY)
+
+
+def test_conflictos_entrada():
+    a = albaran()
+    assert [x for x in R.conflictos_entrada(a, KERAKOLL, CLIENTES, [], HOY) if x["nivel"] == "error"] == []
+    sin_cliente = R.conflictos_entrada(a, None, [ALIPLAST], [], HOY)
+    assert any("No reconozco al cliente" in x["texto"] for x in sin_cliente)
+    mal = dict(a, total_palets=6)
+    assert any("suman 5" in x["texto"] for x in R.conflictos_entrada(mal, KERAKOLL, CLIENTES, [], HOY))
+    otro = R.conflictos_entrada(a, ALIPLAST, CLIENTES, [], HOY)
+    assert any("parece de Kerakoll" in x["texto"] for x in otro)
+    previa = {"id": "E-2026-0001", "estado": "pendiente", "cliente": KERAKOLL, "albaran": a, "lineas": a["lineas"], "palets": []}
+    dup = R.conflictos_entrada(a, KERAKOLL, CLIENTES, [previa], HOY)
+    assert any(x["nivel"] == "error" and "ya está cargado como entrada E-2026-0001" in x["texto"] for x in dup)
+    futuro = dict(a, fecha="2026-12-01")
+    assert any("futura" in x["texto"] for x in R.conflictos_entrada(futuro, KERAKOLL, CLIENTES, [], HOY))
+    otro_dest = dict(a, destinatario="Almacén de Valencia")
+    assert any("Burriana" in x["texto"] for x in R.conflictos_entrada(otro_dest, KERAKOLL, CLIENTES, [], HOY))
+
+
+def entrada_base():
+    a = albaran()
+    return {"id": "E-2026-0001", "estado": "pendiente", "creada": "2026-11-17T09:00", "cliente": KERAKOLL, "albaran": a, "lineas": a["lineas"], "palets": []}
+
+
+def poner(e, et, en_stock=frozenset()):
+    p = R.verificar_palet(e, R.limpiar_etiqueta(et), set(en_stock))
+    p["id"] = f"{e['id']}-{len(e['palets']) + 1:02d}"
+    e["palets"].append(p)
+    return p
+
+
+def test_verificar_palets_y_discrepancias():
+    e = entrada_base()
+    for i in range(3):
+        assert poner(e, etiqueta("KK-100", SSCC[i], "L77"))["estado"] == "ok"
+    assert poner(e, etiqueta("KK-200", SSCC[3]))["estado"] == "ok"
+    assert R.discrepancias_entrada(e) == ["Faltan 1 palets de KK-200 (albarán 2, verificados 1)."]
+    sobra = poner(e, etiqueta("KK-100", SSCC[4], "L77"))
+    assert sobra["estado"] == "discrepancia" and "Sobra" in sobra["motivo"]
+    ajeno = poner(e, etiqueta("ZZ-9", SSCC[5]))
+    assert "no figura en el albarán" in ajeno["motivo"]
+    repetido = poner(e, etiqueta("KK-200", SSCC[3]))
+    assert "repetido" in repetido["motivo"]
+    lote = R.verificar_palet(entrada_base(), R.limpiar_etiqueta(etiqueta("KK-100", SSCC[9], "L99")), set())
+    assert "Lote distinto" in lote["motivo"]
+    de_otro = R.verificar_palet(entrada_base(), R.limpiar_etiqueta(etiqueta("KK-100", SSCC[10], "L77", cliente="Aliplast")), set())
+    assert "no de Kerakoll" in de_otro["motivo"]
+    ya_en_stock = R.verificar_palet(entrada_base(), R.limpiar_etiqueta(etiqueta("KK-100", SSCC[11], "L77")), {SSCC[11]})
+    assert "repetido" in ya_en_stock["motivo"]
+
+
+def entrada_cerrada(ident="E-2026-0001", dia="2026-11-17", ref="KK-100", n=3, desde=0, cliente=KERAKOLL):
+    e = entrada_base()
+    e.update(id=ident, cliente=cliente, estado="cerrada", cerrada=f"{dia}T10:00")
+    e["lineas"] = [{"ref": ref, "descripcion": "Mortero", "palets": n, "kg": 1200 * n, "lote": ""}]
+    for i in range(n):
+        poner(e, etiqueta(ref, SSCC[desde + i]))
+    return e
+
+
+def salida_base(lineas, cliente=KERAKOLL, ident="S-2026-0001"):
+    return {"id": ident, "estado": "pedida", "creada": "2026-11-18T08:00", "cliente": cliente, "referencia": "PED-9", "destino": "Valencia",
+            "lineas": lineas, "palets": [], "avisos": []}
+
+
+def test_stock_y_salidas():
+    e1, e2 = entrada_cerrada("E-2026-0001", "2026-11-10", n=2), entrada_cerrada("E-2026-0002", "2026-11-15", n=2, desde=5)
+    existencias = R.stock([e1, e2], [])
+    assert [p["id"] for p in existencias] == ["E-2026-0001-01", "E-2026-0001-02", "E-2026-0002-01", "E-2026-0002-02"]
+    s = salida_base([{"ref": "KK-100", "descripcion": "", "palets": 2}])
+    assert R.conflictos_salida(s, existencias) == []
+    pide_mas = salida_base([{"ref": "KK-100", "descripcion": "", "palets": 9}, {"ref": "XX", "descripcion": "", "palets": 1}])
+    texto = " ".join(a["texto"] for a in R.conflictos_salida(pide_mas, existencias))
+    assert "solo hay 4" in texto and "no tiene en stock XX" in texto
+    # FIFO: se carga primero un palet de la entrada nueva → aviso de que hay uno más antiguo
+    p = R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[5])), existencias, [])
+    assert p["estado"] == "ok" and p["palet_id"] == "E-2026-0002-01" and "más antiguo" in p["aviso"]
+    s["palets"].append(p)
+    assert R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[5])), existencias, [])["estado"] == "discrepancia"   # ya cargado
+    s["palets"].append(R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[0])), existencias, []))
+    sobra = R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[1])), existencias, [])
+    assert sobra["estado"] == "discrepancia" and "Sobra" in sobra["motivo"]
+    assert R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[20])), existencias, [])["motivo"].startswith("Este palet no está en el stock")
+    assert R.discrepancias_salida(s) == []
+    s["estado"] = "cargada"
+    assert [p["id"] for p in R.stock([e1, e2], [s])] == ["E-2026-0001-02", "E-2026-0002-02"]
+    # otra salida abierta reserva los palets
+    otra = salida_base([{"ref": "KK-100", "descripcion": "", "palets": 1}], ident="S-2026-0002")
+    otra["palets"].append(R.cargar_palet(otra, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[1])), R.stock([e1, e2], [s]), [s]))
+    assert otra["palets"][0]["estado"] == "ok"
+    tercera = salida_base([{"ref": "KK-100", "descripcion": "", "palets": 1}], ident="S-2026-0003")
+    assert "reservado" in R.cargar_palet(tercera, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[1])), R.stock([e1, e2], [s]), [s, otra])["motivo"]
+
+
+def test_palet_de_otro_cliente_en_salida():
+    e = entrada_cerrada(n=1)
+    s = salida_base([{"ref": "KK-100", "descripcion": "", "palets": 1}], cliente=ALIPLAST)
+    p = R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[0])), R.stock([e], []), [])
+    assert p["estado"] == "discrepancia" and "es de Kerakoll" in p["motivo"]
+
+
+def test_facturacion():
+    e = entrada_cerrada("E-2026-0001", "2026-11-10", n=2)
+    s = salida_base([{"ref": "KK-100", "descripcion": "", "palets": 1}])
+    s["palets"].append(R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[0])), R.stock([e], []), []))
+    s.update(estado="cargada", cargada="2026-11-15T12:00")
+    mov = F.movimientos([e], [s])
+    assert [(m["fecha"], m["tipo"]) for m in mov] == [("2026-11-10", "ENTRADA"), ("2026-11-10", "ENTRADA"), ("2026-11-15", "SALIDA")]
+    # palet 1: del 10 al 14 = 5 días; palet 2: del 10 al 30 = 21 días
+    assert F.estocaje([e], [s], "2026-11-01", "2026-11-30") == {"KERAKOLL": 26}
+    lineas = {l["clave"]: l for l in F.lineas_facturables([e], [s], "2026-11-01", "2026-11-30", {"KERAKOLL": {"entrada_palet": 2.5, "estocaje_palet_dia": 0.5}})}
+    assert lineas["entrada_palet"]["cantidad"] == 2 and lineas["entrada_palet"]["importe"] == 5.0
+    assert lineas["salida_palet"]["importe"] is None and lineas["estocaje_palet_dia"]["importe"] == 13.0
+
+
+# ---- almacenamiento ---------------------------------------------------------------------------------------------------
+
+class OdooFalso:
+    """Adjuntos de Odoo mínimos: search_read con «=» y «=like», create y write."""
+
+    def __init__(self):
+        self.adjuntos, self.sig = [], 100
+
+    def __call__(self, modelo, metodo, args, **kw):
+        assert modelo == "ir.attachment"
+        if metodo == "search_read":
+            filtros = args[0]
+            res = self.adjuntos
+            for campo, op, valor in filtros:
+                if campo == "name":
+                    res = [a for a in res if (a["name"] == valor if op == "=" else a["name"].startswith(valor.split("%")[0]) and a["name"].endswith(valor.split("%")[-1]))]
+                if campo == "res_model":
+                    res = [a for a in res if a["res_model"] == valor]
+            return [dict(a) for a in sorted(res, key=lambda a: a["name"])][: kw.get("limit", 999)]
+        if metodo == "create":
+            self.sig += 1
+            self.adjuntos.append(dict(args[0], id=self.sig))
+            return self.sig
+        if metodo == "write":
+            next(a for a in self.adjuntos if a["id"] == args[0][0]).update(args[1])
+            return True
+        raise AssertionError(metodo)
+
+
+def test_store_odoo_adjuntos():
+    from app.pr import pr_odoo as O
+    assert ("ir.attachment", "search_read") in O.PERMITIDO and ("ir.attachment", "create") in O.PERMITIDO and ("ir.attachment", "write") in O.PERMITIDO
+    s = S.OdooAdjuntosStore(OdooFalso())
+    s.escribir("entrada", "E-2026-0001", {"id": "E-2026-0001", "x": 1})
+    s.escribir("entrada", "E-2026-0001", {"id": "E-2026-0001", "x": 2})   # sustituye, no duplica
+    s.escribir("entrada", "E-2026-0002", {"id": "E-2026-0002"})
+    s.escribir("salida", "S-2026-0001", {"id": "S-2026-0001"})
+    assert s.leer("entrada", "E-2026-0001")["x"] == 2 and s.leer("entrada", "E-9") is None
+    assert [d["id"] for d in s.listar("entrada")] == ["E-2026-0001", "E-2026-0002"] and len(s.listar("salida")) == 1
+    s.guardar_foto("E-2026-0001", "01 KK-100.jpg", b"abc", "image/jpeg")
+    s.guardar_foto("E-2026-0001", "01 KK-100.jpg", b"abcd", "image/jpeg")
+    s.guardar_foto("E-2026-0002", "01.jpg", b"z", "image/jpeg")
+    fotos = s.leer_fotos("E-2026-0001")
+    assert [(f["nombre"], base64.b64decode(f["b64"])) for f in fotos] == [("01 KK-100.jpg", b"abcd")]
+
+
+# ---- API de punta a punta ---------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def cliente(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    monkeypatch.setenv("ODOO_MODE", "mock")
+    monkeypatch.setenv("APP_ACCESS_CODE", "")
+    monkeypatch.setenv("APP_OFICINA_CODE", "")
+    A.set_store(S.MemoriaStore())
+    yield TestClient(app)
+    A.set_store(None)
+
+
+@pytest.fixture
+def enviados(monkeypatch):
+    lista = []
+    monkeypatch.setattr(A, "enviar_n8n", lambda datos: lista.append(datos) or True)
+    return lista
+
+
+FOTO = {"archivo_b64": base64.b64encode(b"imagen").decode(), "tipo": "image/jpeg"}
+
+
+def leer_con(monkeypatch, albaran=None, etiquetas=(), peticion=None):
+    monkeypatch.setattr(A.L, "leer_albaran", lambda archivos, cli=None: albaran or LEIDO_ALBARAN)
+    cola = list(etiquetas)
+    monkeypatch.setattr(A.L, "leer_etiqueta", lambda datos, tipo, cli=None: cola.pop(0))
+    monkeypatch.setattr(A.L, "leer_peticion", lambda archivos, cli=None: peticion)
+
+
+def dar_de_alta(cliente):
+    for c in CLIENTES:
+        assert cliente.post("/api/stock/clientes", json={"codigo": c["codigo"], "nombre": c["nombre"], "alias": c["alias"]}).status_code == 200
+
+
+def test_flujo_entrada_completo(cliente, monkeypatch, enviados):
+    dar_de_alta(cliente)
+    etiquetas = [etiqueta("KK-100", SSCC[0], "L77"), etiqueta("KK-100", SSCC[1], "L77"), etiqueta("KK-100", SSCC[2], "L77"), etiqueta("KK-200", SSCC[3])]
+    leer_con(monkeypatch, etiquetas=etiquetas)
+    # oficina: foto del albarán → cliente recomendado y sin conflictos
+    r = cliente.post("/api/stock/entradas/leer", json={"archivos": [FOTO]})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["cliente_sugerido"] == "KERAKOLL" and not [a for a in d["avisos"] if a["nivel"] == "error"]
+    r = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"], "fotos": [FOTO]})
+    assert r.status_code == 200, r.text
+    ident = r.json()["id"]
+    assert ident.startswith("E-") and r.json()["estado"] == "pendiente"
+    # el mismo albarán otra vez → conflicto, y solo pasa si la oficina confirma
+    r = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"]})
+    assert r.status_code == 409 and r.json()["codigo"] == "entrada_conflicto"
+    assert cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"], "confirmado": True}).status_code == 200
+    assert len(cliente.get("/api/stock/entradas?abiertas=true").json()["entradas"]) == 2
+    # almacén: 4 etiquetas
+    for _ in range(4):
+        r = cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
+        assert r.status_code == 200, r.text
+    det = cliente.get(f"/api/stock/entradas/{ident}").json()
+    assert det["estado"] == "descargando" and det["verificados"] == 4 and det["esperados"] == 5
+    # cerrar con un palet que falta → pide confirmar
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    assert r.status_code == 409 and r.json()["codigo"] == "discrepancias" and "Faltan 1 palets de KK-200" in r.json()["error"]
+    assert enviados == []
+    # palet a mano para el que falta → cuadra
+    r = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"ref": "KK-200", "kg": 1200, "sscc": SSCC[6]})
+    assert r.status_code == 200 and r.json()["palet"]["manual"] is True
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["entrada"]["estado"] == "cerrada" and res["entrada"]["discrepancias"] == 0 and res["enviado"] is True
+    # un solo envío a n8n: Excel de la entrada (con correo), libro de control (solo SharePoint) y las fotos
+    assert len(enviados) == 1
+    e = enviados[0]
+    assert e["evento"] == "entrada_cerrada" and e["carpeta"] == f"ENTRADA {ident}" and "AL-5521" in e["asunto"]
+    assert [(a["nombre"], a["correo"]) for a in e["archivos"]] == [(f"ENTRADA {ident}.xlsx", True), ("CONTROL ALMACEN BURRIANA.xlsx", False)]
+    assert {f["nombre"] for f in e["fotos"]} >= {"albaran 1.jpg", "01 KK-100.jpg"} and all(f["carpeta"] == e["carpeta"] for f in e["fotos"])
+    libro = openpyxl.load_workbook(io.BytesIO(base64.b64decode(e["archivos"][1]["b64"])))
+    assert libro.sheetnames == ["RESUMEN STOCK", "STOCK", "ENTRADAS", "SALIDAS", "MOVIMIENTOS", "CLIENTES"]
+    assert libro["STOCK"].max_row == 4 + 5 and libro["MOVIMIENTOS"].max_row == 4 + 5
+    # y ya no se puede tocar
+    assert cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO}).status_code == 409
+    st = cliente.get("/api/stock/stock").json()
+    assert st["total_palets"] == 5 and {(g["ref"], g["palets"]) for g in st["resumen"]} == {("KK-100", 3), ("KK-200", 2)}
+
+
+def test_entrada_con_discrepancias_aceptadas(cliente, monkeypatch, enviados):
+    dar_de_alta(cliente)
+    leer_con(monkeypatch, etiquetas=[etiqueta("ZZ-9", SSCC[0])])
+    d = cliente.post("/api/stock/entradas/leer", json={"archivos": [FOTO]}).json()
+    ident = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"]}).json()["id"]
+    r = cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
+    assert r.json()["palet"]["estado"] == "discrepancia"
+    assert cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).status_code == 409
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True, "nota": "Falta el resto, llega mañana"})
+    assert r.status_code == 200 and r.json()["entrada"]["discrepancias"] == 3   # palet ajeno + faltan 3 de KK-100 + faltan 2 de KK-200
+    assert "Falta el resto" in enviados[0]["html"] and "Discrepancias aceptadas" in enviados[0]["html"]
+    assert cliente.get("/api/stock/stock").json()["total_palets"] == 1   # el palet físico entra aunque no estuviera en el albarán
+    wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(enviados[0]["archivos"][0]["b64"])))
+    assert "Discrepancias aceptadas" in " ".join(str(c.value) for f in wb["ENTRADA"].iter_rows() for c in f if c.value)
+
+
+def test_flujo_salida_completo(cliente, monkeypatch, enviados):
+    dar_de_alta(cliente)
+    s0 = A.get_store()
+    s0.escribir("entrada", "E-2026-0001", entrada_cerrada("E-2026-0001", "2026-11-10", n=3))
+    leer_con(monkeypatch, etiquetas=[etiqueta("KK-100", SSCC[0]), etiqueta("KK-100", SSCC[1]), etiqueta("KK-100", SSCC[2])],
+             peticion={"cliente": "Kerakoll", "referencia_cliente": "PED-9", "destino": "Valencia", "fecha": "2026-11-18",
+                       "lineas": [{"referencia": "KK-100", "palets": 2}], "dudas": []})
+    p = cliente.post("/api/stock/salidas/leer", json={"archivos": [FOTO]}).json()
+    assert p["cliente_sugerido"] == "KERAKOLL" and p["peticion"]["lineas"][0]["palets"] == 2
+    # pedir algo que no hay → conflicto
+    mal = {"cliente": "KERAKOLL", "lineas": [{"ref": "NOHAY", "palets": 1}]}
+    assert cliente.post("/api/stock/salidas", json=mal).status_code == 409
+    r = cliente.post("/api/stock/salidas", json={"cliente": "KERAKOLL", "referencia": "PED-9", "destino": "Valencia", "lineas": [{"ref": "KK-100", "palets": 2}], "foto": FOTO})
+    assert r.status_code == 200, r.text
+    ident = r.json()["id"]
+    r = cliente.post(f"/api/stock/salidas/{ident}/etiqueta", json={"foto": FOTO})
+    assert r.status_code == 200 and r.json()["salida"]["cargados"] == 1 and r.json()["salida"]["estado"] == "preparando"
+    # sin completar → discrepancia (faltan) y no se cierra sin confirmar
+    r = cliente.post(f"/api/stock/salidas/{ident}/cerrar", json={})
+    assert r.status_code == 409 and "Faltan 1 palets de KK-100" in r.json()["error"]
+    r = cliente.post(f"/api/stock/salidas/{ident}/etiqueta", json={"foto": FOTO})
+    assert r.json()["salida"]["cargados"] == 2
+    # un tercer palet no pedido: sobra → se puede quitar
+    r = cliente.post(f"/api/stock/salidas/{ident}/etiqueta", json={"foto": FOTO})
+    assert r.json()["palet"]["estado"] == "discrepancia"
+    sobra = r.json()["palet"]["n"]
+    assert cliente.post(f"/api/stock/salidas/{ident}/quitar", json={"palet": str(sobra)}).json()["palets"][-1]["n"] == 2
+    r = cliente.post(f"/api/stock/salidas/{ident}/cerrar", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["salida"]["estado"] == "cargada" and r.json()["enviado"]
+    e = enviados[-1]
+    assert e["evento"] == "salida_cargada" and e["archivos"][0]["nombre"] == f"SALIDA {ident}.xlsx" and any(f["nombre"] == "peticion.jpg" for f in e["fotos"])
+    wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(e["archivos"][0]["b64"])))
+    assert wb.sheetnames == ["SALIDA"] and "TOTAL: 2 palets" in " ".join(str(c.value) for f in wb["SALIDA"].iter_rows() for c in f if c.value)
+    assert cliente.get("/api/stock/stock").json()["total_palets"] == 1   # quedan 1 de los 3
+
+
+def test_etiqueta_ilegible_y_reenvio(cliente, monkeypatch, enviados):
+    dar_de_alta(cliente)
+    leer_con(monkeypatch, etiquetas=[{"sscc": None, "referencia": None, "descripcion": None, "lote": None, "dudas": []}])
+    d = cliente.post("/api/stock/entradas/leer", json={"archivos": [FOTO]}).json()
+    ident = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"]}).json()["id"]
+    r = cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
+    assert r.status_code == 422 and r.json()["codigo"] == "etiqueta_ilegible"
+    assert cliente.post(f"/api/stock/entradas/{ident}/reenviar").status_code == 409   # aún abierta
+    assert cliente.post("/api/stock/libro").json()["enviado"] is True and enviados[-1]["evento"] == "libro" and enviados[-1]["correo"] is False
+
+
+def test_codigo_de_oficina_y_fotos_invalidas(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    monkeypatch.setenv("ODOO_MODE", "mock")
+    monkeypatch.setenv("APP_ACCESS_CODE", "conductores1")
+    monkeypatch.setenv("APP_OFICINA_CODE", "oficina-1234")
+    monkeypatch.setattr(A, "FAIL_DELAY", 0, raising=False)
+    import app.main as M
+    monkeypatch.setattr(M, "FAIL_DELAY", 0)
+    A.set_store(S.MemoriaStore())
+    c = TestClient(app)
+    assert c.get("/api/stock/stock", headers={"X-Codigo-Acceso": "conductores1"}).status_code == 403   # un conductor no entra
+    assert c.get("/api/stock/stock", headers={"X-Codigo-Acceso": "oficina-1234"}).status_code == 200
+    r = c.post("/api/stock/entradas/leer", headers={"X-Codigo-Acceso": "oficina-1234"}, json={"archivos": [{"archivo_b64": "no es base64!!", "tipo": "image/jpeg"}]})
+    assert r.status_code == 400 and r.json()["codigo"] == "archivo_invalido"
+    A.set_store(None)
+
+
+def test_enviar_n8n_solo_en_real(monkeypatch):
+    enviado = []
+    monkeypatch.setattr(A.httpx, "post", lambda url, json, timeout, headers: enviado.append((url, json, headers)) or type("R", (), {"status_code": 200})())
+    monkeypatch.setenv("STOCK_AVISOS_WEBHOOK", "https://n8n.example/webhook/stock-burriana")
+    monkeypatch.setenv("STOCK_AVISOS_CLAVE", "clave")
+    monkeypatch.setattr(A, "real", lambda: False)
+    assert A.enviar_n8n({"evento": "x"}) is False and enviado == []
+    monkeypatch.setattr(A, "real", lambda: True)
+    monkeypatch.delenv("STOCK_CORREO_PARA", raising=False)
+    assert A.enviar_n8n({"evento": "x"}) is True
+    assert enviado[0][1]["para"] == "carmelomartinez@stinsa.com" and enviado[0][2] == {"X-Clave": "clave"}
+    monkeypatch.setenv("STOCK_CORREO_PARA", "traficolevante@stinsa.com")
+    A.enviar_n8n({"evento": "y"})
+    assert enviado[1][1]["para"] == "traficolevante@stinsa.com"
+
+
+def test_excel_libro_vacio():
+    wb = openpyxl.load_workbook(io.BytesIO(X.libro_control([], [], CLIENTES, HOY)))
+    assert wb.sheetnames == ["RESUMEN STOCK", "STOCK", "ENTRADAS", "SALIDAS", "MOVIMIENTOS", "CLIENTES"]
+    assert wb["CLIENTES"]["A5"].value == "KERAKOLL"
