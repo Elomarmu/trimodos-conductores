@@ -341,7 +341,8 @@ def pedidos_pr(odoo, desde: str) -> list[dict]:
 
 def viajes(odoo, desde: str | None = None) -> list[dict]:
     """Todos los viajes de PR (líneas con bulto de los pedidos «PR <MES>») desde esa fecha, del más antiguo al más nuevo.
-    estado: «En stock» si aún no tiene caja móvil; «Tren N» si ya va en un tren."""
+    estado: «En stock» si aún no tiene caja móvil; «Tren N» si ya va en un tren; «Tren anterior» si la oficina la sacó
+    de stock porque se cargó en un tren anterior, fuera de la app."""
     desde = desde or desde_defecto()
     pedidos = {p["id"]: p["name"] for p in pedidos_pr(odoo, desde)}
     if not pedidos:
@@ -370,11 +371,42 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
                     "bultos": p.get("number_of_packages") or None, "codigo_paper": p.get("carrier_tracking_ref") or "",
                     "contenedor": (l.get("equipment_id") or [None, ""])[1],
                     **{k: o.get(k, "") for k in ("albaran", "codigo_natur", "ler", "calidad", "tren", "convoy", "fecha_tren", "foto",
-                                                 "foto_di", "vagon", "caja_movil", "comprobaciones")},
+                                                 "foto_di", "vagon", "caja_movil", "comprobaciones", "fuera_stock")},
                     **{"doc_" + d: ok for d, ok in docs.get(tarea, {d: False for d in R.DOCUMENTOS}).items()},
                     "tipo": R.tipo_calidad(o.get("calidad")),
-                    "estado": f"Tren {o['tren']}" if o.get("caja_movil") and o.get("tren") else "En stock"})
+                    "estado": (f"Tren {o['tren']}" if o.get("caja_movil") and o.get("tren")
+                               else "Tren anterior" if o.get("fuera_stock") else "En stock")})
     return res
+
+
+def sacar_de_stock(odoo, lista: list[dict], bulto_ids: list[int], cuando: str) -> list[str]:
+    """Oficina: estas cargas ya se fueron en un tren anterior (fuera de la app). Dejan de estar en stock; en Odoo no se borra
+    nada, solo se apunta en las observaciones del bulto. Devuelve los bultos cambiados."""
+    por_id = {v["bulto_id"]: v for v in lista}
+    hechos = []
+    for b in bulto_ids:
+        v = por_id.get(b)
+        if not v:
+            raise ErrorPR("No encuentro una de las cargas. Actualiza la lista y vuelve a probar.")
+        if v["estado"] != "En stock":
+            continue
+        _cambiar_obs(odoo, b, {"fuera_stock": f"cargada en un tren anterior (marcada el {cuando})"})
+        hechos.append(v.get("bulto"))
+    return hechos
+
+
+def devolver_a_stock(odoo, lista: list[dict], bulto_ids: list[int]) -> list[str]:
+    """Deshace «sacar de stock»: la carga vuelve a estar en stock y se puede asignar a una caja."""
+    por_id = {v["bulto_id"]: v for v in lista}
+    hechos = []
+    for b in bulto_ids:
+        v = por_id.get(b)
+        if not v or v["estado"] != "Tren anterior":
+            continue
+        p = odoo("tms.package", "search_read", [[["id", "=", b]]], fields=["unload_note"])
+        odoo("tms.package", "write", [[b], {"unload_note": R.observaciones({}, p[0].get("unload_note"), quitar=("fuera_stock",))}])
+        hechos.append(v.get("bulto"))
+    return hechos
 
 
 def siguiente_tren(lista: list[dict]) -> int:

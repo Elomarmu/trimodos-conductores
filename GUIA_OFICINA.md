@@ -65,6 +65,18 @@ Lista de las cargas a las que les falta algo: foto del albarán, DI de residuos,
 - Pulsa **«Completar»** y se abre esa carga en «Modificar una carga».
 - Revísala a menudo, sobre todo antes de cerrar un tren.
 
+### Sacar de stock (cargadas en un tren anterior)
+
+Si en el almacén salen como «en stock» cargas que en realidad ya se fueron en un tren anterior (por ejemplo, viajes metidos a mano en el pedido que se cargaron por el procedimiento de siempre):
+
+1. Pulsa **«Sacar de stock (cargadas en un tren anterior)»**.
+2. Marca las cargas una a una, o usa **«Marcar todas con fecha de carga hasta el día…»** y pulsa «Marcar».
+3. Pulsa **«Sacar de stock las marcadas»** y confirma.
+
+Dejan de salir en el almacén, en «STOCK EN NAVE» y en «Cargas pendientes», y pasan a «HISTORICO TRENES» como «Tren anterior». **En Odoo no se borra nada.** Si alguna se sacó por error, abajo sale en «Ya sacadas de stock»: pulsa **«Devolver a stock»**.
+
+**Importante:** no borres filas a mano en la Excel de registro: la app la rehace entera desde Odoo cada vez.
+
 ### Composición del tren
 
 Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almacén con su **nº de convoy de entrada** (el del listado de Captrain).

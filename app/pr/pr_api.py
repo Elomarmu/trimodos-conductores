@@ -377,7 +377,55 @@ def pendientes():
     """Oficina: cargas a las que les falta algún dato o documento (foto del albarán, DI de residuos)."""
     lista = O.viajes(odoo_pr())
     return {"pendientes": [{k: v.get(k) for k in ("bulto_id", "bulto", "albaran", "codigo_paper", "fecha", "lugar", "estado", "tarea_id")}
-                           | {"faltan": R.faltan(v)} for v in lista if R.faltan(v)]}
+                           | {"faltan": R.faltan(v)} for v in lista if R.faltan(v) and v["estado"] != "Tren anterior"]}
+
+
+class Bultos(BaseModel):
+    bulto_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+def _fila_stock(v: dict) -> dict:
+    return {k: v.get(k) for k in ("bulto_id", "bulto", "albaran", "codigo_paper", "fecha", "lugar", "colaborador", "tractora",
+                                  "pedido", "estado", "fuera_stock")}
+
+
+@oficina.get("/stock")
+def stock():
+    """Oficina: lo que la app tiene en stock y lo que se sacó de stock (cargado en un tren anterior)."""
+    return stock_de(O.viajes(odoo_pr()))
+
+
+@oficina.post("/stock/sacar")
+def stock_sacar(body: Bultos):
+    """Oficina: saca de stock cargas que ya se fueron en un tren anterior (no se borra nada en Odoo)."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    hechos = _pr(O.sacar_de_stock, odoo, lista, body.bulto_ids, dt.datetime.now(R.MADRID).strftime("%d/%m/%Y"))
+    log.info("sacadas de stock (tren anterior): %s", hechos)
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return {"hechos": hechos, **stock_de(lista)}
+
+
+@oficina.post("/stock/devolver")
+def stock_devolver(body: Bultos):
+    """Oficina: deshace «sacar de stock»."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    hechos = _pr(O.devolver_a_stock, odoo, lista, body.bulto_ids)
+    log.info("devueltas a stock: %s", hechos)
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return {"hechos": hechos, **stock_de(lista)}
+
+
+def stock_de(lista: list[dict]) -> dict:
+    return {"stock": [_fila_stock(v) for v in lista if v["estado"] == "En stock"],
+            "fuera": [_fila_stock(v) for v in lista if v["estado"] == "Tren anterior"]}
 
 
 @oficina.get("/viajes")
@@ -794,7 +842,7 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
         al_tren = [por_caja[c["caja_movil"]] for c in O.cajas_en_orden(t) if c["caja_movil"] in por_caja]
     titulo_tren = (f"Viajes cargados en el tren {int(t['tren'])}" + (f" (convoy {O.convoy_tren(t)})" if O.convoy_tren(t) else "")
                    + (" · terminado" if t.get("terminado") else " · cargando") if t else "Viajes cargados en el tren")
-    pendientes = [v for v in lista if faltan(v)]
+    pendientes = [v for v in lista if faltan(v) and v["estado"] != "Tren anterior"]
     stock = [v for v in lista if v["estado"] == "En stock"]
     dias = _dias_es(desde, hasta)
     h3 = lambda texto: f"<h3 style='font:bold 12pt Calibri,Arial;color:#1F4E79;margin:18px 0 6px'>{html.escape(texto)}</h3>"

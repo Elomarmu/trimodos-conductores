@@ -421,3 +421,26 @@ def test_registrar_buscar_pendientes_viajes_y_tren_usan_la_misma_referencia(monk
     O.buscar_pedido_mes(Espia(), "2026-11-09")                              # donde registrar busca el pedido del mes
     assert refs[-1] == "PR NOVIEMBRE APP"
     assert O.ref_de_app("PR NOVIEMBRE APP") and not O.ref_de_app("PR NOVIEMBRE")
+
+
+def test_sacar_de_stock_y_devolver(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    enviados = []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: [
+        dict(v, estado="Tren anterior" if R.leer_observaciones(o.bultos[v["bulto_id"]]["unload_note"]).get("fuera_stock")
+             and v["estado"] == "En stock" else v["estado"]) for v in o.viajes()])
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    _cargar(odoo, 11, "CRPU0910069")
+    r = A.stock_sacar(A.Bultos(bulto_ids=[11, 12, 13]))          # la 11 ya va en el tren 86: no se toca
+    assert len(r["hechos"]) == 2
+    assert [v["bulto_id"] for v in r["stock"]] == [14] and [v["bulto_id"] for v in r["fuera"]] == [12, 13]
+    assert "cargada en un tren anterior" in R.leer_observaciones(odoo.bultos[12]["unload_note"])["fuera_stock"]
+    assert enviados[-1]["evento"] == "registro"                     # la Excel de registro se pone al día
+    with pytest.raises(A.AppError):                                  # fuera de stock: ya no se puede asignar
+        A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="CTEA25000377"))
+    r = A.stock_devolver(A.Bultos(bulto_ids=[12]))                   # deshacer
+    assert len(r["hechos"]) == 1 and "Fuera de stock" not in odoo.bultos[12]["unload_note"]
+    assert [v["bulto_id"] for v in r["stock"]] == [12, 14]

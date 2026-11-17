@@ -158,6 +158,7 @@
   <button id="of-registrar" class="btn primary">Registrar un viaje (foto del albarán)</button>
   <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
   <button id="of-pendientes" class="btn secondary">Cargas con documentos o datos pendientes</button>
+  <button id="of-stock" class="btn secondary">Sacar de stock (cargadas en un tren anterior)</button>
   <button id="of-tren" class="btn secondary">Composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
   <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
@@ -172,6 +173,31 @@
   <div id="pend-lista" class="lista"></div>
   <div class="actions">
     <button id="pend-recargar" class="btn ghost">Actualizar</button>
+    <button class="btn ghost" data-go="pr-oficina">Volver</button>
+  </div>
+</main>
+
+<!-- Oficina: sacar de stock las cargas que ya se fueron en un tren anterior (y deshacerlo) -->
+<main id="s-pr-stock" class="screen" hidden>
+  <h1>Sacar de stock</h1>
+  <p class="hint">Marca las cargas que ya se fueron en un tren anterior (cargadas fuera de la app). Dejan de salir en el almacén y en
+    «STOCK EN NAVE» y pasan al histórico como «Tren anterior». En Odoo no se borra nada y se puede deshacer.</p>
+  <p id="stk-cuenta" class="banner info"></p>
+  <div class="row2">
+    <div class="field"><label for="stk-hasta">Marcar todas con fecha de carga hasta el día</label><input id="stk-hasta" type="date"></div>
+    <button id="stk-marcar-hasta" type="button" class="btn ghost small">Marcar</button>
+  </div>
+  <div class="actions">
+    <button id="stk-todas" type="button" class="btn ghost small">Marcar todas</button>
+    <button id="stk-ninguna" type="button" class="btn ghost small">Desmarcar todas</button>
+  </div>
+  <div id="stk-lista" class="lista"></div>
+  <button id="stk-sacar" class="btn primary">Sacar de stock las marcadas</button>
+  <h2 id="stk-fuera-titulo">Ya sacadas de stock (tren anterior)</h2>
+  <p id="stk-fuera-hint" class="hint">Si alguna se sacó por error, pulsa «Devolver a stock».</p>
+  <div id="stk-fuera" class="lista"></div>
+  <div class="actions">
+    <button id="stk-recargar" class="btn ghost">Actualizar</button>
     <button class="btn ghost" data-go="pr-oficina">Volver</button>
   </div>
 </main>

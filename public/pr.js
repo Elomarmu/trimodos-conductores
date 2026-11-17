@@ -781,3 +781,77 @@ function accesoDirecto() {
 window.addEventListener("load", accesoDirecto);
 window.addEventListener("codigo-ok", () => { if (currentScreen === "pr-almacen") cargarAlmacen(); });
 window.addEventListener("hashchange", accesoDirecto);
+
+
+// ---------- oficina: sacar de stock las cargas que ya se fueron en un tren anterior (y deshacerlo) ----------
+const prStk = { stock: [], fuera: [], marcadas: new Set() };
+$("of-stock").addEventListener("click", () => { go("pr-stock"); cargarStockPR(); });
+$("stk-recargar").addEventListener("click", cargarStockPR);
+async function cargarStockPR() {
+  clearError();
+  busy("Cargando el stock…");
+  try { pintarStockPR(await api("/api/pr/stock")); } catch (e) { showError(e.message); } finally { busy(null); }
+}
+const textoStockPR = (v) => [fechaEs(v.fecha), v.albaran ? `albarán ${v.albaran}` : null, v.codigo_paper, v.lugar, v.colaborador || v.tractora]
+  .filter(Boolean).join(" · ");
+function pintarStockPR(r) {
+  prStk.stock = r.stock || []; prStk.fuera = r.fuera || [];
+  prStk.marcadas = new Set([...prStk.marcadas].filter((id) => prStk.stock.some((v) => v.bulto_id === id)));
+  const n = prStk.stock.length, f = prStk.fuera.length;
+  $("stk-cuenta").textContent = `${n} ${n === 1 ? "carga" : "cargas"} en stock · ${f} ${f === 1 ? "sacada" : "sacadas"} de stock.`;
+  $("stk-lista").replaceChildren(...prStk.stock.map((v) => {
+    const caja = h("input", { type: "checkbox", id: `stk-${v.bulto_id}`, class: "stk-check" });
+    caja.checked = prStk.marcadas.has(v.bulto_id);
+    caja.addEventListener("change", () => { caja.checked ? prStk.marcadas.add(v.bulto_id) : prStk.marcadas.delete(v.bulto_id); contarStockPR(); });
+    return h("label", { class: "fila stk-fila", for: caja.id }, caja,
+      h("span", {}, h("b", {}, v.bulto || ""), h("br"), h("span", { class: "code" }, textoStockPR(v))));
+  }));
+  $("stk-fuera-titulo").hidden = $("stk-fuera-hint").hidden = !prStk.fuera.length;
+  $("stk-fuera").replaceChildren(...prStk.fuera.map((v) => h("div", { class: "fila" },
+    h("span", {}, h("b", {}, v.bulto || ""), h("br"), h("span", { class: "code" }, textoStockPR(v)), h("br"),
+      h("span", { class: "hint" }, v.fuera_stock || "")),
+    h("button", { type: "button", class: "btn ghost mini", onclick: () => devolverStockPR(v) }, "Devolver a stock"))));
+  contarStockPR();
+}
+function contarStockPR() {
+  const n = prStk.marcadas.size;
+  $("stk-sacar").textContent = n ? `Sacar de stock las marcadas (${n})` : "Sacar de stock las marcadas";
+  $("stk-sacar").disabled = !n;
+}
+function marcarStockPR(filtro) {
+  prStk.stock.forEach((v) => { if (filtro(v)) prStk.marcadas.add(v.bulto_id); });
+  pintarStockPR({ stock: prStk.stock, fuera: prStk.fuera });
+}
+$("stk-todas").addEventListener("click", () => marcarStockPR(() => true));
+$("stk-ninguna").addEventListener("click", () => { prStk.marcadas.clear(); pintarStockPR({ stock: prStk.stock, fuera: prStk.fuera }); });
+$("stk-marcar-hasta").addEventListener("click", () => {
+  const hasta = $("stk-hasta").value;
+  if (!hasta) return showError("Elige el día.");
+  marcarStockPR((v) => (v.fecha || "") <= hasta);
+});
+$("stk-sacar").addEventListener("click", () => {
+  const n = prStk.marcadas.size;
+  if (!n) return;
+  clearError();
+  state.onConfirm = async () => {
+    $("confirm").hidden = true;
+    busy("Sacando de stock…");
+    try {
+      const r = await post("/api/pr/stock/sacar", { bulto_ids: [...prStk.marcadas] });
+      if (r.simulado) showError("Modo de prueba: no se ha guardado nada.");
+      else { prStk.marcadas.clear(); pintarStockPR(r); }
+    } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
+  };
+  $("confirm-txt").textContent = `${n === 1 ? "1 carga deja" : n + " cargas dejan"} de estar en stock (se fueron en un tren anterior). ` +
+    "En Odoo no se borra nada y se puede deshacer.";
+  $("confirm").hidden = false;
+  $("btn-no").focus();
+});
+async function devolverStockPR(v) {
+  clearError();
+  busy("Devolviendo a stock…");
+  try {
+    const r = await post("/api/pr/stock/devolver", { bulto_ids: [v.bulto_id] });
+    if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarStockPR(r);
+  } catch (e) { showError(e.message); } finally { busy(null); }
+}
