@@ -7,6 +7,7 @@ En la pantalla principal tienes:
 - **DECA - Trimodos**: corregir una orden de transporte escaneando su QR (igual que los conductores).
 - **Oficina · PR**: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).
 - **Almacén · PR**: cargar las cajas móviles del tren.
+- **Stock Burriana**: entradas y salidas de mercancía del almacén de Burriana y su stock.
 - **Cómo se usa (guía)**: esta guía.
 
 ## Antes de empezar
@@ -140,6 +141,42 @@ Al enviar se hacen tres cosas:
 
 Después el tren queda **TERMINADO**: el almacén lo ve, pero ya no puede cambiarlo. Si hay que corregir algo, la oficina pulsa **«Modificar el tren»**, hace el cambio y vuelve a pulsar «Terminar el tren y enviar las Excel». Esto se puede hacer hasta que se cargue la composición del siguiente tren.
 
+## Stock Burriana: entradas, salidas y stock
+
+El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans Castellón**). La app controla **cuántos palets entran y salen y cuál es cada uno por su código** (el número que va bajo el código de barras de la etiqueta). No controla los bultos de cada palet. Pantalla principal → **Stock Burriana**.
+
+### Entrada de mercancía
+
+1. **La oficina** pulsa **Entradas → «Nueva entrada»** y hace foto al albarán, o elige el **PDF y el Excel** que manda el cliente (el Excel trae la lista exacta de palets con su código y su peso). Se pueden elegir hasta 4 archivos.
+2. La app propone el **cliente** y avisa de conflictos (albarán ya cargado, referencia que no está en su catálogo, fecha rara). El «cliente final» (el cliente de tu cliente) es solo informativo.
+3. Revisa los datos y **el día de entrada en el almacén**: la app propone el del albarán, pero **cámbialo** si el camión se cargó un día y se descarga al siguiente (es el día que cuenta para el estocaje). Pulsa **«Guardar la entrada»**.
+4. **El almacén** abre la entrada y apunta cada palet de una de estas tres formas. La app comprueba que ese código está en el albarán y no está repetido. Un palet mal apuntado se quita con **«Quitar»**.
+   - **«Escanear códigos de barras»**: se abre la cámara y se van pasando los palets uno tras otro sin cerrarla; cada código leído suena, vibra y se apunta solo (sale como «escaneado»). Es lo más rápido y evita errores al teclear.
+   - **«Foto de la etiqueta del palet»**: la app lee la etiqueta de la foto.
+   - **«Elegir un palet de la lista o apuntarlo a mano»**: se elige el código en la lista desplegable (solo salen los del albarán que faltan por apuntar) o se escribe a mano si nada de lo anterior funciona (sale como «a mano»).
+5. Si pasa algo (palet roto, film abierto, falta un palet…), se escribe en **«Incidencias de la descarga»**: la oficina lo verá en el correo.
+6. Al terminar, **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel y las fotos, y se actualiza la Excel de control en SharePoint.
+
+### Salida de mercancía
+
+1. **La oficina** pulsa **Salidas → «Nueva salida»**, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).
+2. **El almacén** abre la salida y apunta cada palet que carga, con **«Escanear códigos de barras»**, con la foto de la etiqueta o eligiéndolo en la lista desplegable (salen los palets del cliente que se pueden cargar, los más antiguos primero). La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. Avisa si hay un palet más antiguo de la misma referencia (conviene sacar primero el más antiguo).
+3. Incidencias de la carga en **«Incidencias de la carga»**. Al terminar, **«Terminar la carga y expedir la Excel»**: sale un correo con la Excel de lo cargado y las fotos.
+
+### Correos que llegan solos (agente.burriana@stinsa.com)
+
+Si el cliente manda el albarán a **agente.burriana@stinsa.com**, la app prepara la entrada sola (o la salida, si el correo habla de recoger o retirar mercancía). En la lista aparece con **📧 POR REVISAR**: ábrela, comprueba el cliente, el día de entrada y los palets, y pulsa **«Está bien: confirmar»**. **Hasta que no se confirme no se puede cerrar.** Si la app no ha podido prepararla (cliente que no reconoce, albarán ya cargado, sin adjuntos), la oficina recibe un correo «No he podido procesar…» y hay que cargarla a mano.
+
+### Stock actual y clientes
+
+- **Stock actual**: palets y kilos que hay ahora en el almacén, por cliente y referencia. El botón **«Rehacer la Excel de control»** vuelve a generar el libro en SharePoint.
+- **Clientes del almacén**: toca un cliente para cambiar su nombre, sus otros nombres o su **catálogo de referencias** (una por línea: `referencia;descripción`). Si llega una referencia que no está en el catálogo, la app avisa: suele ser un error de escritura.
+
+### Dónde queda en SharePoint (Almacen Burriana)
+
+- **CONTROL ALMACEN BURRIANA.xlsx**: hojas Resumen stock, Stock, Entradas, Salidas, Movimientos y Clientes. Lo rehace la app: **no escribas en ella**, se pierde. Solo se guarda en SharePoint (lleva el stock de todos los clientes, no se reenvía).
+- Una carpeta por operación, **«ENTRADA E-2026-0001»** o **«SALIDA S-2026-0001»**, con su Excel y las fotos.
+
 ## Dónde queda todo en SharePoint (Automatizacion)
 
 - **Carpeta «CARTON PAJA TREN N»** (una por tren):
@@ -163,6 +200,9 @@ Después el tren queda **TERMINADO**: el almacén lo ve, pero ya no puede cambia
 | «El vagón … no cuadra con su dígito de control» | Revisa el número del vagón: la última cifra no corresponde. |
 | «Falta: DI de residuos» (u otro) | Completa la carga en «Modificar una carga» o desde «Cargas pendientes». |
 | «El archivo es demasiado grande» | Haz una foto del documento en vez de subir el PDF. |
+| «Hay discrepancias entre el albarán y las etiquetas…» | Lee la lista. Si es un error de foto, quita el palet y fotografíalo otra vez; si es real (palet que sobra o falta), confirma y deja la incidencia escrita. |
+| «Esta operación llegó por correo y la oficina todavía no la ha revisado» | Abre la entrada o salida y pulsa «Está bien» tras comprobar los datos. |
+| «La referencia … no está en el catálogo» | Comprueba que está bien escrita. Si es un producto nuevo, añádela en Clientes del almacén. |
 | «Modo de prueba: no se ha guardado nada» | La app está en pruebas. Avisa al responsable de la app. |
 
 ## Consejos

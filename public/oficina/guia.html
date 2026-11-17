@@ -23,6 +23,7 @@
 <li><strong>DECA - Trimodos</strong>: corregir una orden de transporte escaneando su QR (igual que los conductores).</li>
 <li><strong>Oficina · PR</strong>: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).</li>
 <li><strong>Almacén · PR</strong>: cargar las cajas móviles del tren.</li>
+<li><strong>Stock Burriana</strong>: entradas y salidas de mercancía del almacén de Burriana y su stock.</li>
 <li><strong>Cómo se usa (guía)</strong>: esta guía.</li>
 </ul>
 <h2>Antes de empezar</h2>
@@ -153,6 +154,38 @@
 <li>se envía un correo con las Excel y <strong>todas las fotos de albaranes y DI</strong>. Si falta algún documento, el correo lo indica.</li>
 </ul>
 <p>Después el tren queda <strong>TERMINADO</strong>: el almacén lo ve, pero ya no puede cambiarlo. Si hay que corregir algo, la oficina pulsa <strong>«Modificar el tren»</strong>, hace el cambio y vuelve a pulsar «Terminar el tren y enviar las Excel». Esto se puede hacer hasta que se cargue la composición del siguiente tren.</p>
+<h2>Stock Burriana: entradas, salidas y stock</h2>
+<p>El almacén de Burriana guarda mercancía de clientes (el primero, <strong>Raminatrans Castellón</strong>). La app controla <strong>cuántos palets entran y salen y cuál es cada uno por su código</strong> (el número que va bajo el código de barras de la etiqueta). No controla los bultos de cada palet. Pantalla principal → <strong>Stock Burriana</strong>.</p>
+<h3>Entrada de mercancía</h3>
+<ol>
+<li><strong>La oficina</strong> pulsa <strong>Entradas → «Nueva entrada»</strong> y hace foto al albarán, o elige el <strong>PDF y el Excel</strong> que manda el cliente (el Excel trae la lista exacta de palets con su código y su peso). Se pueden elegir hasta 4 archivos.</li>
+<li>La app propone el <strong>cliente</strong> y avisa de conflictos (albarán ya cargado, referencia que no está en su catálogo, fecha rara). El «cliente final» (el cliente de tu cliente) es solo informativo.</li>
+<li>Revisa los datos y <strong>el día de entrada en el almacén</strong>: la app propone el del albarán, pero <strong>cámbialo</strong> si el camión se cargó un día y se descarga al siguiente (es el día que cuenta para el estocaje). Pulsa <strong>«Guardar la entrada»</strong>.</li>
+<li><strong>El almacén</strong> abre la entrada y apunta cada palet de una de estas tres formas. La app comprueba que ese código está en el albarán y no está repetido. Un palet mal apuntado se quita con <strong>«Quitar»</strong>.
+   - <strong>«Escanear códigos de barras»</strong>: se abre la cámara y se van pasando los palets uno tras otro sin cerrarla; cada código leído suena, vibra y se apunta solo (sale como «escaneado»). Es lo más rápido y evita errores al teclear.
+   - <strong>«Foto de la etiqueta del palet»</strong>: la app lee la etiqueta de la foto.
+   - <strong>«Elegir un palet de la lista o apuntarlo a mano»</strong>: se elige el código en la lista desplegable (solo salen los del albarán que faltan por apuntar) o se escribe a mano si nada de lo anterior funciona (sale como «a mano»).</li>
+<li>Si pasa algo (palet roto, film abierto, falta un palet…), se escribe en <strong>«Incidencias de la descarga»</strong>: la oficina lo verá en el correo.</li>
+<li>Al terminar, <strong>«Terminar la descarga»</strong>. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda <strong>un correo</strong> a la oficina con la Excel y las fotos, y se actualiza la Excel de control en SharePoint.</li>
+</ol>
+<h3>Salida de mercancía</h3>
+<ol>
+<li><strong>La oficina</strong> pulsa <strong>Salidas → «Nueva salida»</strong>, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).</li>
+<li><strong>El almacén</strong> abre la salida y apunta cada palet que carga, con <strong>«Escanear códigos de barras»</strong>, con la foto de la etiqueta o eligiéndolo en la lista desplegable (salen los palets del cliente que se pueden cargar, los más antiguos primero). La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. Avisa si hay un palet más antiguo de la misma referencia (conviene sacar primero el más antiguo).</li>
+<li>Incidencias de la carga en <strong>«Incidencias de la carga»</strong>. Al terminar, <strong>«Terminar la carga y expedir la Excel»</strong>: sale un correo con la Excel de lo cargado y las fotos.</li>
+</ol>
+<h3>Correos que llegan solos (agente.burriana@stinsa.com)</h3>
+<p>Si el cliente manda el albarán a <strong>agente.burriana@stinsa.com</strong>, la app prepara la entrada sola (o la salida, si el correo habla de recoger o retirar mercancía). En la lista aparece con <strong>📧 POR REVISAR</strong>: ábrela, comprueba el cliente, el día de entrada y los palets, y pulsa <strong>«Está bien: confirmar»</strong>. <strong>Hasta que no se confirme no se puede cerrar.</strong> Si la app no ha podido prepararla (cliente que no reconoce, albarán ya cargado, sin adjuntos), la oficina recibe un correo «No he podido procesar…» y hay que cargarla a mano.</p>
+<h3>Stock actual y clientes</h3>
+<ul>
+<li><strong>Stock actual</strong>: palets y kilos que hay ahora en el almacén, por cliente y referencia. El botón <strong>«Rehacer la Excel de control»</strong> vuelve a generar el libro en SharePoint.</li>
+<li><strong>Clientes del almacén</strong>: toca un cliente para cambiar su nombre, sus otros nombres o su <strong>catálogo de referencias</strong> (una por línea: <code>referencia;descripción</code>). Si llega una referencia que no está en el catálogo, la app avisa: suele ser un error de escritura.</li>
+</ul>
+<h3>Dónde queda en SharePoint (Almacen Burriana)</h3>
+<ul>
+<li><strong>CONTROL ALMACEN BURRIANA.xlsx</strong>: hojas Resumen stock, Stock, Entradas, Salidas, Movimientos y Clientes. Lo rehace la app: <strong>no escribas en ella</strong>, se pierde. Solo se guarda en SharePoint (lleva el stock de todos los clientes, no se reenvía).</li>
+<li>Una carpeta por operación, <strong>«ENTRADA E-2026-0001»</strong> o <strong>«SALIDA S-2026-0001»</strong>, con su Excel y las fotos.</li>
+</ul>
 <h2>Dónde queda todo en SharePoint (Automatizacion)</h2>
 <ul>
 <li><strong>Carpeta «CARTON PAJA TREN N»</strong> (una por tren):<ul>
@@ -208,6 +241,18 @@
 <tr>
 <td>«El archivo es demasiado grande»</td>
 <td>Haz una foto del documento en vez de subir el PDF.</td>
+</tr>
+<tr>
+<td>«Hay discrepancias entre el albarán y las etiquetas…»</td>
+<td>Lee la lista. Si es un error de foto, quita el palet y fotografíalo otra vez; si es real (palet que sobra o falta), confirma y deja la incidencia escrita.</td>
+</tr>
+<tr>
+<td>«Esta operación llegó por correo y la oficina todavía no la ha revisado»</td>
+<td>Abre la entrada o salida y pulsa «Está bien» tras comprobar los datos.</td>
+</tr>
+<tr>
+<td>«La referencia … no está en el catálogo»</td>
+<td>Comprueba que está bien escrita. Si es un producto nuevo, añádela en Clientes del almacén.</td>
 </tr>
 <tr>
 <td>«Modo de prueba: no se ha guardado nada»</td>

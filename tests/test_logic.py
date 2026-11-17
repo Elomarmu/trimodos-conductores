@@ -435,6 +435,10 @@ def test_todas_las_rutas_api_exigen_codigo_salvo_health():
             from app.pr.pr_api import require_n8n
             assert require_n8n in [d.call for d in r.dependant.dependencies]
             continue
+        if r.path == "/api/stock/correo":   # correos del buzón del almacén: n8n con su clave (X-Clave = STOCK_CORREO_CLAVE)
+            from app.stock.stock_api import require_correo
+            assert require_correo in [d.call for d in r.dependant.dependencies]
+            continue
         protegida = require_access in [d.call for d in r.dependant.dependencies]
         assert protegida == (r.path != "/api/health"), r.path
 

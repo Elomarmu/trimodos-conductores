@@ -244,6 +244,29 @@ def registrar(odoo, v: dict) -> dict:
 
 # ---- completar un viaje después (código Paper, peso, balas, contenedor; datos del tren) ---------------------------
 
+def ref_de_app(ref: str | None) -> bool:
+    """¿La referencia del pedido termina en PR_PEDIDO_SUFIJO (p. ej. « APP»)? Sin sufijo, todas valen."""
+    suf = R.sufijo_pedido()
+    return not suf or (ref or "").rstrip().upper().endswith(suf.upper())
+
+
+def comprobar_de_app(odoo, bulto: dict) -> None:
+    """Con PR_PEDIDO_SUFIJO activo, rechaza las cargas cuyo pedido no es de la app (p. ej. el pedido manual)."""
+    if not R.sufijo_pedido():
+        return
+    lineas = bulto.get("sale_line_ids")
+    if lineas is None:   # solo se conoce el id del bulto
+        ps = odoo("tms.package", "search_read", [[["id", "=", bulto.get("id")]]], fields=["sale_line_ids"])
+        lineas = ps[0].get("sale_line_ids") if ps else []
+    ordenes = {(l.get("order_id") or [None])[0] for l in odoo("sale.order.line", "search_read", [[["id", "in", lineas]]],
+                                                              fields=["order_id"])} if lineas else set()
+    ordenes.discard(None)
+    refs = [o.get("client_order_ref") for o in odoo("sale.order", "search_read", [[["id", "in", list(ordenes)]]],
+                                                    fields=["client_order_ref"])] if ordenes else []
+    if not refs or not all(ref_de_app(r) for r in refs):
+        raise ErrorPR("Esta carga no es de la app.")
+
+
 def buscar_viaje(odoo, texto: str) -> dict | None:
     """Por nº de albarán, código Paper o nombre de bulto."""
     t = re.sub(r"\s+", "", texto or "").upper()
@@ -685,6 +708,7 @@ def _carga(v: dict | None) -> dict | None:
 
 
 def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str) -> str:
+    comprobar_de_app(odoo, {"id": bulto_id})
     caja = next((c for c in tren["cajas"] if c["caja_movil"] == caja_movil), None)
     if not caja:
         raise ErrorPR(f"La caja {caja_movil} no está en el tren {tren['tren']}.")
@@ -719,6 +743,7 @@ def asignar(odoo, tren: dict, lista: list[dict], bulto_id: int, caja_movil: str)
 
 def quitar(odoo, bulto_id: int, tren: dict | None = None, lista: list[dict] | None = None) -> str:
     """Deshace la asignación: la carga vuelve a stock. Si su vagón se queda sin carga, sale de la lista de cargados."""
+    comprobar_de_app(odoo, {"id": bulto_id})
     p = odoo("tms.package", "search_read", [[["id", "=", bulto_id], ["partner_id", "=", R.CLIENTE_ID]]], fields=["name", "unload_note"])
     if not p:
         raise ErrorPR("No encuentro esa carga.")

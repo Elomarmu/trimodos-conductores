@@ -187,6 +187,12 @@ app.include_router(pr_api.router, dependencies=access)             # conductor (
 app.include_router(pr_api.oficina, dependencies=access_oficina)    # oficina y almacén: solo con su código
 app.include_router(pr_api.n8n)                                     # resumen de la mañana: clave del flujo de n8n (X-Clave)
 
+# Control de stock del almacén de Burriana (entradas con albarán y etiquetas, salidas, Excel de control). Solo oficina y almacén.
+from .stock import stock_api  # noqa: E402
+
+app.include_router(stock_api.router, dependencies=access_oficina)
+app.include_router(stock_api.correo)                                  # correos del buzón del almacén: clave de n8n (X-Clave)
+
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")
 _public = Path(__file__).resolve().parent.parent / "public"

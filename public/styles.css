@@ -315,3 +315,12 @@ select, input[type=date], input[type=time] { min-width: 0; max-width: 100%; disp
 
 textarea { min-height: 72px; resize: vertical; font-family: inherit; line-height: 1.35; }
 .nota { color: var(--warn); font-size: .95rem; }
+
+/* Lector de códigos de barras (Stock Burriana) */
+.bar-video { width: 100%; max-height: 52vh; object-fit: cover; border-radius: 12px; background: #000; }
+#barras .avisos { min-height: 3rem; }
+
+/* Advertencias amarillas plegadas tras una flechita */
+.avisos-plegados > summary { cursor: pointer; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line, #444); font-weight: 600; }
+.avisos-plegados[open] > summary { margin-bottom: 10px; }
+.avisos-plegados > .banner + .banner { margin-top: 10px; }
