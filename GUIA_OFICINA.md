@@ -5,9 +5,9 @@ Esta app es para el **personal de oficina y de almacén**. Los conductores usan 
 En la pantalla principal tienes:
 
 - **DECA - Trimodos**: corregir una orden de transporte escaneando su QR (igual que los conductores).
-- **Oficina · PR**: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).
-- **Almacén · PR**: cargar las cajas móviles del tren.
-- **Stock Burriana**: entradas y salidas de mercancía del almacén de Burriana y su stock.
+- **Oficina Sevilla**: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).
+- **Almacén Sevilla**: cargar las cajas móviles del tren.
+- **Oficina Burriana**: entradas y salidas de mercancía del almacén de Burriana y su stock.
 - **Cómo se usa (guía)**: esta guía.
 
 ## Antes de empezar
@@ -33,7 +33,7 @@ Cada vez que hagas una foto a un albarán o a un DI:
 
 Consejo: el folio entero, sobre una superficie oscura y con buena luz.
 
-## Oficina · PR
+## Oficina Sevilla (viajes de PR)
 
 ### Registrar un viaje (foto del albarán)
 
@@ -106,11 +106,11 @@ Para un **tren nuevo**:
 2. Revisa el total por clase de bobina y los avisos, por ejemplo una caja que no suma lo que dice su cabecera o una captura que falta.
 3. Pulsa **«Enviar la Excel a Sevilla»**. También se puede descargar.
 
-## Almacén · PR: cargar las cajas móviles
+## Almacén Sevilla: cargar las cajas móviles
 
 Arriba pone **«Está cargado el tren N de fecha DD-MM-AAAA»**. Comprueba que es el tren que estáis cargando. Si no lo es, la oficina tiene que cargar su composición.
 
-Se entra desde **«Almacén · PR»** (menú principal). La oficina también puede asignar cargas desde **Oficina · PR › «Asignar cargas a cajas»**: es la misma pantalla, pero con los botones de terminar y modificar el tren.
+Se entra desde **«Almacén Sevilla»** (menú principal). La oficina también puede asignar cargas desde **Oficina Sevilla › «Asignar cargas a cajas»**: es la misma pantalla, pero con los botones de terminar y modificar el tren.
 
 Cada cambio (asignar, quitar, mover o corregir) pone al día **la Excel del tren y la de registro en SharePoint** en ese momento. Si alguna vez no cuadra lo de SharePoint con la app, la oficina tiene el botón **«Rehacer la Excel y los documentos del tren en SharePoint»** en «Asignar cargas a cajas».
 
@@ -140,7 +140,7 @@ La lista **«Ya cargadas»** está en el orden del tren: **arriba los vagones pe
 
 ### Terminar el tren (solo la oficina)
 
-Se hace desde **Oficina · PR › «Asignar cargas a cajas»**. Cuando esté todo cargado, pulsa **«Terminar el tren y enviar las Excel»**. La app enseña el **nº de convoy de salida** (si todavía no se había puesto, el de entrada):
+Se hace desde **Oficina Sevilla › «Asignar cargas a cajas»**. Cuando esté todo cargado, pulsa **«Terminar el tren y enviar las Excel»**. La app enseña el **nº de convoy de salida** (si todavía no se había puesto, el de entrada):
 
 - Si es correcto, pulsa **«Confirmar y enviar»**.
 - Si no lo es, **escribe el bueno** y pulsa «Confirmar y enviar»: se guarda en el tren y en sus cargas antes de enviar.
@@ -155,7 +155,7 @@ Después el tren queda **TERMINADO**: el almacén lo ve, pero ya no puede cambia
 
 ## Stock Burriana: entradas, salidas y stock
 
-El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans Castellón**). La app controla **cuántos palets entran y salen y cuál es cada uno por su código** (el número que va bajo el código de barras de la etiqueta). No controla los bultos de cada palet. Pantalla principal → **Stock Burriana**.
+El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans Castellón**). La app controla **cuántos palets entran y salen y cuál es cada uno por su código** (el número que va bajo el código de barras de la etiqueta). No controla los bultos de cada palet. Pantalla principal → **Oficina Burriana**.
 
 ### Entrada de mercancía
 

@@ -679,7 +679,7 @@ def test_la_guia_de_la_app_se_genera_desde_el_markdown_y_no_esta_desfasada():
         assert actual.replace("\r\n", "\n") == generar(nombre).replace("\r\n", "\n"), f"{destino.name} desfasada: ejecuta scripts.generar_guia"
         assert f'href="{inicio}">Volver a la app' in actual
     assert "corregir la orden de transporte" in (GUIAS["conductores"][1]).read_text(encoding="utf-8")
-    assert "Almacén · PR" in (GUIAS["oficina"][1]).read_text(encoding="utf-8")
+    assert "Almacén Sevilla" in (GUIAS["oficina"][1]).read_text(encoding="utf-8")
 
 
 def test_el_menu_enlaza_a_la_guia_y_se_guarda_para_uso_sin_conexion():

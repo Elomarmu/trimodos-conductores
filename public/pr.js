@@ -2,7 +2,7 @@
 // Viajes de PR (SAICA): foto del albarán → revisar → guardar en Odoo y descargar la orden de transporte.
 // Usa las utilidades de app.js ($, h, post, api, busy, showError, go, state, loadPdf, abrirPdf…).
 
-const pr = { viaje: null, vehiculos: null, puntos: [], oficina: false };   // oficina: entra desde «Oficina · PR»
+const pr = { viaje: null, vehiculos: null, puntos: [], oficina: false };   // oficina: entra desde «Oficina Sevilla»
 const MAX_LADO = 1600;   // la foto se reduce en el móvil: se lee bien, sube en un momento y caben todas en el correo del tren
 
 $("btn-pr").addEventListener("click", () => { pr.oficina = false; go("pr-foto"); });
