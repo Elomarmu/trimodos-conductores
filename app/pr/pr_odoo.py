@@ -409,6 +409,26 @@ def devolver_a_stock(odoo, lista: list[dict], bulto_ids: list[int]) -> list[str]
     return hechos
 
 
+# ---- avisos de SharePoint: Excel que no se han podido sustituir (p. ej. porque alguien la tenía abierta) ----------------
+NOMBRE_AVISOS = "PR_AVISOS_SHAREPOINT.json"
+
+
+def leer_avisos(odoo) -> dict:
+    adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "res.company"], ["name", "=", NOMBRE_AVISOS]]],
+               fields=["datas"], limit=1)
+    return json.loads(base64.b64decode(adj[0]["datas"]).decode()) if adj and adj[0].get("datas") else {}
+
+
+def guardar_avisos(odoo, avisos: dict) -> None:
+    contenido = base64.b64encode(json.dumps(avisos, ensure_ascii=False).encode()).decode()
+    previo = odoo("ir.attachment", "search_read", [[["res_model", "=", "res.company"], ["name", "=", NOMBRE_AVISOS]]], fields=["id"], limit=1)
+    if previo:
+        odoo("ir.attachment", "write", [[previo[0]["id"]], {"datas": contenido}])
+    else:
+        odoo("ir.attachment", "create", [{"name": NOMBRE_AVISOS, "res_model": "res.company", "res_id": R.EMPRESA_ID, "datas": contenido,
+                                          "mimetype": "application/json", "type": "binary"}])
+
+
 def siguiente_tren(lista: list[dict]) -> int:
     """Número de tren propio (correlativo). El último que se hizo a mano fue el 85 (PR_ULTIMO_TREN)."""
     nums = [int(v["tren"]) for v in lista if str(v.get("tren") or "").isdigit()]

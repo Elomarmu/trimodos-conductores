@@ -444,3 +444,24 @@ def test_sacar_de_stock_y_devolver(monkeypatch):
     r = A.stock_devolver(A.Bultos(bulto_ids=[12]))                   # deshacer
     assert len(r["hechos"]) == 1 and "Fuera de stock" not in odoo.bultos[12]["unload_note"]
     assert [v["bulto_id"] for v in r["stock"]] == [12, 14]
+
+
+def test_avisos_de_sharepoint(monkeypatch):
+    odoo = OdooOrden()
+    adjuntos = {}
+    def falso(modelo, metodo, args, **kw):
+        if modelo == "ir.attachment" and args and args[0] and isinstance(args[0], list) and args[0][:1] == [["res_model", "=", "res.company"]]:
+            return [{"id": 1, "datas": adjuntos["datas"]}] if "datas" in adjuntos else []
+        if modelo == "ir.attachment" and metodo in ("create", "write"):
+            datos = args[0] if metodo == "create" else args[1]
+            adjuntos["datas"] = datos["datas"]
+            return 1
+        return odoo(modelo, metodo, args, **kw)
+    monkeypatch.setattr(A, "odoo_pr", lambda: falso)
+    A.sharepoint_resultado(A.ResultadosSP(resultados=[
+        A.ResultadoSP(archivo="REGISTRO VIAJES PR.xlsx", ok=False, bloqueada=True, motivo="423 resourceLocked"),
+        A.ResultadoSP(archivo="CARTON PAJA TREN 86.xlsx", ok=True)]))
+    av = A.avisos_sharepoint()["avisos"]
+    assert [(a["archivo"], a["bloqueada"]) for a in av] == [("REGISTRO VIAJES PR.xlsx", True)]
+    A.sharepoint_resultado(A.ResultadosSP(resultados=[A.ResultadoSP(archivo="REGISTRO VIAJES PR.xlsx", ok=True)]))
+    assert A.avisos_sharepoint()["avisos"] == []                    # cuando sale bien, el aviso se quita

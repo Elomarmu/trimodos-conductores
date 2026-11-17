@@ -602,6 +602,20 @@
       },
       "alwaysOutputData": true,
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cuenta a la app cómo ha ido cada Excel subida a SharePoint. Si una no se pudo sustituir (p. ej. porque alguien la\n// tenía abierta: error 423), la oficina lo verá en la app con un botón «Reintentar». Nunca para el flujo.\nconst cfg = $('Configuración').first().json;\nconst resultados = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const it = items[i];\n  let nombre = it.json && it.json.name;\n  try { nombre = nombre || $('Preparar SharePoint y correo').itemMatching(i).json.nombre; } catch (e) {}\n  if (!nombre) continue;\n  const err = it.json && it.json.error;\n  const texto = err ? (typeof err === 'string' ? err : JSON.stringify(err)) : '';\n  resultados.push({ archivo: String(nombre).slice(0, 200), ok: !err, bloqueada: /423|locked/i.test(texto), motivo: texto.slice(0, 280) });\n}\nif (resultados.length) {\n  try {\n    await this.helpers.httpRequest({ method: 'POST', url: `${cfg.app}/api/pr/sharepoint/resultado`, json: true,\n      headers: { 'X-Clave': cfg.claveWebhook }, body: { resultados }, timeout: 30000 });\n  } catch (e) { /* la app no contesta: no pasa nada, el flujo sigue */ }\n}\nreturn [{ json: { resultados } }];"
+      },
+      "id": "ca70bb6c-ae50-4698-a3cc-dee77f0e389a",
+      "name": "Avisar a la app del resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        220
+      ],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -810,6 +824,17 @@
         [
           {
             "node": "Preparar SharePoint y correo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir Excel a SharePoint": {
+      "main": [
+        [
+          {
+            "node": "Avisar a la app del resultado",
             "type": "main",
             "index": 0
           }

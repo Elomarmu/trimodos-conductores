@@ -77,6 +77,12 @@ Dejan de salir en el almacén, en «STOCK EN NAVE» y en «Cargas pendientes», 
 
 **Importante:** no borres filas a mano en la Excel de registro: la app la rehace entera desde Odoo cada vez.
 
+### Aviso «No se ha podido actualizar en SharePoint»
+
+Si una Excel (la de registro o la del tren) está **abierta** en algún ordenador cuando la app la quiere cambiar, SharePoint no deja sustituirla. Entonces, al entrar en **Oficina Sevilla** o en **Almacén Sevilla**, sale un aviso amarillo con la Excel y la hora. **Ciérrala en todos los ordenadores** (sobre todo en el Excel de escritorio) y pulsa **«Reintentar»**: la app la rehace desde Odoo y la vuelve a subir. El aviso desaparece solo cuando ya se ha podido actualizar.
+
+Consejo: consultad las Excel en el navegador y cerradlas al acabar.
+
 ### Composición del tren
 
 Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almacén con su **nº de convoy de entrada** (el del listado de Captrain).

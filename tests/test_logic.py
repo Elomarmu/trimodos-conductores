@@ -431,7 +431,7 @@ def test_todas_las_rutas_api_exigen_codigo_salvo_health():
     for r in rutas:
         if r.path.startswith("/api/argon/"):
             continue  # proceso ARGON: lo llama n8n con su propia clave (ARGON_CLAVE); se comprueba abajo
-        if r.path == "/api/pr/resumen":   # resumen de la mañana: n8n con su clave (X-Clave) u oficina con su código
+        if r.path in ("/api/pr/resumen", "/api/pr/sharepoint/resultado"):   # los llama n8n con su clave (X-Clave) u oficina con su código
             from app.pr.pr_api import require_n8n
             assert require_n8n in [d.call for d in r.dependant.dependencies]
             continue

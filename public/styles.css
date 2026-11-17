@@ -327,3 +327,6 @@ textarea { min-height: 72px; resize: vertical; font-family: inherit; line-height
 
 .stk-fila { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .stk-fila input[type=checkbox] { width: 26px; height: 26px; flex: none; accent-color: var(--brand); }
+
+.sp-aviso ul { margin: 6px 0; padding-left: 20px; }
+.sp-aviso p { margin: 6px 0; }

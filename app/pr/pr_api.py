@@ -822,6 +822,61 @@ def require_n8n(enviar: bool = False, x_clave: str = Header(""), x_codigo_acceso
     raise AppError("No autorizado.", 401, "codigo_invalido")
 
 
+class ResultadoSP(BaseModel):
+    archivo: str = Field(min_length=1, max_length=200)
+    ok: bool
+    bloqueada: bool = False
+    motivo: str = Field("", max_length=300)
+
+
+class ResultadosSP(BaseModel):
+    resultados: list[ResultadoSP] = Field(max_length=50)
+
+
+@n8n.post("/sharepoint/resultado", dependencies=[Depends(require_n8n)])
+def sharepoint_resultado(body: ResultadosSP):
+    """n8n avisa de cómo ha ido cada Excel subida a SharePoint. Si no se pudo (p. ej. estaba abierta), la oficina lo verá
+    en la app con un botón para reintentar; cuando una subida sale bien, el aviso de esa Excel se quita."""
+    odoo = odoo_pr()
+    avisos = O.leer_avisos(odoo)
+    antes = dict(avisos)
+    ahora = dt.datetime.now(R.MADRID).strftime("%d/%m %H:%M")
+    for r in body.resultados:
+        if r.ok:
+            avisos.pop(r.archivo, None)
+        else:
+            avisos[r.archivo] = {"cuando": ahora, "bloqueada": r.bloqueada, "motivo": r.motivo[:200]}
+            log.warning("SharePoint: no se ha podido sustituir %s (%s)", r.archivo, r.motivo[:200])
+    if avisos != antes:
+        O.guardar_avisos(odoo, avisos)
+    return {"ok": True, "avisos": len(avisos)}
+
+
+@oficina.get("/avisos")
+def avisos_sharepoint():
+    """Oficina: Excel que no se han podido actualizar en SharePoint."""
+    try:
+        avisos = O.leer_avisos(odoo_pr())
+    except AppError:
+        raise
+    return {"avisos": [{"archivo": k, **v} for k, v in sorted(avisos.items())]}
+
+
+@oficina.post("/sharepoint/reintentar")
+def sharepoint_reintentar():
+    """Oficina: vuelve a generar desde Odoo y a subir la Excel de registro y la del tren actual."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    t = O.tren_actual(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    if t:
+        poner_al_dia(odoo, t, lista)
+    else:
+        subir_registro(odoo, lista)
+    return {"ok": True}
+
+
 @n8n.get("/resumen", dependencies=[Depends(require_n8n)])
 def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\d{2})?$")):
     """Para n8n por la mañana (lunes a sábado): llegadas a la nave, cargas en el tren, datos pendientes y stock."""

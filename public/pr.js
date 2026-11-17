@@ -8,7 +8,7 @@ const MAX_LADO = 1600;   // la foto se reduce en el móvil: se lee bien, sube en
 $("btn-pr").addEventListener("click", () => { pr.oficina = false; go("pr-foto"); });
 $("of-registrar").addEventListener("click", () => { pr.oficina = true; go("pr-foto"); });
 document.addEventListener("click", (e) => { if (e.target.closest(".pr-volver")) go(pr.oficina ? "pr-oficina" : "menu"); });
-$("btn-pr-oficina").addEventListener("click", () => go("pr-oficina"));
+$("btn-pr-oficina").addEventListener("click", () => { go("pr-oficina"); revisarSharePoint("sp-aviso-oficina"); });
 $("btn-pr-almacen").addEventListener("click", () => abrirAlmacen(false));
 $("of-tren").addEventListener("click", () => {
   $("tren-paso1").hidden = false; $("tren-paso2").hidden = true; $("tren-hecho").hidden = true;
@@ -513,6 +513,7 @@ async function abrirAlmacen(desdeOficina) {
   $("alm-enviar").hidden = true;   // lo decide pintarAlmacen (solo oficina y con el tren sin terminar)
   $("alm-descargas").replaceChildren();
   go("pr-almacen");
+  revisarSharePoint("sp-aviso-almacen");
   await cargarAlmacen();
 }
 $("alm-volver").addEventListener("click", () => go(alm.oficina ? "pr-oficina" : "menu"));
@@ -853,5 +854,34 @@ async function devolverStockPR(v) {
   try {
     const r = await post("/api/pr/stock/devolver", { bulto_ids: [v.bulto_id] });
     if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarStockPR(r);
+  } catch (e) { showError(e.message); } finally { busy(null); }
+}
+
+
+// ---------- aviso: una Excel no se ha podido actualizar en SharePoint (normalmente porque alguien la tenía abierta) ----------
+async function revisarSharePoint(id) {
+  const caja = $(id);
+  if (!caja) return;
+  let r;
+  try { r = await api("/api/pr/avisos"); } catch { return; }   // el aviso nunca debe molestar al trabajo
+  const avisos = r.avisos || [];
+  caja.hidden = !avisos.length;
+  if (!avisos.length) return caja.replaceChildren();
+  const abierta = avisos.some((a) => a.bloqueada);
+  caja.replaceChildren(h("div", { class: "banner warn" },
+    h("b", {}, "⚠ No se ha podido actualizar en SharePoint:"),
+    h("ul", {}, ...avisos.map((a) => h("li", {}, `${a.archivo.replace(/\.xlsx$/, "")} (${a.cuando})` + (a.bloqueada ? " — estaba abierta" : "")))),
+    h("p", {}, abierta ? "Ciérrala en todos los ordenadores (sobre todo en el Excel de escritorio) y pulsa «Reintentar»."
+      : "Pulsa «Reintentar». Si vuelve a fallar, avisa al responsable de la app."),
+    h("button", { type: "button", class: "btn secondary small", onclick: () => reintentarSharePoint(id) }, "Reintentar")));
+}
+async function reintentarSharePoint(id) {
+  clearError();
+  busy("Volviendo a subir las Excel…");
+  try {
+    const r = await post("/api/pr/sharepoint/reintentar", {});
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    $(id).replaceChildren(h("div", { class: "banner info" }, "Enviado de nuevo. Compruebo en unos segundos si ya se ha podido actualizar…"));
+    setTimeout(() => revisarSharePoint(id), 20000);
   } catch (e) { showError(e.message); } finally { busy(null); }
 }
