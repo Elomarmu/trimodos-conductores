@@ -78,6 +78,17 @@ def resumen_ubicaciones(palets: list[dict]) -> list[tuple[str, int]]:
     return sorted(cuenta.items(), key=lambda x: (x[0] == "sin ubicación", -x[1], x[0]))
 
 
+def es_sin_codigo(texto) -> bool:
+    """«SIN CODIGO» escrito donde va el código del palet (mercancía no normativa, sin etiqueta con código)."""
+    t = unicodedata.normalize("NFD", str(texto or "").upper())
+    return re.sub(r"[^A-Z]", "", t) == "SINCODIGO"
+
+
+def codigo_interno(id_palet: str) -> str:
+    """Código que se da a un palet sin código para poder controlarlo y sacarlo: SC + su id (SCI2026000103)."""
+    return sscc("SC" + id_palet)
+
+
 def sscc(texto) -> str:
     """Código del palet de la etiqueta, comparable venga como venga: SSCC de 18 cifras (puede traer «(00)» o espacios),
     código de fábrica de 10 cifras, o código con letras como el «LP26-0236823» de Aliplast. Sin letras se devuelve solo con
@@ -401,7 +412,8 @@ def verificar_palet(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> d
 def _verificar_inventario(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> dict:
     """Entrada manual de inventario (mercancía que ya estaba en el almacén o aparece sin albarán): no hay albarán con el que casar.
     Se acepta el palet con lo que diga su etiqueta; solo se avisa si repite un código o no tiene referencia."""
-    codigo = etiqueta.get("sscc") if len(etiqueta.get("sscc") or "") >= MIN_CODIGO else ""
+    sin_codigo = bool(etiqueta.get("sin_codigo"))   # «SIN CODIGO»: mercancía no normativa; se acepta si tiene ubicación
+    codigo = "" if sin_codigo else (etiqueta.get("sscc") if len(etiqueta.get("sscc") or "") >= MIN_CODIGO else "")
     ya = [p for p in entrada["palets"] if p.get("estado_alta") != "quitado"]
     lineas = entrada["lineas"]
     ref = etiqueta.get("ref") or ""
@@ -414,8 +426,10 @@ def _verificar_inventario(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]
         palet.update(estado="discrepancia", duplicado=True, motivo="Este código de palet ya está registrado: palet repetido (se descarta al cerrar).")
     elif idx is None:
         palet.update(estado="discrepancia", motivo="Falta la referencia del palet: escríbela o haz foto de su etiqueta.")
-    elif not codigo:
-        palet.update(estado="discrepancia", motivo="Falta el código del palet (hace falta para poder controlarlo y sacarlo después).")
+    elif sin_codigo and not etiqueta.get("ubicacion"):
+        palet.update(estado="discrepancia", motivo="Palet sin código: hace falta indicar su ubicación para aceptarlo.")
+    elif not codigo and not sin_codigo:
+        palet.update(estado="discrepancia", motivo="Falta el código del palet (hace falta para poder controlarlo y sacarlo después). Si no tiene, escribe SIN CODIGO.")
     return palet
 
 
@@ -460,7 +474,7 @@ def disponibles_salida(salida: dict, existencias: list[dict], otras_salidas: lis
            and ((p["sscc"] in lista) if lista else (not refs or referencia(p["ref"]) in refs))]
     res.sort(key=lambda p: (p["fecha_entrada"], p["id"]))
     return [{"codigo": p["sscc"], "ref": p["ref"], "lote": p.get("lote") or "", "kg": p.get("kg"), "palet": p["id"], "fecha_entrada": p["fecha_entrada"],
-             "ubicacion": p.get("ubicacion") or "", "linea": _linea_salida(salida["lineas"], p)}
+             "ubicacion": p.get("ubicacion") or "", "sin_codigo": bool(p.get("sin_codigo")), "linea": _linea_salida(salida["lineas"], p)}
             for p in res[:tope]]
 
 
@@ -520,7 +534,7 @@ def stock(entradas: list[dict], salidas: list[dict], controles: list[dict] | Non
                 continue
             res.append({"id": p["id"], "cliente": e["cliente"]["codigo"], "cliente_nombre": e["cliente"]["nombre"], "ref": p["ref"],
                         "descripcion": p["descripcion"], "lote": p["lote"], "sscc": p["sscc"], "kg": p["kg"], "bultos": p.get("bultos"),
-                        "fecha_prod": p.get("fecha_prod") or "", "ubicacion": p.get("ubicacion") or "", "inventario": e.get("tipo") == "inventario", "entrada": e["id"], "albaran": e["albaran"].get("numero"), "fecha_entrada": fecha_entrada(e),
+                        "fecha_prod": p.get("fecha_prod") or "", "ubicacion": p.get("ubicacion") or "", "sin_codigo": bool(p.get("sin_codigo")), "inventario": e.get("tipo") == "inventario", "entrada": e["id"], "albaran": e["albaran"].get("numero"), "fecha_entrada": fecha_entrada(e),
                         "cliente_final": e["albaran"].get("cliente_final") or ""})
     return res
 

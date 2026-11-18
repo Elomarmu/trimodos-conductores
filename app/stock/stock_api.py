@@ -478,18 +478,22 @@ def entrada_detalle(ident: str):
     return _detalle_entrada(_documento(get_store(), "entrada", ident))
 
 
-def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "", ubicacion: str = "") -> dict:
+def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "", ubicacion: str = "", sin_codigo: bool = False) -> dict:
     try:
         ubicacion = R.limpiar_ubicacion(ubicacion)
     except R.ErrorStock as err:
         raise AppError(str(err), 400, "ubicacion_invalida")
     entradas, salidas = store.listar("entrada"), store.listar("salida")
     etiqueta = {**etiqueta, "ref": R.canonica(_cliente_de(store, e), etiqueta.get("ref"))}
+    if sin_codigo:
+        etiqueta.update(sin_codigo=True, sscc="", ubicacion=R.limpiar_ubicacion(ubicacion))
     palet = R.verificar_palet(e, etiqueta, _sscc_en_stock(store, entradas, salidas))
     if e.get("tipo") == "inventario":
         R.recontar_inventario(e)
     n = max([int(p["id"].rsplit("-", 1)[1]) for p in e["palets"]] or [0]) + 1
     palet.update(id=f"{e['id']}-{n:02d}", manual=manual, hora=ahora(), foto="", origen=origen, ubicacion=ubicacion)
+    if sin_codigo:
+        palet["sscc"] = R.codigo_interno(palet["id"])   # para poder controlarlo y sacarlo después
     e["ubicacion"] = ubicacion   # la ubicación «de ahora»: los siguientes palets se dejan en la misma hasta que se cambie
     if foto:
         palet["foto"] = _guardar_foto(store, e["id"], f"{n:02d} {etiqueta.get('ref') or 'palet'}", foto)
@@ -517,19 +521,22 @@ def entrada_palet_manual(ident: str, body: PaletManual):
     store = get_store()
     e = _documento(store, "entrada", ident)
     _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
-    codigo = R.sscc(body.sscc)
+    sin_codigo = R.es_sin_codigo(body.sscc)
+    if sin_codigo and e.get("tipo") != "inventario":
+        raise AppError("«SIN CODIGO» solo vale en la entrada manual de inventario. En una entrada con albarán el palet tiene que traer su código.", 400, "sin_codigo_no_vale")
+    codigo = "" if sin_codigo else R.sscc(body.sscc)
     if not (body.ref or body.descripcion or codigo):
         raise AppError("Escribe el código del palet o su referencia.", 400, "sin_referencia")
-    datos = {"sscc": body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos}
+    datos = {"sscc": "" if sin_codigo else body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos}
     exp = next((x for x in e.get("esperados") or [] if codigo and x["codigo"] == codigo), None)
     if exp and not body.ref:   # solo llega el código (leído con la cámara o elegido de la lista): lo demás sale del albarán
         datos.update(referencia=exp.get("ref") or "", lote=body.lote or exp.get("lote") or "", kg=body.kg if body.kg is not None else exp.get("kg"))
-    palet = _anadir_palet_entrada(store, e, R.limpiar_etiqueta(datos), None, body.origen != "barras", body.origen, body.ubicacion)
+    palet = _anadir_palet_entrada(store, e, R.limpiar_etiqueta(datos), None, body.origen != "barras", body.origen, body.ubicacion, sin_codigo)
     return {"palet": palet, "entrada": _detalle_entrada(e)}
 
 
 class Corregir(PaletManual):
-    palet: str = Field(max_length=40)
+    palet: str = Field(max_length=40)   # (ubicacion: solo se usa si el palet aún no tenía)
 
 
 @router.post("/entradas/{ident}/corregir")
@@ -542,15 +549,24 @@ def entrada_corregir(ident: str, body: Corregir):
     p = next((p for p in e["palets"] if p["id"] == body.palet and p.get("estado_alta") != "quitado"), None)
     if not p:
         raise AppError("No encuentro ese palet.", 404, "no_encontrado")
-    codigo = R.sscc(body.sscc)
+    sin_codigo = R.es_sin_codigo(body.sscc)
+    if sin_codigo and e.get("tipo") != "inventario":
+        raise AppError("«SIN CODIGO» solo vale en la entrada manual de inventario. En una entrada con albarán el palet tiene que traer su código.", 400, "sin_codigo_no_vale")
+    codigo = "" if sin_codigo else R.sscc(body.sscc)
     if not (body.ref or body.descripcion or codigo):
         raise AppError("Escribe el código del palet o su referencia.", 400, "sin_referencia")
-    datos = {"sscc": body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos}
+    datos = {"sscc": "" if sin_codigo else body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos}
     exp = next((x for x in e.get("esperados") or [] if codigo and x["codigo"] == codigo), None)
     if exp and not body.ref:   # solo se ha puesto el código: lo demás sale del albarán
         datos.update(referencia=exp.get("ref") or "", lote=body.lote or exp.get("lote") or "", kg=body.kg if body.kg is not None else exp.get("kg"))
     etiqueta = R.limpiar_etiqueta(datos)
     etiqueta = {**etiqueta, "ref": R.canonica(_cliente_de(store, e), etiqueta.get("ref"))}
+    try:
+        ubic = p.get("ubicacion") or R.limpiar_ubicacion(body.ubicacion)   # la del palet; si no tenía, la que está elegida ahora
+    except R.ErrorStock as err:
+        raise AppError(str(err), 400, "ubicacion_invalida")
+    if sin_codigo:
+        etiqueta.update(sin_codigo=True, sscc="", ubicacion=ubic)
     entradas, salidas = store.listar("entrada"), store.listar("salida")
     en_stock = _sscc_en_stock(store, [x for x in entradas if x["id"] != e["id"]], salidas)
     p["estado_alta"] = "quitado"   # mientras se comprueba, el palet no cuenta (si no, saldría repetido de sí mismo)
@@ -558,10 +574,12 @@ def entrada_corregir(ident: str, body: Corregir):
         nuevo = R.verificar_palet(e, etiqueta, en_stock)
     finally:
         del p["estado_alta"]
-    for k in ("duplicado", "aceptado", "motivo", "estado"):
+    for k in ("duplicado", "aceptado", "motivo", "estado", "sin_codigo"):
         p.pop(k, None)
     p.update(nuevo)
-    p.update(manual=True, corregido=ahora())
+    p.update(manual=True, corregido=ahora(), ubicacion=ubic)
+    if sin_codigo:
+        p["sscc"] = R.codigo_interno(p["id"])
     if e.get("tipo") == "inventario":
         R.recontar_inventario(e)
         R.quitar_lineas_vacias(e)

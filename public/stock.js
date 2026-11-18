@@ -192,6 +192,7 @@ function pintarEntrada(e) {
   const cerrada = e.estado === "cerrada";
   const inv = e.tipo === "inventario";
   $("se-titulo").textContent = inv ? `Entrada manual de inventario ${e.id}` : `Entrada ${e.id}`;
+  document.querySelector('label[for="se-m-sscc"]').textContent = inv ? "Código del palet (el número bajo el código de barras). Si no lo tiene, escribe SIN CODIGO y pon la ubicación" : "Código del palet (el número bajo el código de barras)";
   $("se-lineas-titulo").textContent = inv ? "Referencias apuntadas" : "Lo que dice el albarán";
   $("se-cerrar").textContent = inv ? "Terminar la entrada de inventario" : "Terminar la descarga";
   $("se-barras").textContent = inv ? "Leer el código de barras de un palet" : "Escanear códigos de barras";
@@ -218,7 +219,7 @@ function pintarEntrada(e) {
   $("se-palets-titulo").hidden = !e.palets.length;
   $("se-palets").replaceChildren(...e.palets.map((p) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", p.fecha_prod ? ` · prod. ${fechaEs(p.fecha_prod)}` : "", h("br"),
-      h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
+      h("span", { class: "hint" }, p.id + (p.sin_codigo ? " · SIN CÓDIGO" : p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       h("br"), h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación"),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
     cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => corregirPaletEntrada(p) }, "Corregir"),
@@ -271,7 +272,7 @@ function corregirPaletEntrada(p) {
   stk.corrigiendo = p.id;
   const det = $("se-manual").closest("details");
   det.hidden = false; det.open = true;
-  $("se-m-ref").value = p.ref || ""; $("se-m-lote").value = p.lote || ""; $("se-m-kg").value = p.kg ? String(p.kg) : ""; $("se-m-sscc").value = p.sscc || "";
+  $("se-m-ref").value = p.ref || ""; $("se-m-lote").value = p.lote || ""; $("se-m-kg").value = p.kg ? String(p.kg) : ""; $("se-m-sscc").value = p.sin_codigo ? "SIN CODIGO" : p.sscc || "";
   $("se-m-corrigiendo").hidden = false;
   $("se-m-corrigiendo-txt").textContent = `Corrigiendo el palet ${p.id}. Cambia lo que esté mal y pulsa «Guardar corrección».`;
   $("se-m-guardar").textContent = "Guardar corrección";
@@ -290,7 +291,7 @@ $("se-manual").addEventListener("submit", async (ev) => {
   const datos = { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim() };
   const corr = stk.corrigiendo;
   const r = corr
-    ? await conCarga("Guardando la corrección…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/corregir`, { ...datos, palet: corr }))
+    ? await conCarga("Guardando la corrección…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/corregir`, { ...datos, palet: corr, ubicacion: $("se-ubic").value.trim() }))
     : await conCarga("Añadiendo…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`, { ...datos, ubicacion: $("se-ubic").value.trim() }));
   if (!r) return;
   if (corr) terminarCorreccion(); else $("se-manual").reset();
@@ -454,7 +455,7 @@ async function pintarListaSalida(s) {
   if (!stk.salida || stk.salida.id !== s.id) return;   // se ha cambiado de salida mientras tanto
   campo.hidden = !stk.disponibles.length;
   sel.replaceChildren(h("option", { value: "" }, `— Elegir (${stk.disponibles.length} disponibles) —`),
-    ...stk.disponibles.map((x) => h("option", { value: x.codigo }, `${x.codigo} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""} · 📍 ${x.ubicacion || "sin ubicación"} · entró ${fechaEs(x.fecha_entrada)}`)));
+    ...stk.disponibles.map((x) => h("option", { value: x.codigo }, `${x.sin_codigo ? "SIN CÓDIGO (" + x.palet + ")" : x.codigo} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""} · 📍 ${x.ubicacion || "sin ubicación"} · entró ${fechaEs(x.fecha_entrada)}`)));
   // Dónde está el material pedido: por cada línea, las ubicaciones con los palets que quedan por cargar
   for (const l of s.lineas) {
     const el = $("ss-ubic-" + l.linea);
@@ -553,7 +554,7 @@ function pintarUbicar(marcados) {
   $("su-cabecera").textContent = `${g.nombre} · ${g.ref || "—"} · ${ps.length} palets (${sin} sin ubicación)`;
   $("su-lista").replaceChildren(...ps.map((p) => h("label", { class: "fila" },
     h("input", { type: "checkbox", value: p.id, checked: !!(marcados && marcados.has(p.id)) }),
-    h("span", {}, h("b", {}, p.sscc || p.id), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
+    h("span", {}, h("b", {}, p.sin_codigo ? "SIN CÓDIGO" : p.sscc || p.id), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
       h("span", { class: "hint" }, p.id + " · entró " + fechaEs(p.fecha_entrada)), h("br"), h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación")))));
 }
 const marcadosUbicar = () => [...$("su-lista").querySelectorAll("input:checked")].map((i) => i.value);
