@@ -200,7 +200,11 @@ function pintarEntrada(e) {
   document.querySelector('label[for="se-etq-camara"]').hidden = cerrada;
   $("se-barras").hidden = cerrada;
   $("se-ubic-campo").hidden = cerrada;
-  if (stk.ubicEntrada !== e.id) { $("se-ubic").value = e.ubicacion || ""; stk.ubicEntrada = e.id; }   // la que se escribe se conserva mientras se sigue en la misma entrada
+  if (stk.ubicEntrada !== e.id) {
+    $("se-ubic").replaceChildren(h("option", { value: "" }, "— Sin ubicación —"),
+      ...(e.ubicaciones_validas || []).map((g) => h("optgroup", { label: g.grupo }, ...g.zonas.map((z) => h("option", { value: z }, z)))));
+    $("se-ubic").value = e.ubicacion || ""; stk.ubicEntrada = e.id;
+  }   // la que se escribe se conserva mientras se sigue en la misma entrada
   pintarListaEntrada(e);
   $("se-cierre").hidden = cerrada;
   $("se-revisar").hidden = !e.por_revisar;

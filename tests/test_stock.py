@@ -705,20 +705,22 @@ def test_ubicacion_en_la_entrada_el_stock_y_la_salida(cliente, enviados):
     disponibles de una salida y en cada palet cargado. El inventario va a traficolevante y Carmelo."""
     ident = cliente.post("/api/stock/inventario", json={"cliente": "ALIPLAST", "fecha_entrada": "2026-11-01"}).json()["id"]
     alta = lambda cod, ubic: cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": cod, "ref": "F05182S", "lote": "L1", "kg": 100, "ubicacion": ubic}).json()
-    assert alta("LP26-2000001", " a-12 ")["palet"]["ubicacion"] == "A-12"
-    alta("LP26-2000002", "a-12")
-    r = alta("LP26-2000003", "B-3")        # ya no caben: se cambia de ubicación y se sigue
-    assert r["palet"]["ubicacion"] == "B-3" and r["entrada"]["ubicacion"] == "B-3"
+    assert alta("LP26-2000001", " e1 ")["palet"]["ubicacion"] == "E1"
+    alta("LP26-2000002", "E1")
+    r = alta("LP26-2000003", "S3")        # ya no caben: se cambia de ubicación y se sigue
+    assert r["palet"]["ubicacion"] == "S3" and r["entrada"]["ubicacion"] == "S3"
+    mala = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "LP26-2000009", "ref": "F05182S", "ubicacion": "Z9"})
+    assert mala.status_code == 400 and mala.json()["codigo"] == "ubicacion_invalida"   # solo las zonas de la lista
     alta("LP26-2000004", "")               # sin informar: queda sin ubicación
     cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
     env = enviados[-1]
     assert env["evento"] == "inventario_cerrado" and env["para"] == "traficolevante@stinsa.com,carmelomartinez@stinsa.com"
-    assert "A-12 (2)" in env["html"] and "B-3 (1)" in env["html"] and "sin ubicación (1)" in env["html"]
+    assert "E1 (2)" in env["html"] and "S3 (1)" in env["html"] and "sin ubicación (1)" in env["html"]
     st = cliente.get("/api/stock/stock").json()
-    assert [(u["ubicacion"], u["palets"]) for u in st["resumen"][0]["ubicaciones"]] == [("A-12", 2), ("B-3", 1), ("sin ubicación", 1)]
-    assert sorted(p["ubicacion"] for p in st["palets"]) == ["", "A-12", "A-12", "B-3"]
+    assert [(u["ubicacion"], u["palets"]) for u in st["resumen"][0]["ubicaciones"]] == [("E1", 2), ("S3", 1), ("sin ubicación", 1)]
+    assert sorted(p["ubicacion"] for p in st["palets"]) == ["", "E1", "E1", "S3"]
     s = cliente.post("/api/stock/salidas", json={"cliente": "ALIPLAST", "lineas": [{"ref": "F05182S", "palets": 2}], "confirmado": True}).json()
     disp = cliente.get(f"/api/stock/salidas/{s['id']}/disponibles").json()["palets"]
-    assert {d["codigo"]: d["ubicacion"] for d in disp}["LP262000003"] == "B-3" and all(d["linea"] == 0 for d in disp)
+    assert {d["codigo"]: d["ubicacion"] for d in disp}["LP262000003"] == "S3" and all(d["linea"] == 0 for d in disp)
     p = cliente.post(f"/api/stock/salidas/{s['id']}/palet", json={"sscc": "LP26-2000003", "origen": "barras"}).json()["palet"]
-    assert p["estado"] == "ok" and p["ubicacion"] == "B-3"
+    assert p["estado"] == "ok" and p["ubicacion"] == "S3"

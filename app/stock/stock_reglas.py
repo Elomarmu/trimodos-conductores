@@ -58,9 +58,15 @@ def entero(valor) -> int | None:
         return None
 
 
+UBICACIONES = [("Estanterías", [f"E{n}" for n in range(1, 7)]), ("Suelo", [f"S{n}" for n in range(1, 11)])]   # zonas del almacén de Burriana
+
+
 def limpiar_ubicacion(texto) -> str:
-    """Zona del almacén donde se deja un palet (texto libre corto: «A-12», «Nave 2 muelle»). Siempre en mayúsculas y sin espacios de más."""
-    return " ".join(str(texto or "").split()).upper()[:30]
+    """Zona del almacén donde se deja un palet: una de UBICACIONES (E1…E6 estanterías, S1…S10 suelo) o vacío. Si no existe, ErrorStock."""
+    u = "".join(str(texto or "").split()).upper()
+    if u and u not in {z for _, zs in UBICACIONES for z in zs}:
+        raise ErrorStock(f"La ubicación «{texto}» no existe: elige una de la lista (estanterías E1-E6 o suelo S1-S10).")
+    return u
 
 
 def resumen_ubicaciones(palets: list[dict]) -> list[tuple[str, int]]:

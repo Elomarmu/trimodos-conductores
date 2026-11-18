@@ -319,7 +319,8 @@ def _detalle_entrada(e: dict) -> dict:
     return {**_resumen_entrada(e), "albaran_datos": e["albaran"], "lineas": R.estado_lineas(e), "palets": R.activos(e),
             "avisos": e.get("avisos") or [], "pendientes": R.pendientes_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else [],
             "discrepancias_lista": R.discrepancias_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else e.get("discrepancias_cierre") or [],
-            "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or "", "ubicacion": e.get("ubicacion") or ""}
+            "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or "", "ubicacion": e.get("ubicacion") or "",
+            "ubicaciones_validas": [{"grupo": g, "zonas": z} for g, z in R.UBICACIONES]}
 
 
 def _resumen_salida(s: dict) -> dict:
@@ -478,13 +479,16 @@ def entrada_detalle(ident: str):
 
 
 def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "", ubicacion: str = "") -> dict:
+    try:
+        ubicacion = R.limpiar_ubicacion(ubicacion)
+    except R.ErrorStock as err:
+        raise AppError(str(err), 400, "ubicacion_invalida")
     entradas, salidas = store.listar("entrada"), store.listar("salida")
     etiqueta = {**etiqueta, "ref": R.canonica(_cliente_de(store, e), etiqueta.get("ref"))}
     palet = R.verificar_palet(e, etiqueta, _sscc_en_stock(store, entradas, salidas))
     if e.get("tipo") == "inventario":
         R.recontar_inventario(e)
     n = max([int(p["id"].rsplit("-", 1)[1]) for p in e["palets"]] or [0]) + 1
-    ubicacion = R.limpiar_ubicacion(ubicacion)
     palet.update(id=f"{e['id']}-{n:02d}", manual=manual, hora=ahora(), foto="", origen=origen, ubicacion=ubicacion)
     e["ubicacion"] = ubicacion   # la ubicación «de ahora»: los siguientes palets se dejan en la misma hasta que se cambie
     if foto:
