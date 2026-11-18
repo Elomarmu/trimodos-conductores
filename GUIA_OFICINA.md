@@ -7,7 +7,7 @@ En la pantalla principal tienes:
 - **DECA - Trimodos**: corregir una orden de transporte escaneando su QR (igual que los conductores).
 - **Oficina Sevilla**: todo lo de los viajes de PR de SAICA (registrar, modificar, pendientes, composición del tren, bobinas).
 - **Almacén Sevilla**: cargar las cajas móviles del tren.
-- **Oficina Burriana**: entradas y salidas de mercancía del almacén de Burriana y su stock.
+- **Oficina Burriana**: entradas y salidas de mercancía del almacén de Burriana, su inventario, las ubicaciones y el control de stock.
 - **Cómo se usa (guía)**: esta guía.
 
 ## Antes de empezar
@@ -159,60 +159,155 @@ Al enviar se hacen tres cosas:
 
 Después el tren queda **TERMINADO**: el almacén lo ve, pero ya no puede cambiarlo. Si hay que corregir algo, la oficina pulsa **«Modificar el tren»**, hace el cambio y vuelve a pulsar «Terminar el tren y enviar las Excel». Esto se puede hacer hasta que se cargue la composición del siguiente tren.
 
-## Stock Burriana: entradas, salidas y stock
+## Stock Burriana: entradas, salidas, inventario y ubicaciones
 
-El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans Castellón**). La app controla **cuántos palets entran y salen y cuál es cada uno por su código** (el número que va bajo el código de barras de la etiqueta). No controla los bultos de cada palet. Pantalla principal → **Oficina Burriana**.
+El almacén de Burriana guarda mercancía de clientes (**Raminatrans Castellón**, **Aliplast Iberia**…). La app controla **cuántos palets entran y salen, cuál es cada uno por su código** (el número que va bajo el código de barras de la etiqueta) **y en qué zona del almacén está**. No controla los bultos de cada palet. En las capturas, los **números rojos** señalan lo que se explica en cada paso.
 
-### Entrada de mercancía
+![Menú principal: Oficina Burriana](/guia-img/menu.jpg)
 
-1. **La oficina** pulsa **Entradas → «Nueva entrada»** y hace foto al albarán, o elige el **PDF y el Excel** que manda el cliente (el Excel trae la lista exacta de palets con su código y su peso). Se pueden elegir hasta 4 archivos.
-2. La app propone el **cliente** y avisa de conflictos (albarán ya cargado, referencia que no está en su catálogo, fecha rara). El «cliente final» (el cliente de tu cliente) es solo informativo.
-3. Revisa los datos y **el día de entrada en el almacén**: la app propone el del albarán, pero **cámbialo** si el camión se cargó un día y se descarga al siguiente (es el día que cuenta para el estocaje). Pulsa **«Guardar la entrada»**.
-4. **El almacén** abre la entrada y apunta cada palet de una de estas tres formas. La app comprueba que ese código está en el albarán y no está repetido. Un palet mal apuntado se quita con **«Quitar»**.
-   - **«Escanear códigos de barras»**: se abre la cámara y se van pasando los palets uno tras otro sin cerrarla; cada código leído suena, vibra y se apunta solo (sale como «escaneado»). Es lo más rápido y evita errores al teclear.
-   - **«Foto de la etiqueta del palet»**: la app lee la etiqueta de la foto.
-   - **«Elegir un palet de la lista o apuntarlo a mano»**: se elige el código en la lista desplegable (solo salen los del albarán que faltan por apuntar) o se escribe a mano si nada de lo anterior funciona (sale como «a mano»).
-5. Si pasa algo (palet roto, film abierto, falta un palet…), se escribe en **«Incidencias de la descarga»**: la oficina lo verá en el correo.
-6. Al terminar, **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel y las fotos, y se actualiza la Excel de control en SharePoint.
+Pantalla principal → **Oficina Burriana**. Dentro hay cuatro grandes botones: **Entrada de mercancía**, **Salidas**, **Inventario** y **Clientes del almacén**.
 
-**Ubicación en el almacén:** en la pantalla de la entrada (y en la entrada manual de inventario), justo debajo de los botones de escanear, hay el campo **Ubicación**. Elige de la lista la zona donde dejas los palets (estanterías **E1 a E6** o suelo **S1 a S10**) y ve escaneando; cada palet queda con esa ubicación. Si en mitad de la descarga ya no caben, **cambia la ubicación antes de escanear el siguiente** y sigue. En cada palet de la lista se ve su 📍. La ubicación sale en el **Inventario** (por referencia), en la Excel, en el correo de la entrada y, al hacer una **salida**, en cada línea pedida (dónde está ese material), en la lista de palets disponibles y en cada palet cargado.
+**Quién hace qué:** la **oficina** da de alta la entrada (albarán) o la salida (petición) y revisa; el **almacén** apunta los palets que descarga o carga. Todo se hace desde el móvil.
 
-**Ubicar o cambiar la ubicación de lo que ya está en el almacén:** en **Inventario**, cada referencia tiene el botón **«Ubicar / cambiar ubicación»**. Se abre la lista de sus palets con su 📍; marca los que quieras (hay un botón para marcar los que no tienen ubicación), elige la ubicación y pulsa **«Asignar ubicación a los marcados»**. Poner ubicación a palets que no la tenían es directo. Si entre los marcados hay palets que **ya tienen otra ubicación**, la app avisa de cuáles son y pide confirmación antes de cambiarlos.
+### 1. Entrada de mercancía (descarga de un camión)
 
-**Palet con error o mal leído:** en cada palet de la entrada, junto a **Incidencia** y **Quitar**, está **«Corregir»**. Sus datos pasan al formulario de apuntar a mano: cambia la referencia, el lote, los kg o el código que estén mal y pulsa **«Guardar corrección»**. El palet se vuelve a comprobar con el albarán (si ya cuadra, deja de salir el aviso) y conserva su foto, su ubicación y sus incidencias.
+1. **La oficina** pulsa **Entradas → «Nueva entrada»** y hace foto al albarán, o elige el **PDF y el Excel** que manda el cliente (el Excel trae la lista exacta de palets con su código y su peso). Se pueden elegir hasta 4 archivos (también el CMR y el packing list).
+2. La app propone el **cliente** y avisa de conflictos (albarán ya cargado, referencia que no está en su catálogo, fecha rara). Revisa los datos y **el día de entrada en el almacén**: la app propone el del albarán, pero **cámbialo** si el camión se cargó un día y se descarga al siguiente (es el día que cuenta para el estocaje). Pulsa **«Guardar la entrada»**.
+3. **El almacén** abre la entrada y va apuntando cada palet.
 
-**Palets sin código (solo en la entrada manual de inventario):** a veces entra mercancía no normativa que no trae etiqueta con código. Al apuntarlo o corregirlo, marca la casilla **«Este palet no tiene código»**: se acepta siempre que el palet tenga **ubicación** (elígela en el desplegable de Ubicación; si no hay, sale el aviso). La app le da un código interno para poder controlarlo y sacarlo, y en las listas se ve como «SIN CÓDIGO». Después no hace falta teclear nada: en el **control de inventario** y en la **salida** hay un desplegable **«Palets sin código»** con los que hay en el almacén (referencia, lote y ubicación) para elegir el que has encontrado o vas a cargar. En una entrada con albarán no vale: ahí el palet tiene que traer su código.
+![Entrada: botones para apuntar palets y ubicación](/guia-img/entrada-arriba.jpg)
+
+- **(1)** **«Foto de la etiqueta del palet»:** la app lee la etiqueta de la foto.
+- **(2)** **«Escanear códigos de barras»:** se abre la cámara y se pasan los palets uno tras otro sin cerrarla; cada código leído suena, vibra y se apunta solo (sale como «escaneado»). Es lo más rápido y evita errores al teclear.
+- **(3)** **Ubicación en el almacén:** **antes de empezar a escanear, elige la zona** donde vas a dejar los palets: **estanterías E1 a E6** o **suelo S1 a S10**. Cada palet que apuntes queda en esa ubicación. Si a mitad de descarga ya no caben, **cambia la ubicación en el desplegable antes de escanear el siguiente** y sigue.
+- **(4)** **«Lo que dice el albarán»:** cuántos palets de cada referencia faltan por verificar (3/6 = 3 apuntados de 6).
+
+   Si ninguna forma funciona, abajo está **«Elegir un palet de la lista o apuntarlo a mano»**: se elige el código en la lista desplegable (solo salen los del albarán que faltan por apuntar) o se escribe a mano (sale como «a mano»).
+
+La app comprueba que cada código está en el albarán y no está repetido. En la lista **«Palets verificados»** cada palet muestra su referencia, lote, kilos, código y su **📍 ubicación**:
+
+![Lista de palets con sus botones](/guia-img/entrada-palets.jpg)
+
+- **(1)** **📝 Corregir:** cambia los datos de un palet mal leído (ver más abajo).
+- **(2)** **⚠️ Incidencia:** anota un problema del bulto con fotos (el número indica cuántas lleva ya).
+- **(3)** **Quitar:** el palet deja de contar en esta entrada.
+- **(4)** **Aviso amarillo:** la app explica por qué ese palet no cuadra (no está en el albarán, está repetido, lote distinto…).
+
+**Palet leído dos veces o fuera de lista:** el primero queda como bueno y el repetido sale como advertencia para depurar (puedes quitarlo con «Quitar»); si no lo quitas, se descarta solo al cerrar y no entra dos veces. Los palets repetidos o que no figuran en la lista no cuentan para decir que «sobran» otros: los palets declarados en el albarán se dan por buenos.
+
+#### Corregir un palet con error
+
+Si un palet sale con aviso porque se leyó mal (referencia, lote, kilos o código), pulsa **📝**. Sus datos pasan al formulario de abajo con un recuadro amarillo; cambia lo que esté mal y pulsa **«Guardar corrección»**. El palet se vuelve a comprobar con el albarán (si ya cuadra, desaparece el aviso) y **conserva su foto, su ubicación y sus incidencias**. «Cancelar» lo deja como estaba.
+
+![Corregir un palet](/guia-img/corregir.jpg)
+
+- **(1)** Recuadro que dice qué palet se está corrigiendo.
+- **(2)** Campos con los datos actuales: cámbialos.
+- **(3)** **Guardar corrección.**
+
+#### Incidencia de un bulto (palet roto, film abierto, golpe…)
+
+Pulsa **⚠️** en el palet. Escribe qué ha pasado y haz hasta **4 fotos** del bulto, con la cámara o **eligiéndolas de la galería**. Al terminar la entrada, el **correo a la oficina** lleva una sección **«Incidencias por bulto»** con la explicación y las fotos dentro del propio correo. También se guardan en la carpeta de SharePoint y la Excel tiene la columna «Incidencia». Funciona igual en las salidas.
+
+![Incidencia del bulto](/guia-img/incidencia.jpg)
+
+- **(1)** Qué ha pasado.
+- **(2)** **Hacer una foto del bulto** con la cámara.
+- **(3)** **Elegir fotos de la galería** o de archivos.
+- **(4)** **Guardar la incidencia.**
+
+#### Terminar la descarga
+
+Abajo, si hace falta cambia el **día de entrada**, escribe las **incidencias generales de la descarga** (falta un palet, camión sucio…) y pulsa **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel de la entrada, las fotos y el resumen por ubicación, y se actualiza la Excel de control en SharePoint.
+
+![Cierre de la entrada](/guia-img/cierre.jpg)
+
+- **(1)** Día de entrada en el almacén.
+- **(2)** Incidencias de la descarga (salen en el correo).
+- **(3)** **Terminar la descarga.**
 
 **Una entrada no se puede declarar dos veces:** si el albarán ya está cargado para ese cliente, la app da error y dice con qué entrada coincide (ni confirmando se puede repetir). Si una entrada está duplicada o mal hecha, ábrela y pulsa **«Anular esta entrada»**: deja de contar (si ya estaba cerrada, sus palets salen del inventario) y el albarán puede volver a declararse. No se puede anular si algún palet suyo ya está en una salida; en ese caso se corrige primero la salida. El correo que se envió al cerrar no se puede retirar.
 
-**Palets leídos dos veces y fuera de lista:** si un palet se lee dos veces, el primero queda como bueno y el repetido sale como **advertencia** para depurar (puedes quitarlo con «Quitar»); si no lo quitas, se descarta solo al cerrar y no entra dos veces en el inventario. Los palets repetidos o que no figuran en la lista no cuentan para decir que «sobran» otros: los palets declarados en el albarán se dan por buenos.
+**Correos que llegan solos (agente.burriana@stinsa.com):** si el cliente manda el albarán a esa dirección, la app prepara la entrada sola (o la salida, si el correo habla de recoger o retirar mercancía). En la lista aparece con **📧 POR REVISAR**: ábrela, comprueba el cliente, el día de entrada y los palets, y pulsa **«Está bien: confirmar»**. **Hasta que no se confirme no se puede cerrar.** Si la app no ha podido prepararla (cliente que no reconoce, albarán ya cargado, sin adjuntos), la oficina recibe un correo «No he podido procesar…» y hay que cargarla a mano.
 
-**Incidencia de un bulto:** junto a «Quitar», cada palet (en entradas y en salidas) tiene el botón **«Incidencia»**: escribes qué ha pasado y haces hasta 4 fotos del bulto. Al terminar, el correo a oficina (con la Excel y el enlace) trae una sección **«Incidencias por bulto»** con la explicación y las fotos dentro del propio correo; las fotos también se guardan en la carpeta de SharePoint y la Excel lleva la columna «Incidencia».
+**Aviso de llegada al cliente (Aliplast):** si el cliente lo tiene activado, al terminar la descarga la app manda un correo a **traficolevante@stinsa.com y a Carmelo** con el mensaje ya redactado para el cliente (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list). Arriba lleva un recuadro con el **contacto del cliente**. Quien lo revise lo **reenvía al cliente** y borra el recuadro. El cliente nunca recibe nada directamente de la app. Si el envío falla, aparece un botón para repetirlo. Para Aliplast la app compara además la lista del packing list con los totales del albarán y avisa si no cuadran.
 
-### Salida de mercancía
+### 2. Salida de mercancía (carga de un camión)
 
 1. **La oficina** pulsa **Salidas → «Nueva salida»**, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).
-2. **El almacén** abre la salida y apunta cada palet que carga, con **«Escanear códigos de barras»**, con la foto de la etiqueta o eligiéndolo en la lista desplegable (salen los palets del cliente que se pueden cargar). La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. **No hay que respetar el orden de entrada (FIFO).** En los clientes marcados «hay que localizar el palet concreto» (Aliplast) hay que cargar exactamente los palets de la lista de la petición y la app avisa de los que faltan; en los demás (Raminatrans) basta con la referencia y el número de palets.
-3. Incidencias de la carga en **«Incidencias de la carga»**. Al terminar, **«Terminar la carga y expedir la Excel»**: sale un correo con la Excel de lo cargado y las fotos.
+2. **El almacén** abre la salida y apunta cada palet que carga: con **«Escanear códigos de barras»**, con la foto de la etiqueta o eligiéndolo en la lista desplegable.
 
-### Correos que llegan solos (agente.burriana@stinsa.com)
+![Salida: dónde está el material pedido](/guia-img/salida.jpg)
 
-Si el cliente manda el albarán a **agente.burriana@stinsa.com**, la app prepara la entrada sola (o la salida, si el correo habla de recoger o retirar mercancía). En la lista aparece con **📧 POR REVISAR**: ábrela, comprueba el cliente, el día de entrada y los palets, y pulsa **«Está bien: confirmar»**. **Hasta que no se confirme no se puede cerrar.** Si la app no ha podido prepararla (cliente que no reconoce, albarán ya cargado, sin adjuntos), la oficina recibe un correo «No he podido procesar…» y hay que cargarla a mano.
+- **(1)** **«Está en…»:** debajo de cada referencia pedida, la app dice **en qué ubicaciones hay ese material** y cuántos palets en cada una (por ejemplo «E1 (1) · sin ubicación (1)»). Así se sabe dónde ir a buscarlo.
+- **(2)** **Escanear códigos de barras:** cada palet cargado se comprueba con el stock: que está en el almacén, que es del cliente y que es lo que se pidió.
 
-### Inventario y clientes
+3. En la lista de **«Palets cargados»** cada palet muestra su **📍 ubicación** de donde se ha sacado. En la lista desplegable de palets disponibles también sale la ubicación de cada uno, y los más antiguos primero. **No hay que respetar el orden de entrada (FIFO)**: solo se avisa (⏳) de lo que lleva más de un mes.
 
-- **Inventario** (antes «Stock actual»): palets y kilos que hay ahora en el almacén, por cliente y referencia, con el lote. Avisa (⏳) de la mercancía que **lleva más de un mes** en el almacén. El botón **«Rehacer la Excel de control»** vuelve a generar el libro en SharePoint. Dentro hay dos opciones:
-  - **Entrada manual de inventario**: para dar de alta mercancía que ya estaba en la nave (por ejemplo, las existencias de un cliente nuevo) o que aparece sin albarán. Eliges cliente y fecha, apuntas los palets con la foto de la etiqueta (lee código, referencia, lote y kg) o a mano, y **«Terminar la entrada de inventario»**. No se compara con ningún albarán, no se avisa al cliente y no cuenta como manipulación de entrada para facturar (sí para el estocaje).
-  - **Control de inventario**: eliges el cliente (o todos), escaneas o escribes los palets que hay físicamente y la app te dice los que **faltan** (están en el sistema y no los has contado) y los que **sobran** (los has encontrado y no están en el sistema, o son de otro cliente). Al terminar puedes marcar **«Dar de baja los que faltan»**; se manda un resumen por correo.
-- **Clientes del almacén**: toca un cliente para cambiar su nombre, sus otros nombres o su **catálogo de referencias** (una por línea: `referencia;descripción;códigos equivalentes separados por /`, por ejemplo `F05182S;Film;F05182S-MV`). Si llega una referencia que no está en el catálogo, la app avisa; los códigos equivalentes se tratan como la misma referencia. También se configura si en las salidas hay que localizar el palet concreto y el **aviso de llegada** al cliente.
+![Palets cargados con su ubicación](/guia-img/salida-palets.jpg)
 
-### Aviso de llegada al cliente (Aliplast)
+4. En los clientes marcados «hay que localizar el palet concreto» (Aliplast) hay que cargar exactamente los palets de la lista de la petición y la app avisa de los que faltan; en los demás (Raminatrans) basta con la referencia y el número de palets.
+5. **Palets sin código:** si la mercancía no tiene código (ver Inventario), en el formulario de abajo hay un desplegable **«Palets sin código del almacén»** para elegir el que se carga.
+6. Incidencias de la carga en **«Incidencias de la carga»** (y ⚠️ en cada palet). Al terminar, **«Terminar la carga y expedir la Excel»**: sale un correo con la Excel de lo cargado y las fotos.
 
-Si el cliente tiene activado el aviso, al **terminar la descarga** la app manda un correo a **traficolevante@stinsa.com y a Carmelo** con el mensaje ya redactado para el cliente (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list) que se fotografió al abrir la entrada. Arriba lleva un recuadro con el **contacto del cliente** (nombre y correo, que se ponen en Clientes del almacén). Quien lo revise lo **reenvía al cliente** (los adjuntos van incluidos) y borra el recuadro. El cliente nunca recibe nada directamente de la app. Si el envío falla, aparece un botón para repetirlo. Para entradas de Aliplast la app compara además la lista del packing list con los totales del albarán (palets y kilos) y avisa si no cuadran.
-### Dónde queda en SharePoint (Almacen Burriana)
+### 3. Inventario: lo que hay en el almacén
 
-- **CONTROL ALMACEN BURRIANA.xlsx**: hojas Resumen stock, Stock, Entradas, Salidas, Movimientos y Clientes. Lo rehace la app: **no escribas en ella**, se pierde. Solo se guarda en SharePoint (lleva el stock de todos los clientes, no se reenvía).
-- Una carpeta por operación, **«ENTRADA E-2026-0001»** o **«SALIDA S-2026-0001»**, con su Excel y las fotos.
+**Inventario** muestra los palets y kilos que hay ahora, por cliente y referencia, con el lote y las **ubicaciones**. Avisa (⏳) de la mercancía que **lleva más de un mes** en el almacén. El botón **«Rehacer la Excel de control»** vuelve a generar el libro en SharePoint.
+
+![Inventario](/guia-img/inventario.jpg)
+
+- **(1)** **Entrada manual de inventario:** dar de alta mercancía que ya estaba en la nave.
+- **(2)** **Control de inventario:** contar lo que hay físicamente y compararlo con el sistema.
+- **(3)** **Ubicar / cambiar ubicación:** en cada referencia, para poner o cambiar la ubicación de los palets que ya están en el almacén.
+
+#### Ubicar o cambiar la ubicación de lo que ya está en el almacén
+
+Pulsa **«Ubicar / cambiar ubicación»** en la referencia. Se abre la lista de sus palets, cada uno con su 📍.
+
+![Ubicar palets](/guia-img/ubicar.jpg)
+
+- **(1)** Elige la **ubicación** que quieres asignar.
+- **(2)** **«Marcar los que no tienen ubicación»** los selecciona de golpe (también puedes marcar a mano o usar «Marcar todos / ninguno»).
+- **(3)** Casilla de cada palet.
+- **(4)** **«Asignar ubicación a los marcados».**
+
+Poner ubicación a palets que **no la tenían** es directo. Si entre los marcados hay palets que **ya tienen otra ubicación**, la app avisa de cuáles son y **pide confirmación** antes de cambiarlos. Se guarda la ubicación anterior de cada palet.
+
+#### Entrada manual de inventario
+
+Sirve para dar de alta mercancía que ya estaba en la nave (por ejemplo, las existencias de un cliente nuevo) o que aparece sin albarán. **Inventario → «Entrada manual de inventario»**, eliges cliente y fecha de entrada, y apuntas los palets como en una entrada normal (foto de la etiqueta, escáner o a mano), **eligiendo antes la ubicación**. Al terminar, **«Terminar la entrada de inventario»**: se manda un correo a **traficolevante@stinsa.com y a Carmelo**. No se compara con ningún albarán, no se avisa al cliente y no cuenta como manipulación de entrada para facturar (sí para el estocaje). También tiene los botones 📝 corregir, ⚠️ incidencia y Quitar.
+
+![Entrada manual de inventario con un palet sin código](/guia-img/inventario-manual.jpg)
+
+- **(1)** **Ubicación** donde se deja el palet.
+- **(2)** **«Este palet no tiene código»:** para mercancía no normativa sin etiqueta con código. Se acepta **siempre que tenga ubicación**. La app le da un código interno para poder controlarlo y sacarlo después, y en las listas se ve como **«SIN CÓDIGO»**. Solo vale en la entrada manual de inventario; en una entrada con albarán el palet tiene que traer su código.
+- **(3)** **Añadir el palet.**
+
+#### Control de inventario
+
+Sirve para comprobar que lo que hay en la nave coincide con el sistema. **Inventario → «Control de inventario»**: eliges el cliente (o todos), escaneas o escribes los palets que hay físicamente y la app te dice los que **faltan** (están en el sistema y no los has contado) y los que **sobran** (los has encontrado y no están en el sistema, o son de otro cliente). Al terminar puedes marcar **«Dar de baja los que faltan»**; se manda un resumen por correo.
+
+![Control de inventario](/guia-img/control.jpg)
+
+- **(1)** **Palets sin código del inventario:** desplegable para elegir el palet sin código que has encontrado (no tiene etiqueta que escanear).
+- **(2)** **Escanear códigos de barras** para el resto.
+
+### 4. Clientes del almacén
+
+Toca un cliente para cambiar su nombre, sus otros nombres o su **catálogo de referencias** (una por línea: `referencia;descripción;códigos equivalentes separados por /`, por ejemplo `F05182S;Film;F05182S-MV`). Si llega una referencia que no está en el catálogo, la app avisa; los códigos equivalentes se tratan como la misma referencia. También se configura si en las salidas hay que localizar el palet concreto y el **aviso de llegada** al cliente (contacto y correo).
+
+### 5. Dónde queda en SharePoint (Almacen Burriana)
+
+- **CONTROL ALMACEN BURRIANA.xlsx**: hojas Resumen stock, Stock (con la ubicación de cada palet), Entradas, Salidas, Movimientos y Clientes. Lo rehace la app: **no escribas en ella**, se pierde. Solo se guarda en SharePoint (lleva el stock de todos los clientes, no se reenvía).
+- Una carpeta por operación, **«ENTRADA E-2026-0001»**, **«SALIDA S-2026-0001»** o **«ENTRADA MANUAL DE INVENTARIO I-2026-0001»**, con su Excel y las fotos (incluidas las de las incidencias).
+
+### Si algo falla
+
+- **«No hay conexión con el sistema»:** la app no ha podido hablar con Odoo en ese momento. Espera unos segundos y repite; si pasa siempre, avisa a la oficina de Sevilla.
+- **«No hay conexión. Inténtalo de nuevo.»:** el móvil no ha podido enviar la foto o la petición (poca cobertura). Repite con mejor señal.
+- **Un palet sale con aviso amarillo:** léelo; casi siempre se arregla con **📝 Corregir** (dato mal leído) o **Quitar** (palet repetido).
+- **La app no muestra lo último que se ha cambiado:** cierra la app del todo y ábrela otra vez.
+
 
 ## Dónde queda todo en SharePoint (Automatizacion)
 

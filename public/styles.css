@@ -332,3 +332,6 @@ textarea { min-height: 72px; resize: vertical; font-family: inherit; line-height
 .sp-aviso p { margin: 6px 0; }
 .acciones { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
 .btn.mini { width: auto; min-width: 44px; min-height: 44px; padding: 4px 10px; font-size: 1.1rem; line-height: 1; }
+.guia img { display: block; width: 100%; max-width: 340px; height: auto; margin: 12px auto; border-radius: 14px; border: 1px solid var(--line); }
+.guia h3 { margin: 20px 0 4px; }
+.guia h4 { margin: 16px 0 2px; color: var(--brand); }
