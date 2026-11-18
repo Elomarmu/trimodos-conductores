@@ -787,17 +787,18 @@ def test_palet_sin_codigo_solo_en_inventario_y_con_ubicacion(cliente):
     sin_ubic = alta(sscc="SIN CODIGO").json()["palet"]
     assert sin_ubic["estado"] == "discrepancia" and "ubicación" in sin_ubic["motivo"]   # sin ubicación no se acepta
     # se corrige poniendo la ubicación (la elegida en pantalla) y se acepta
-    r = cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": sin_ubic["id"], "ref": "VARIOS", "lote": "L1", "kg": 50, "sscc": "sin código", "ubicacion": "S7"})
+    r = cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": sin_ubic["id"], "ref": "VARIOS", "lote": "L1", "kg": 50, "sscc": "", "sin_codigo": True, "ubicacion": "S7"})
     p = r.json()["palet"]
     assert p["estado"] == "ok" and p["sin_codigo"] and p["ubicacion"] == "S7" and p["sscc"].startswith("SCI")
     # directamente con ubicación
-    q = alta(sscc="Sin Codigo", ubicacion="E6").json()["palet"]
+    q = alta(sin_codigo=True, ubicacion="E6").json()["palet"]
     assert q["estado"] == "ok" and q["sin_codigo"] and q["sscc"] != p["sscc"]
+    assert alta(sscc="sin código", ubicacion="E6").json()["palet"]["sin_codigo"]   # escribirlo también vale
     # un palet sin nada de código ni «SIN CODIGO» sigue dando aviso
     assert alta(sscc="", ubicacion="E6").json()["palet"]["estado"] == "discrepancia"
     cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True})
     st = [x for x in cliente.get("/api/stock/stock").json()["palets"] if x["sin_codigo"]]
-    assert len(st) == 2 and {x["ubicacion"] for x in st} == {"S7", "E6"}
+    assert len(st) == 3 and {x["ubicacion"] for x in st} == {"S7", "E6"}
     # en una entrada con albarán no vale
     e = cliente.post("/api/stock/entradas", json={"cliente": "ALIPLAST", "fotos": [FOTO], "albaran": {"numero": "DDT-SC-1", "fecha": "2026-11-18", "total_palets": 1, "total_kg": 50,
                      "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 1, "kg": 50}], "dudas": []}}).json()

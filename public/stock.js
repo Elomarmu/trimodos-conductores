@@ -192,7 +192,7 @@ function pintarEntrada(e) {
   const cerrada = e.estado === "cerrada";
   const inv = e.tipo === "inventario";
   $("se-titulo").textContent = inv ? `Entrada manual de inventario ${e.id}` : `Entrada ${e.id}`;
-  document.querySelector('label[for="se-m-sscc"]').textContent = inv ? "Código del palet (el número bajo el código de barras). Si no lo tiene, escribe SIN CODIGO y pon la ubicación" : "Código del palet (el número bajo el código de barras)";
+  $("se-m-sincod-campo").hidden = !inv || cerrada;
   $("se-lineas-titulo").textContent = inv ? "Referencias apuntadas" : "Lo que dice el albarán";
   $("se-cerrar").textContent = inv ? "Terminar la entrada de inventario" : "Terminar la descarga";
   $("se-barras").textContent = inv ? "Leer el código de barras de un palet" : "Escanear códigos de barras";
@@ -272,29 +272,35 @@ function corregirPaletEntrada(p) {
   stk.corrigiendo = p.id;
   const det = $("se-manual").closest("details");
   det.hidden = false; det.open = true;
-  $("se-m-ref").value = p.ref || ""; $("se-m-lote").value = p.lote || ""; $("se-m-kg").value = p.kg ? String(p.kg) : ""; $("se-m-sscc").value = p.sin_codigo ? "SIN CODIGO" : p.sscc || "";
+  $("se-m-ref").value = p.ref || ""; $("se-m-lote").value = p.lote || ""; $("se-m-kg").value = p.kg ? String(p.kg) : ""; $("se-m-sscc").value = p.sin_codigo ? "" : p.sscc || "";
+  $("se-m-sincod").checked = !!p.sin_codigo; $("se-m-sscc").disabled = !!p.sin_codigo;
   $("se-m-corrigiendo").hidden = false;
   $("se-m-corrigiendo-txt").textContent = `Corrigiendo el palet ${p.id}. Cambia lo que esté mal y pulsa «Guardar corrección».`;
   $("se-m-guardar").textContent = "Guardar corrección";
   det.scrollIntoView({ behavior: "smooth", block: "center" });
 }
+$("se-m-sincod").addEventListener("change", () => {
+  $("se-m-sscc").disabled = $("se-m-sincod").checked;
+  if ($("se-m-sincod").checked) $("se-m-sscc").value = "";
+});
 function terminarCorreccion() {
   stk.corrigiendo = null;
   $("se-m-corrigiendo").hidden = true;
   $("se-m-guardar").textContent = "Añadir el palet";
   $("se-manual").reset();
+  $("se-m-sscc").disabled = false;
 }
 $("se-m-cancelar").addEventListener("click", terminarCorreccion);
 $("se-manual").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const kg = parseNum($("se-m-kg").value);
-  const datos = { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim() };
+  const datos = { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim(), sin_codigo: $("se-m-sincod").checked };
   const corr = stk.corrigiendo;
   const r = corr
     ? await conCarga("Guardando la corrección…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/corregir`, { ...datos, palet: corr, ubicacion: $("se-ubic").value.trim() }))
     : await conCarga("Añadiendo…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`, { ...datos, ubicacion: $("se-ubic").value.trim() }));
   if (!r) return;
-  if (corr) terminarCorreccion(); else $("se-manual").reset();
+  if (corr) terminarCorreccion(); else { $("se-manual").reset(); $("se-m-sscc").disabled = false; }
   pintarEntrada(r.entrada);
   if (corr) $("se-aviso-palet").replaceChildren(h("div", { class: "banner " + (r.palet.estado === "ok" ? "info" : "warn") },
     r.palet.estado === "ok" ? `✓ Palet ${r.palet.id} corregido: ahora coincide con el albarán.` : "⚠ Corregido, pero sigue con aviso: " + r.palet.motivo));
@@ -456,6 +462,10 @@ async function pintarListaSalida(s) {
   campo.hidden = !stk.disponibles.length;
   sel.replaceChildren(h("option", { value: "" }, `— Elegir (${stk.disponibles.length} disponibles) —`),
     ...stk.disponibles.map((x) => h("option", { value: x.codigo }, `${x.sin_codigo ? "SIN CÓDIGO (" + x.palet + ")" : x.codigo} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""} · 📍 ${x.ubicacion || "sin ubicación"} · entró ${fechaEs(x.fecha_entrada)}`)));
+  const sc = stk.disponibles.filter((x) => x.sin_codigo);
+  $("ss-sincod-campo").hidden = !sc.length;
+  $("ss-m-sincod").replaceChildren(h("option", { value: "" }, `— Elegir (${sc.length} sin código) —`),
+    ...sc.map((x) => h("option", { value: x.codigo }, `${x.palet} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""} · 📍 ${x.ubicacion || "sin ubicación"}`)));
   // Dónde está el material pedido: por cada línea, las ubicaciones con los palets que quedan por cargar
   for (const l of s.lineas) {
     const el = $("ss-ubic-" + l.linea);
@@ -466,6 +476,11 @@ async function pintarListaSalida(s) {
     el.textContent = txt ? "📍 Está en: " + txt : "No hay palets de esta referencia en el almacén.";
   }
 }
+$("ss-m-sincod").addEventListener("change", () => {
+  const x = (stk.disponibles || []).find((y) => y.codigo === $("ss-m-sincod").value);
+  if (!x) return;
+  $("ss-m-sscc").value = x.codigo; $("ss-m-ref").value = x.ref || ""; $("ss-m-lote").value = x.lote || "";
+});
 $("ss-m-lista").addEventListener("change", () => {
   const x = (stk.disponibles || []).find((y) => y.codigo === $("ss-m-lista").value);
   if (!x) return;
@@ -630,6 +645,7 @@ function pintarControl(k) {
   $("sc2-titulo").textContent = `Control de inventario ${k.id}`;
   $("sc2-cabecera").textContent = `${k.cliente.nombre} · en el sistema ${r.esperados} palets · contados ${r.contados} · correctos ${r.bien} · faltan ${r.faltan.length} · sobran ${r.sobran.length}` + (cerrado ? " · CERRADO" : "");
   for (const i of ["sc2-barras", "sc2-form", "sc2-cierre"]) $(i).hidden = cerrado;
+  if (!cerrado) cargarSinCodigoControl(k);
   const caja = (clase, texto) => h("div", { class: "fila" }, h("span", { class: clase }, texto));
   $("sc2-resultado").replaceChildren(
     ...(r.sobran.length ? [h("h2", {}, `Sobran (${r.sobran.length}): encontrados y no están en el sistema`)] : []),
@@ -639,6 +655,19 @@ function pintarControl(k) {
     ...(!r.faltan.length && !r.sobran.length ? [h("p", { class: "hint" }, r.contados ? "De momento todo lo contado coincide con el sistema." : "Escanea el primer palet.")] : []),
     ...(cerrado && k.bajas.length ? [h("div", { class: "banner warn" }, `Se dieron de baja ${k.bajas.length} palets del sistema.`)] : []));
 }
+// Palets sin código del inventario del cliente del control: se eligen de la lista (no tienen etiqueta que escanear)
+async function cargarSinCodigoControl(k) {
+  if (stk.ctlSinId === k.id) return;
+  stk.ctlSinId = k.id;
+  $("sc2-sincod-campo").hidden = true;
+  let r;
+  try { r = await api("/api/stock/stock" + (k.cliente.codigo ? "?cliente=" + encodeURIComponent(k.cliente.codigo) : "")); } catch { stk.ctlSinId = null; return; }
+  const sc = r.palets.filter((p) => p.sin_codigo);
+  $("sc2-sincod-campo").hidden = !sc.length;
+  $("sc2-sincod").replaceChildren(h("option", { value: "" }, `— Elegir (${sc.length} sin código) —`),
+    ...sc.map((p) => h("option", { value: p.sscc }, `${p.id} · ${p.ref || "¿?"}${p.lote ? " · lote " + p.lote : ""} · 📍 ${p.ubicacion || "sin ubicación"}`)));
+}
+$("sc2-sincod").addEventListener("change", () => { if ($("sc2-sincod").value) $("sc2-codigo").value = $("sc2-sincod").value; });
 const contarPalet = async (codigo, origen) => {
   const r = await post(`/api/stock/controles/${encodeURIComponent(stk.control.id)}/palet`, { sscc: codigo, origen });
   pintarControl(r.control);
@@ -659,7 +688,7 @@ $("sc2-form").addEventListener("submit", async (ev) => {
   if (!codigo) return;
   const r = await conCarga("Contando…", () => contarPalet(codigo, ""));
   if (!r) return;
-  $("sc2-codigo").value = "";
+  $("sc2-codigo").value = ""; $("sc2-sincod").value = "";
   $("sc2-aviso").replaceChildren(h("div", { class: "banner " + (!r.repetido && r.palet.estado === "ok" ? "info" : "warn") },
     r.repetido ? `⚠ ${codigo} ya estaba contado.` : r.palet.estado === "ok" ? `✓ ${r.palet.ref || ""} · ${codigo}` : `⚠ ${codigo}: ${r.palet.motivo}`));
 });

@@ -419,6 +419,7 @@
         <div class="field"><label for="se-m-lote">Lote</label><input id="se-m-lote" type="text" autocomplete="off"></div>
         <div class="field"><label for="se-m-kg">Kg</label><input id="se-m-kg" type="text" inputmode="numeric" autocomplete="off"></div>
       </div>
+      <label class="hint" id="se-m-sincod-campo" hidden><input id="se-m-sincod" type="checkbox"> Este palet no tiene código (mercancía no normativa; hace falta elegir su ubicación)</label>
       <div class="field"><label for="se-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="se-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
       <button type="submit" id="se-m-guardar" class="btn secondary small">Añadir el palet</button>
     </form>
@@ -488,6 +489,7 @@
   <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
     <form id="ss-manual" novalidate>
       <div class="field" id="ss-lista-campo" hidden><label for="ss-m-lista">Palets del almacén que se pueden cargar (los más antiguos primero)</label><select id="ss-m-lista"></select></div>
+      <div class="field" id="ss-sincod-campo" hidden><label for="ss-m-sincod">Palets sin código del almacén</label><select id="ss-m-sincod"></select></div>
       <div class="field"><label for="ss-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="ss-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
       <div class="row2">
         <div class="field"><label for="ss-m-ref">Referencia</label><input id="ss-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
@@ -581,6 +583,7 @@
   <p id="sc2-cabecera" class="banner info"></p>
   <button id="sc2-barras" type="button" class="btn primary huge">Escanear códigos de barras</button>
   <form id="sc2-form" class="pkg" novalidate>
+    <div class="field" id="sc2-sincod-campo" hidden><label for="sc2-sincod">Palets sin código del inventario (elige el que has encontrado)</label><select id="sc2-sincod"></select></div>
     <div class="field"><label for="sc2-codigo">O escribe el código del palet</label><input id="sc2-codigo" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
     <button type="submit" class="btn secondary small">Contar el palet</button>
   </form>

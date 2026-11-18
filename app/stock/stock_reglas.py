@@ -429,7 +429,7 @@ def _verificar_inventario(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]
     elif sin_codigo and not etiqueta.get("ubicacion"):
         palet.update(estado="discrepancia", motivo="Palet sin código: hace falta indicar su ubicación para aceptarlo.")
     elif not codigo and not sin_codigo:
-        palet.update(estado="discrepancia", motivo="Falta el código del palet (hace falta para poder controlarlo y sacarlo después). Si no tiene, escribe SIN CODIGO.")
+        palet.update(estado="discrepancia", motivo="Falta el código del palet (hace falta para poder controlarlo y sacarlo después). Si no tiene, marca «Sin código».")
     return palet
 
 

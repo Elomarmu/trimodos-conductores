@@ -179,6 +179,7 @@ class PaletManual(BaseModel):
     kg: int | None = Field(None, ge=0)
     bultos: int | None = Field(None, ge=0)
     origen: str = Field("", max_length=10)   # «barras» si el código se ha leído con la cámara; vacío: escrito o elegido de la lista
+    sin_codigo: bool = False   # casilla «sin código» (solo entrada manual de inventario)
     ubicacion: str = Field("", max_length=40)   # zona del almacén donde se deja el palet (solo en entradas)
 
 
@@ -521,7 +522,7 @@ def entrada_palet_manual(ident: str, body: PaletManual):
     store = get_store()
     e = _documento(store, "entrada", ident)
     _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
-    sin_codigo = R.es_sin_codigo(body.sscc)
+    sin_codigo = body.sin_codigo or R.es_sin_codigo(body.sscc)
     if sin_codigo and e.get("tipo") != "inventario":
         raise AppError("«SIN CODIGO» solo vale en la entrada manual de inventario. En una entrada con albarán el palet tiene que traer su código.", 400, "sin_codigo_no_vale")
     codigo = "" if sin_codigo else R.sscc(body.sscc)
@@ -549,7 +550,7 @@ def entrada_corregir(ident: str, body: Corregir):
     p = next((p for p in e["palets"] if p["id"] == body.palet and p.get("estado_alta") != "quitado"), None)
     if not p:
         raise AppError("No encuentro ese palet.", 404, "no_encontrado")
-    sin_codigo = R.es_sin_codigo(body.sscc)
+    sin_codigo = body.sin_codigo or R.es_sin_codigo(body.sscc)
     if sin_codigo and e.get("tipo") != "inventario":
         raise AppError("«SIN CODIGO» solo vale en la entrada manual de inventario. En una entrada con albarán el palet tiene que traer su código.", 400, "sin_codigo_no_vale")
     codigo = "" if sin_codigo else R.sscc(body.sscc)
