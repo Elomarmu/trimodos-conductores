@@ -88,6 +88,12 @@ def destinatarios() -> str:
     return os.environ.get("STOCK_CORREO_PARA", "carmelomartinez@stinsa.com")
 
 
+def destinatarios_inventario() -> str:
+    """A quién va el correo de la entrada manual de inventario y de los controles de inventario: la oficina
+    (traficolevante@ y Carmelo). Variable STOCK_INVENTARIO_PARA (varias direcciones separadas por coma)."""
+    return os.environ.get("STOCK_INVENTARIO_PARA", "traficolevante@stinsa.com,carmelomartinez@stinsa.com")
+
+
 def enviar_n8n(datos: dict) -> bool:
     """Flujo de n8n «STOCK BURRIANA» (STOCK_AVISOS_WEBHOOK): sube a SharePoint y manda el correo. Nunca para el trabajo."""
     url = os.environ.get("STOCK_AVISOS_WEBHOOK", "")
@@ -162,6 +168,7 @@ class SalidaIn(BaseModel):
 
 class Etiqueta(BaseModel):
     foto: PA.Archivo
+    ubicacion: str = Field("", max_length=40)   # zona del almacén donde se deja el palet (solo en entradas)
 
 
 class PaletManual(BaseModel):
@@ -172,6 +179,7 @@ class PaletManual(BaseModel):
     kg: int | None = Field(None, ge=0)
     bultos: int | None = Field(None, ge=0)
     origen: str = Field("", max_length=10)   # «barras» si el código se ha leído con la cámara; vacío: escrito o elegido de la lista
+    ubicacion: str = Field("", max_length=40)   # zona del almacén donde se deja el palet (solo en entradas)
 
 
 class Quitar(BaseModel):
@@ -311,7 +319,7 @@ def _detalle_entrada(e: dict) -> dict:
     return {**_resumen_entrada(e), "albaran_datos": e["albaran"], "lineas": R.estado_lineas(e), "palets": R.activos(e),
             "avisos": e.get("avisos") or [], "pendientes": R.pendientes_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else [],
             "discrepancias_lista": R.discrepancias_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else e.get("discrepancias_cierre") or [],
-            "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or ""}
+            "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or "", "ubicacion": e.get("ubicacion") or ""}
 
 
 def _resumen_salida(s: dict) -> dict:
@@ -469,14 +477,16 @@ def entrada_detalle(ident: str):
     return _detalle_entrada(_documento(get_store(), "entrada", ident))
 
 
-def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "") -> dict:
+def _anadir_palet_entrada(store, e: dict, etiqueta: dict, foto: PA.Archivo | None, manual: bool, origen: str = "", ubicacion: str = "") -> dict:
     entradas, salidas = store.listar("entrada"), store.listar("salida")
     etiqueta = {**etiqueta, "ref": R.canonica(_cliente_de(store, e), etiqueta.get("ref"))}
     palet = R.verificar_palet(e, etiqueta, _sscc_en_stock(store, entradas, salidas))
     if e.get("tipo") == "inventario":
         R.recontar_inventario(e)
     n = max([int(p["id"].rsplit("-", 1)[1]) for p in e["palets"]] or [0]) + 1
-    palet.update(id=f"{e['id']}-{n:02d}", manual=manual, hora=ahora(), foto="", origen=origen)
+    ubicacion = R.limpiar_ubicacion(ubicacion)
+    palet.update(id=f"{e['id']}-{n:02d}", manual=manual, hora=ahora(), foto="", origen=origen, ubicacion=ubicacion)
+    e["ubicacion"] = ubicacion   # la ubicación «de ahora»: los siguientes palets se dejan en la misma hasta que se cambie
     if foto:
         palet["foto"] = _guardar_foto(store, e["id"], f"{n:02d} {etiqueta.get('ref') or 'palet'}", foto)
     e["palets"].append(palet)
@@ -494,7 +504,7 @@ def entrada_etiqueta(ident: str, body: Etiqueta):
     etiqueta = R.limpiar_etiqueta(_leer(L.leer_etiqueta, datos, tipo))
     if not (etiqueta["sscc"] or etiqueta["ref"] or etiqueta["descripcion"]):
         raise AppError("No se lee la etiqueta. Haz otra foto con más luz o apunta el palet a mano.", 422, "etiqueta_ilegible")
-    palet = _anadir_palet_entrada(store, e, etiqueta, body.foto, False)
+    palet = _anadir_palet_entrada(store, e, etiqueta, body.foto, False, ubicacion=body.ubicacion)
     return {"palet": palet, "entrada": _detalle_entrada(e)}
 
 
@@ -510,7 +520,7 @@ def entrada_palet_manual(ident: str, body: PaletManual):
     exp = next((x for x in e.get("esperados") or [] if codigo and x["codigo"] == codigo), None)
     if exp and not body.ref:   # solo llega el código (leído con la cámara o elegido de la lista): lo demás sale del albarán
         datos.update(referencia=exp.get("ref") or "", lote=body.lote or exp.get("lote") or "", kg=body.kg if body.kg is not None else exp.get("kg"))
-    palet = _anadir_palet_entrada(store, e, R.limpiar_etiqueta(datos), None, body.origen != "barras", body.origen)
+    palet = _anadir_palet_entrada(store, e, R.limpiar_etiqueta(datos), None, body.origen != "barras", body.origen, body.ubicacion)
     return {"palet": palet, "entrada": _detalle_entrada(e)}
 
 
@@ -627,14 +637,17 @@ def _enviar_entrada(store, e: dict) -> tuple[bool, list[dict]]:
     html_ = _cuerpo_correo(f"Entrada {e['id']} · {e['cliente']['nombre']}",
                            f"Albarán <b>{html.escape(a.get('numero') or '—')}</b> del {html.escape('-'.join(reversed((a.get('fecha') or '').split('-'))))} · "
                            f"{html.escape(a.get('matricula') or '')} · {html.escape(a.get('transportista') or '')}",
-                           [f"{sum(l['verificados'] for l in lineas)} de {sum(l['esperados'] for l in lineas)} palets verificados con su etiqueta."]
+                           [(f"{len(R.activos(e))} palets apuntados." if e.get("tipo") == "inventario"
+                             else f"{sum(l['verificados'] for l in lineas)} de {sum(l['esperados'] for l in lineas)} palets verificados con su etiqueta.")]
+                           + [f"Ubicación: {', '.join(f'{u} ({n})' for u, n in R.resumen_ubicaciones(R.activos(e)))}."]
                            + _nota_antiguedad(store, e["cliente"]["codigo"]),
                            tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "", e.get("observaciones") or "", inc_html)
     inventario = e.get("tipo") == "inventario"
     ok = enviar_n8n({"evento": "inventario_cerrado" if inventario else "entrada_cerrada", "carpeta": carpeta,
                      "asunto": ("⚠ " if e.get("observaciones") else "") + (f"Almacén Burriana · Entrada manual de inventario {e['id']} · {e['cliente']['nombre']}" if inventario
                               else f"Almacén Burriana · Entrada {e['id']} · {e['cliente']['nombre']} · albarán {a.get('numero') or ''}".strip()),
-                     "html": html_, "archivos": archivos, "fotos": fotos})
+                     "html": html_, "archivos": archivos, "fotos": fotos,
+                     **({"para": destinatarios_inventario()} if inventario else {})})
     return ok, archivos[:1]
 
 
@@ -1143,9 +1156,9 @@ def control_cerrar(ident: str, body: CerrarControl):
              + f"<p style='{estilo};color:#595959'>{html.escape(R.ALMACEN)}.</p>")
     libro = {"nombre": X.LIBRO, "carpeta": "", "correo": False, "b64": base64.b64encode(X.libro_control(entradas, salidas, cli, controles=store.listar("control"))).decode()}
     enviado = enviar_n8n({"evento": "control_cerrado", "carpeta": "", "asunto": f"Almacén Burriana · Control de inventario {c['id']} · {c['cliente']['nombre']}"
-                          + (f" · {len(res['faltan'])} faltan" if res["faltan"] else ""), "html": html_, "archivos": [libro], "fotos": []})
+                          + (f" · {len(res['faltan'])} faltan" if res["faltan"] else ""), "html": html_, "archivos": [libro], "fotos": [], "para": destinatarios_inventario()})
     log.info("control %s cerrado: %s contados, %s faltan, %s sobran, bajas=%s", c["id"], res["contados"], len(res["faltan"]), len(res["sobran"]), len(bajas))
-    return {"control": _detalle_control(store, c), "enviado": enviado, "para": destinatarios()}
+    return {"control": _detalle_control(store, c), "enviado": enviado, "para": destinatarios_inventario()}
 
 
 @router.get("/stock")
@@ -1159,13 +1172,15 @@ def stock_actual(cliente: str = Query("", max_length=40)):
         p["dias"] = R.dias_entre(p["fecha_entrada"], hoy)
         p["antiguo"] = p["dias"] > R.DIAS_ESTOCAJE_AVISO
         g = grupos.setdefault((p["cliente"], p["ref"]), {"cliente": p["cliente"], "cliente_nombre": p["cliente_nombre"], "ref": p["ref"],
-                              "descripcion": p["descripcion"], "palets": 0, "kg": 0, "desde": p["fecha_entrada"], "antiguos": 0})
+                              "descripcion": p["descripcion"], "palets": 0, "kg": 0, "desde": p["fecha_entrada"], "antiguos": 0, "_p": []})
+        g["_p"].append(p)
         g["palets"] += 1
         g["antiguos"] += 1 if p["antiguo"] else 0
         g["kg"] += p["kg"] or 0
         g["desde"] = min(g["desde"], p["fecha_entrada"])
     for g in grupos.values():
         g["dias"] = R.dias_entre(g["desde"], hoy)
+        g["ubicaciones"] = [{"ubicacion": u, "palets": n} for u, n in R.resumen_ubicaciones(g.pop("_p"))]
     return {"total_palets": len(palets), "total_kg": sum(p["kg"] or 0 for p in palets), "antiguos": sum(1 for p in palets if p["antiguo"]), "dias_aviso": R.DIAS_ESTOCAJE_AVISO,
             "resumen": sorted(grupos.values(), key=lambda g: (g["cliente_nombre"], g["ref"])),
             "palets": palets}

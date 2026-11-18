@@ -58,6 +58,20 @@ def entero(valor) -> int | None:
         return None
 
 
+def limpiar_ubicacion(texto) -> str:
+    """Zona del almacén donde se deja un palet (texto libre corto: «A-12», «Nave 2 muelle»). Siempre en mayúsculas y sin espacios de más."""
+    return " ".join(str(texto or "").split()).upper()[:30]
+
+
+def resumen_ubicaciones(palets: list[dict]) -> list[tuple[str, int]]:
+    """[(ubicación, nº de palets)] de más a menos palets; los que no tienen ubicación salen como «sin ubicación»."""
+    cuenta: dict[str, int] = {}
+    for p in palets:
+        u = p.get("ubicacion") or "sin ubicación"
+        cuenta[u] = cuenta.get(u, 0) + 1
+    return sorted(cuenta.items(), key=lambda x: (x[0] == "sin ubicación", -x[1], x[0]))
+
+
 def sscc(texto) -> str:
     """Código del palet de la etiqueta, comparable venga como venga: SSCC de 18 cifras (puede traer «(00)» o espacios),
     código de fábrica de 10 cifras, o código con letras como el «LP26-0236823» de Aliplast. Sin letras se devuelve solo con
@@ -427,7 +441,8 @@ def disponibles_salida(salida: dict, existencias: list[dict], otras_salidas: lis
     res = [p for p in existencias if p["cliente"] == cod and p["id"] not in tomados and p.get("sscc")
            and ((p["sscc"] in lista) if lista else (not refs or referencia(p["ref"]) in refs))]
     res.sort(key=lambda p: (p["fecha_entrada"], p["id"]))
-    return [{"codigo": p["sscc"], "ref": p["ref"], "lote": p.get("lote") or "", "kg": p.get("kg"), "palet": p["id"], "fecha_entrada": p["fecha_entrada"]}
+    return [{"codigo": p["sscc"], "ref": p["ref"], "lote": p.get("lote") or "", "kg": p.get("kg"), "palet": p["id"], "fecha_entrada": p["fecha_entrada"],
+             "ubicacion": p.get("ubicacion") or "", "linea": _linea_salida(salida["lineas"], p)}
             for p in res[:tope]]
 
 
@@ -487,7 +502,7 @@ def stock(entradas: list[dict], salidas: list[dict], controles: list[dict] | Non
                 continue
             res.append({"id": p["id"], "cliente": e["cliente"]["codigo"], "cliente_nombre": e["cliente"]["nombre"], "ref": p["ref"],
                         "descripcion": p["descripcion"], "lote": p["lote"], "sscc": p["sscc"], "kg": p["kg"], "bultos": p.get("bultos"),
-                        "fecha_prod": p.get("fecha_prod") or "", "inventario": e.get("tipo") == "inventario", "entrada": e["id"], "albaran": e["albaran"].get("numero"), "fecha_entrada": fecha_entrada(e),
+                        "fecha_prod": p.get("fecha_prod") or "", "ubicacion": p.get("ubicacion") or "", "inventario": e.get("tipo") == "inventario", "entrada": e["id"], "albaran": e["albaran"].get("numero"), "fecha_entrada": fecha_entrada(e),
                         "cliente_final": e["albaran"].get("cliente_final") or ""})
     return res
 
@@ -579,7 +594,7 @@ def _salida_palet(stock_palet: dict | None, etiqueta: dict, estado: str, motivo:
     base = stock_palet or {}
     return {"palet_id": base.get("id"), "sscc": etiqueta.get("sscc") or base.get("sscc") or "", "ref": etiqueta.get("ref") or base.get("ref") or "",
             "descripcion": base.get("descripcion") or etiqueta.get("descripcion") or "", "lote": etiqueta.get("lote") or base.get("lote") or "",
-            "kg": base.get("kg") or etiqueta.get("kg"), "linea": linea, "estado": estado, "motivo": motivo, "aviso": ""}
+            "kg": base.get("kg") or etiqueta.get("kg"), "ubicacion": base.get("ubicacion") or "", "linea": linea, "estado": estado, "motivo": motivo, "aviso": ""}
 
 
 def estado_lineas_salida(salida: dict) -> list[dict]:

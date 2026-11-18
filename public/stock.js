@@ -199,6 +199,8 @@ function pintarEntrada(e) {
     : `${e.cliente.nombre}${e.cliente_final ? " (para " + e.cliente_final + ")" : ""} · albarán ${e.albaran || "—"} del ${fechaEs(e.fecha)} · entrada en almacén ${fechaEs(e.fecha_entrada)} · ${e.verificados} de ${e.esperados} palets verificados` + (cerrada ? " · CERRADA" : "");
   document.querySelector('label[for="se-etq-camara"]').hidden = cerrada;
   $("se-barras").hidden = cerrada;
+  $("se-ubic-campo").hidden = cerrada;
+  if (stk.ubicEntrada !== e.id) { $("se-ubic").value = e.ubicacion || ""; stk.ubicEntrada = e.id; }   // la que se escribe se conserva mientras se sigue en la misma entrada
   pintarListaEntrada(e);
   $("se-cierre").hidden = cerrada;
   $("se-revisar").hidden = !e.por_revisar;
@@ -213,6 +215,7 @@ function pintarEntrada(e) {
   $("se-palets").replaceChildren(...e.palets.map((p) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", p.fecha_prod ? ` · prod. ${fechaEs(p.fecha_prod)}` : "", h("br"),
       h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
+      h("br"), h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación"),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
     cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("entrada", p.id, p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
     cerrada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletEntrada(p) }, "Quitar"))));
@@ -222,7 +225,7 @@ $("se-etq-camara").addEventListener("change", async (ev) => {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = "";
   if (!file) return;
-  const r = await conCarga("Leyendo la etiqueta…", async () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/etiqueta`, { foto: await reducir(file) }));
+  const r = await conCarga("Leyendo la etiqueta…", async () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/etiqueta`, { foto: await reducir(file), ubicacion: $("se-ubic").value.trim() }));
   if (!r) return;
   pintarEntrada(r.entrada);
   const p = r.palet;
@@ -252,7 +255,7 @@ $("se-barras").addEventListener("click", () => stk.entrada.tipo === "inventario"
   titulo: `Entrada ${stk.entrada.id}: escanear palets`,
   yaEsta: (c) => stk.entrada.palets.some((p) => p.sscc === c),
   alLeer: async (codigo) => {
-    const r = await post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`, { sscc: codigo, origen: "barras" });
+    const r = await post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`, { sscc: codigo, origen: "barras", ubicacion: $("se-ubic").value.trim() });
     pintarEntrada(r.entrada);
     const p = r.palet;
     return p.estado === "ok" ? { ok: true, texto: `✓ ${p.ref} · ${codigo}${p.kg ? " · " + n(p.kg) + " kg" : ""}: coincide con el albarán.` } : { ok: false, texto: `⚠ ${codigo}: ${p.motivo}` };
@@ -262,7 +265,7 @@ $("se-manual").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const kg = parseNum($("se-m-kg").value);
   const r = await conCarga("Añadiendo…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`,
-    { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim() }));
+    { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim(), ubicacion: $("se-ubic").value.trim() }));
   if (r) { $("se-manual").reset(); pintarEntrada(r.entrada); }
 });
 async function quitarPaletEntrada(p) {
@@ -386,12 +389,14 @@ function pintarSalida(s) {
   $("ss-revisar-avisos").replaceChildren(...avisosHtml(s.avisos || []));
   $("ss-manual").closest("details").hidden = cargada;
   $("ss-lineas").replaceChildren(...s.lineas.map((l) => h("div", { class: "fila" },
-    h("span", {}, h("b", {}, l.ref || l.descripcion), l.ref && l.descripcion ? " · " + l.descripcion : ""),
+    h("span", {}, h("b", {}, l.ref || l.descripcion), l.ref && l.descripcion ? " · " + l.descripcion : "", cargada ? null : h("br"),
+      cargada ? null : h("span", { class: "hint", id: "ss-ubic-" + l.linea }, "")),
     h("span", { class: l.cargados === l.pedidos ? "code" : "nota" }, `${l.cargados}/${l.pedidos}`))));
   $("ss-palets-titulo").hidden = !s.palets.length;
   $("ss-palets").replaceChildren(...s.palets.map((p) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
       h("span", { class: "hint" }, (p.palet_id || "sin stock") + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
+      p.palet_id ? h("br") : null, p.palet_id ? h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación") : null,
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null,
       p.aviso ? h("br") : null, p.aviso ? h("span", { class: "hint" }, "ℹ " + p.aviso) : null),
     cargada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("salida", String(p.n), p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
@@ -419,7 +424,16 @@ async function pintarListaSalida(s) {
   if (!stk.salida || stk.salida.id !== s.id) return;   // se ha cambiado de salida mientras tanto
   campo.hidden = !stk.disponibles.length;
   sel.replaceChildren(h("option", { value: "" }, `— Elegir (${stk.disponibles.length} disponibles) —`),
-    ...stk.disponibles.map((x) => h("option", { value: x.codigo }, `${x.codigo} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""} · entró ${fechaEs(x.fecha_entrada)}`)));
+    ...stk.disponibles.map((x) => h("option", { value: x.codigo }, `${x.codigo} · ${x.ref || "¿?"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""} · 📍 ${x.ubicacion || "sin ubicación"} · entró ${fechaEs(x.fecha_entrada)}`)));
+  // Dónde está el material pedido: por cada línea, las ubicaciones con los palets que quedan por cargar
+  for (const l of s.lineas) {
+    const el = $("ss-ubic-" + l.linea);
+    if (!el) continue;
+    const cuenta = {};
+    for (const x of stk.disponibles.filter((y) => y.linea === l.linea)) cuenta[x.ubicacion || "sin ubicación"] = (cuenta[x.ubicacion || "sin ubicación"] || 0) + 1;
+    const txt = Object.entries(cuenta).map(([u, k]) => `${u} (${k})`).join(" · ");
+    el.textContent = txt ? "📍 Está en: " + txt : "No hay palets de esta referencia en el almacén.";
+  }
 }
 $("ss-m-lista").addEventListener("change", () => {
   const x = (stk.disponibles || []).find((y) => y.codigo === $("ss-m-lista").value);
@@ -485,6 +499,7 @@ async function cargarStock() {
   $("sa-lista").replaceChildren(...(r.resumen.length ? r.resumen.map((g) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, g.cliente_nombre), h("br"), `${g.ref || "—"}${g.descripcion ? " · " + g.descripcion : ""}`, h("br"),
       h("span", { class: "hint" }, `${n(g.kg)} kg · desde hace ${g.dias} días` + (lotes(g) ? " · lote " + lotes(g) : "")),
+      h("br"), h("span", { class: "hint" }, "📍 " + (g.ubicaciones || []).map((u) => `${u.ubicacion} (${u.palets})`).join(" · ")),
       g.antiguos ? h("br") : null, g.antiguos ? h("span", { class: "nota" }, `⏳ ${g.antiguos} con más de un mes`) : null),
     h("span", { class: "code" }, `${g.palets} palets`))) : [h("p", { class: "hint" }, "El almacén está vacío (todavía no hay entradas cerradas).")]));
   $("sa-descargas").replaceChildren();
