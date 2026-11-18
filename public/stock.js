@@ -592,12 +592,17 @@ function abrirIncidencia(tipo, clave, p) {
   $("sin2-texto").value = ""; $("sin2-fotos").textContent = "";
   go("stock-incidencia");
 }
-$("sin2-foto").addEventListener("change", async (ev) => {
-  const files = [...(ev.target.files || [])].slice(0, 4 - stk.inc.fotos.length);
+async function alElegirFotosIncidencia(ev) {
+  const libres = 4 - stk.inc.fotos.length;
+  const files = [...(ev.target.files || [])].slice(0, Math.max(libres, 0));
+  const sobran = (ev.target.files || []).length > files.length;
   ev.target.value = "";
   try { for (const f of files) stk.inc.fotos.push(await reducir(f)); } catch (e) { return showError(e.message); }
-  $("sin2-fotos").textContent = stk.inc.fotos.length ? `📷 ${stk.inc.fotos.length} foto${stk.inc.fotos.length === 1 ? "" : "s"} lista${stk.inc.fotos.length === 1 ? "" : "s"}` : "";
-});
+  const k = stk.inc.fotos.length;
+  $("sin2-fotos").textContent = k ? `📷 ${k} foto${k === 1 ? "" : "s"} lista${k === 1 ? "" : "s"} (máximo 4)` + (sobran ? " · las demás no caben" : "") : "";
+}
+$("sin2-foto").addEventListener("change", alElegirFotosIncidencia);      // cámara
+$("sin2-galeria").addEventListener("change", alElegirFotosIncidencia);   // galería / archivos
 $("sin2-volver").addEventListener("click", () => go(stk.inc.vuelta));
 $("sin2-guardar").addEventListener("click", async () => {
   const { tipo, clave, fotos, vuelta } = stk.inc, texto = $("sin2-texto").value.trim();
