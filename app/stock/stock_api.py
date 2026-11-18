@@ -193,6 +193,10 @@ class Cerrar(BaseModel):
     observaciones: str | None = Field(None, max_length=1000)   # incidencias de la descarga o la carga (si vienen, sustituyen a las guardadas)
 
 
+class AlbaranFirmado(BaseModel):
+    fotos: list[PA.Archivo] = Field(min_length=1, max_length=4)
+
+
 class Observaciones(BaseModel):
     texto: str = Field("", max_length=1000)
 
@@ -321,6 +325,7 @@ def _detalle_entrada(e: dict) -> dict:
             "avisos": e.get("avisos") or [], "pendientes": R.pendientes_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else [],
             "discrepancias_lista": R.discrepancias_entrada(e) if e["estado"] != R.ENTRADA_CERRADA else e.get("discrepancias_cierre") or [],
             "nota_cierre": e.get("nota_cierre") or "", "observaciones": e.get("observaciones") or "", "ubicacion": e.get("ubicacion") or "",
+            "albaran_firmado": e.get("albaran_firmado") or [], "exige_albaran_firmado": e.get("tipo") != "inventario",
             "ubicaciones_validas": [{"grupo": g, "zonas": z} for g, z in R.UBICACIONES]}
 
 
@@ -644,14 +649,14 @@ def _fotos_envio(store, op: dict, carpeta: str, cids: dict[str, str]) -> list[di
     return [dict(f, carpeta=carpeta, **({"inline": cids[f["nombre"]]} if f["nombre"] in cids else {})) for f in _fotos_de(store, op["id"])]
 
 
-def _cuerpo_correo(titulo: str, cabecera: str, filas_cab: list[str], tabla: str, disc: list[str], nota: str, observaciones: str = "", incidencias: str = "") -> str:
+def _cuerpo_correo(titulo: str, cabecera: str, filas_cab: list[str], tabla: str, disc: list[str], nota: str, observaciones: str = "", incidencias: str = "", firmado: bool = False) -> str:
     estilo = "font:11pt Calibri,Arial"
     inc = (f"<p style='{estilo};color:#C00000'><b>Incidencias en el almacén:</b><br>" + html.escape(observaciones).replace("\n", "<br>") + "</p>") if observaciones else ""
     d = (f"<p style='{estilo};color:#C00000'><b>Discrepancias aceptadas:</b><br>" + "<br>".join(html.escape(x) for x in disc)
          + (f"<br><i>{html.escape(nota)}</i>" if nota else "") + "</p>") if disc else f"<p style='{estilo}'>Sin discrepancias.</p>"
     return (f"<p style='{estilo}'><b>{html.escape(titulo)}</b></p><p style='{estilo}'>{cabecera}</p>"
             + "".join(f"<p style='{estilo}'>{x}</p>" for x in filas_cab) + inc + incidencias + tabla + d
-            + f"<p style='{estilo};color:#595959'>Se adjuntan la Excel y las fotos para reenviar al cliente. {html.escape(R.ALMACEN)}.</p>")
+            + f"<p style='{estilo};color:#595959'>Se adjuntan la Excel y las fotos para reenviar al cliente{', incluida la foto del albarán firmado en la recepción' if firmado else ''}. {html.escape(R.ALMACEN)}.</p>")
 
 
 def _nota_antiguedad(store, codigo: str) -> list[str]:
@@ -705,7 +710,7 @@ def _enviar_entrada(store, e: dict) -> tuple[bool, list[dict]]:
                              else f"{sum(l['verificados'] for l in lineas)} de {sum(l['esperados'] for l in lineas)} palets verificados con su etiqueta.")]
                            + [f"Ubicación: {', '.join(f'{u} ({n})' for u, n in R.resumen_ubicaciones(R.activos(e)))}."]
                            + _nota_antiguedad(store, e["cliente"]["codigo"]),
-                           tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "", e.get("observaciones") or "", inc_html)
+                           tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "", e.get("observaciones") or "", inc_html, bool(e.get("albaran_firmado")))
     inventario = e.get("tipo") == "inventario"
     ok = enviar_n8n({"evento": "inventario_cerrado" if inventario else "entrada_cerrada", "carpeta": carpeta,
                      "asunto": ("⚠ " if e.get("observaciones") else "") + (f"Almacén Burriana · Entrada manual de inventario {e['id']} · {e['cliente']['nombre']}" if inventario
@@ -750,7 +755,7 @@ def _aviso_llegada(store, e: dict) -> dict:
     av = cli.get("aviso_llegada") or {}
     if e.get("tipo") == "inventario" or not av.get("activo"):
         return {"activo": False}
-    docs = [f for f in _fotos_de(store, e["id"]) if f["nombre"].lower().startswith("albaran")]
+    docs = [f for f in _fotos_de(store, e["id"]) if f["nombre"].lower().startswith("albaran") and not f["nombre"].lower().startswith("albaran firmado")]
     num = _limpio(e["albaran"].get("numero") or e["id"])
     archivos = []
     for i, d in enumerate(docs, start=1):
@@ -808,6 +813,17 @@ def entrada_anular(ident: str, body: Anular):
     return {"anulada": e["id"], "estaba_cerrada": estaba_cerrada}
 
 
+@router.post("/entradas/{ident}/albaran-firmado")
+def entrada_albaran_firmado(ident: str, body: AlbaranFirmado):
+    """Foto del albarán firmado por el almacén como recepción de la mercancía. Sustituye a las anteriores y viaja en el correo de cierre."""
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
+    e["albaran_firmado"] = [_guardar_foto(store, e["id"], f"albaran firmado {i}", f) for i, f in enumerate(body.fotos, 1)]
+    store.escribir("entrada", e["id"], e)
+    return _detalle_entrada(e)
+
+
 @router.post("/entradas/{ident}/cerrar")
 def entrada_cerrar(ident: str, body: Cerrar):
     store = get_store()
@@ -816,6 +832,8 @@ def entrada_cerrar(ident: str, body: Cerrar):
     _exigir_revisada(e)
     if not R.activos(e):
         raise AppError("Todavía no hay ningún palet verificado.", 409, "sin_palets")
+    if e.get("tipo") != "inventario" and not e.get("albaran_firmado"):
+        raise AppError("Antes de terminar la descarga haz una foto del albarán firmado por nosotros como recepción de la mercancía.", 409, "falta_albaran_firmado")
     disc = R.discrepancias_entrada(e)
     if disc and not body.confirmado:
         raise AppError("Hay discrepancias entre el albarán y las etiquetas:\n" + "\n".join("· " + d for d in disc) + "\n¿Cierras la entrada igualmente?", 409, "discrepancias")

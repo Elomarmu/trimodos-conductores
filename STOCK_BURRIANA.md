@@ -8,7 +8,8 @@ Sección «Stock Burriana» de la app de oficina y almacén (`/oficina/`). Sigue
 1. Oficina fotografía el albarán del cliente → la app lo lee (Claude visión), **recomienda cliente** y avisa de conflictos (albarán repetido, cliente dudoso).
 2. Almacén fotografía la etiqueta de cada palet → la app la compara con el albarán (sobra, no figura, lote distinto, SSCC repetido, cliente distinto).
 3. Al terminar, si hay discrepancias hay que confirmarlas (se aceptan los palets físicos). Si todo cuadra, se cierra.
-4. Al cerrar: Excel de la entrada + fotos a SharePoint, se actualiza el libro de control y se envía **un** correo.
+4. **Antes de cerrar hace falta la foto del albarán firmado por nosotros (recepción)** — obligatoria en las entradas de albarán, no en la manual de inventario; se guarda como `albaran firmado N` y viaja en el correo de cierre y en SharePoint (no en el aviso al cliente).
+5. Al cerrar: Excel de la entrada + fotos a SharePoint, se actualiza el libro de control y se envía **un** correo.
 
 **Salida de mercancía**
 1. Oficina carga la petición del cliente (foto o a mano).

@@ -218,7 +218,7 @@ Pulsa **⚠️** en el palet. Escribe qué ha pasado y haz hasta **4 fotos** del
 
 #### Terminar la descarga
 
-Abajo, si hace falta cambia el **día de entrada**, escribe las **incidencias generales de la descarga** (falta un palet, camión sucio…) y pulsa **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel de la entrada, las fotos y el resumen por ubicación, y se actualiza la Excel de control en SharePoint.
+Abajo, si hace falta cambia el **día de entrada**, escribe las **incidencias generales de la descarga** (falta un palet, camión sucio…) haz la **foto del albarán firmado** por nosotros como recepción de la mercancía (es **obligatoria**: sin ella la app no deja terminar; puedes hacerla con la cámara o elegir hasta 4 fotos de la galería) y pulsa **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel de la entrada, las fotos (incluido el albarán firmado) y el resumen por ubicación, y se actualiza la Excel de control en SharePoint.
 
 ![Cierre de la entrada](/guia-img/cierre.jpg)
 

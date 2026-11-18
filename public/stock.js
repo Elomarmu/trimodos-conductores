@@ -217,6 +217,8 @@ function pintarEntrada(e) {
   }   // la que se escribe se conserva mientras se sigue en la misma entrada
   pintarListaEntrada(e);
   $("se-cierre").hidden = cerrada;
+  $("se-firmado-campo").hidden = inv;
+  $("se-firmado-estado").textContent = (e.albaran_firmado || []).length ? `✅ Albarán firmado: ${e.albaran_firmado.length} foto${e.albaran_firmado.length === 1 ? "" : "s"} guardada${e.albaran_firmado.length === 1 ? "" : "s"} (si haces otra, sustituye a la anterior)` : "⚠ Falta la foto del albarán firmado";
   $("se-revisar").hidden = !e.por_revisar;
   $("se-revisar-avisos").replaceChildren(...avisosHtml(e.avisos || []));
   $("se-fentrada").value = e.fecha_entrada || ""; $("se-obs").value = e.observaciones || "";
@@ -329,6 +331,20 @@ $("se-revisar-btn").addEventListener("click", async () => {
 });
 $("se-recargar").addEventListener("click", () => abrirEntrada(stk.entrada.id));
 $("se-cerrar").addEventListener("click", () => cerrarEntrada(false));
+async function alElegirAlbaranFirmado(ev) {
+  const files = [...(ev.target.files || [])].slice(0, 4);
+  ev.target.value = "";
+  if (!files.length) return;
+  clearError();
+  const r = await conCarga("Guardando el albarán firmado…", async () => {
+    const fotos = [];
+    for (const f of files) fotos.push(files.length === 1 ? await escanearDocumento(f) : await reducir(f));
+    return post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/albaran-firmado`, { fotos });
+  });
+  if (r) pintarEntrada(r);
+}
+$("se-firmado-camara").addEventListener("change", alElegirAlbaranFirmado);
+$("se-firmado-galeria").addEventListener("change", alElegirAlbaranFirmado);
 // Aviso de llegada al cliente: borrador en traficolevante@ (nunca se envía solo). Solo se dice algo si el cliente lo tiene activado.
 function avisoClienteHtml(a) {
   if (!a || !a.activo) return [];

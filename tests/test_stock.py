@@ -240,6 +240,12 @@ def enviados(monkeypatch):
 FOTO = {"archivo_b64": base64.b64encode(b"imagen").decode(), "tipo": "image/jpeg"}
 
 
+def _cerrar(cliente, ident, cuerpo):
+    """Cierra una entrada del albarán: antes hace falta la foto del albarán firmado (en inventario no)."""
+    cliente.post(f"/api/stock/entradas/{ident}/albaran-firmado", json={"fotos": [FOTO]})
+    return cliente.post(f"/api/stock/entradas/{ident}/cerrar", json=cuerpo)
+
+
 def leer_con(monkeypatch, albaran=None, etiquetas=(), peticion=None):
     monkeypatch.setattr(A.L, "leer_albaran", lambda archivos, cli=None: albaran or LEIDO_ALBARAN)
     cola = list(etiquetas)
@@ -277,13 +283,13 @@ def test_flujo_entrada_completo(cliente, monkeypatch, enviados):
     det = cliente.get(f"/api/stock/entradas/{ident}").json()
     assert det["estado"] == "descargando" and det["verificados"] == 4 and det["esperados"] == 5
     # cerrar con un palet que falta → pide confirmar
-    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    r = _cerrar(cliente, ident, {})
     assert r.status_code == 409 and r.json()["codigo"] == "discrepancias" and "Faltan 1 palets de KK-200" in r.json()["error"]
     assert enviados == []
     # palet a mano para el que falta → cuadra
     r = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"ref": "KK-200", "kg": 1200, "sscc": SSCC[6]})
     assert r.status_code == 200 and r.json()["palet"]["manual"] is True
-    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    r = _cerrar(cliente, ident, {})
     assert r.status_code == 200, r.text
     res = r.json()
     assert res["entrada"]["estado"] == "cerrada" and res["entrada"]["discrepancias"] == 0 and res["enviado"] is True
@@ -309,8 +315,8 @@ def test_entrada_con_discrepancias_aceptadas(cliente, monkeypatch, enviados):
     ident = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"]}).json()["id"]
     r = cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
     assert r.json()["palet"]["estado"] == "discrepancia"
-    assert cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).status_code == 409
-    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True, "nota": "Falta el resto, llega mañana"})
+    assert _cerrar(cliente, ident, {}).status_code == 409
+    r = _cerrar(cliente, ident, {"confirmado": True, "nota": "Falta el resto, llega mañana"})
     assert r.status_code == 200 and r.json()["entrada"]["discrepancias"] == 3   # palet ajeno + faltan 3 de KK-100 + faltan 2 de KK-200
     assert "Falta el resto" in enviados[0]["html"] and "Discrepancias aceptadas" in enviados[0]["html"]
     assert cliente.get("/api/stock/stock").json()["total_palets"] == 1   # el palet físico entra aunque no estuviera en el albarán
@@ -489,7 +495,7 @@ def test_entrada_con_pdf_y_excel_fecha_editable_observaciones_y_salida_con_codig
     for _ in codigos:
         assert cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO}).json()["palet"]["estado"] == "ok"
     assert cliente.post(f"/api/stock/entradas/{ident}/observaciones", json={"texto": "Un palet con el film roto"}).status_code == 200
-    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    r = _cerrar(cliente, ident, {})
     assert r.status_code == 200, r.text
     e = enviados[-1]
     assert e["asunto"].startswith("⚠ ") and "film roto" in e["html"]
@@ -535,10 +541,10 @@ def test_correo_del_buzon_prepara_la_entrada_para_revisar_y_no_se_duplica(client
     assert len(cliente.get("/api/stock/entradas").json()["entradas"]) == 1
     for _ in codigos:
         cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
-    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    r = _cerrar(cliente, ident, {})
     assert r.status_code == 409 and r.json()["codigo"] == "sin_revisar"                              # hasta que la oficina la revise
     assert cliente.post(f"/api/stock/entradas/{ident}/revisar").json()["por_revisar"] is False
-    assert cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).status_code == 200
+    assert _cerrar(cliente, ident, {}).status_code == 200
     # el mismo albarán en otro correo → no se crea, se avisa a la oficina
     r = cliente.post("/api/stock/correo", json={**correo, "mensaje_id": "AAMk-2"}, headers=h).json()
     assert r["resultado"] == "no_procesada" and "ya está cargado" in r["motivo"]
@@ -578,9 +584,9 @@ def test_codigo_de_barras_y_lista_desplegable_en_entradas_y_salidas(cliente, mon
     assert p["estado"] == "discrepancia" and "repetido" in p["motivo"]
     # cerrar la entrada (con el palet que sobra y el repetido aceptados) para que haya stock
     cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "2600044860", "origen": "barras"})
-    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"aceptar": True, "nota": "prueba"})
+    r = _cerrar(cliente, ident, {"aceptar": True, "nota": "prueba"})
     if r.status_code == 409:
-        r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True, "nota": "prueba"})
+        r = _cerrar(cliente, ident, {"confirmado": True, "nota": "prueba"})
     assert r.status_code == 200, r.text
     assert cliente.get(f"/api/stock/entradas/{ident}").json()["pendientes"] == []
     # salida: la lista desplegable ofrece los palets del cliente que se pueden cargar (los más antiguos primero)
@@ -625,7 +631,7 @@ def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
     rep = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "lp26 0000001", "ref": "F05182S"}).json()["palet"]
     assert rep["estado"] == "discrepancia"
     cliente.post(f"/api/stock/entradas/{ident}/quitar", json={"palet": rep["id"]})
-    cerrada = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).json()
+    cerrada = _cerrar(cliente, ident, {}).json()
     assert cerrada["enviado"] and cerrada["aviso_cliente"] == {"activo": False}
     assert enviados[-1]["evento"] == "inventario_cerrado" and "inventario" in enviados[-1]["asunto"].lower()
     resp = cliente.get("/api/stock/stock"); assert resp.status_code == 200, resp.text
@@ -651,7 +657,7 @@ def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
                      "albaran": {"numero": "DDT26-012082", "fecha": "2026-11-18", "total_palets": 1, "total_kg": 376,
                                  "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 1, "kg": 376, "lote": "P03-015457"}], "dudas": []}}).json()
     assert cliente.post(f"/api/stock/entradas/{e['id']}/palet", json={"sscc": "LP26-0000010", "ref": "F05182S", "lote": "P03-015457", "kg": 376}).status_code == 200
-    out = cliente.post(f"/api/stock/entradas/{e['id']}/cerrar", json={"confirmado": True}).json()
+    out = _cerrar(cliente, e['id'], {"confirmado": True}).json()
     assert out["aviso_cliente"]["creado"] is True and "traficolevante@stinsa.com" in out["aviso_cliente"]["para"]
     av = [x for x in enviados if x["evento"] == "aviso_llegada"][-1]
     assert "enviar" not in av and "buzon" not in av and "traficolevante@stinsa.com" in av["para"] and "carmelomartinez@stinsa.com" in av["para"]
@@ -689,7 +695,7 @@ def test_repetido_no_hace_sobrar_al_siguiente_e_incidencia_en_el_correo(cliente,
     r = cliente.post(f"/api/stock/entradas/{ident}/incidencia", json={"palet": b["id"], "texto": "Film roto en una esquina", "fotos": [FOTO]})
     assert r.status_code == 200, r.text
     # al cerrar (confirmando la advertencia) el repetido se descarta y solo entran 2 palets
-    out = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True}).json()
+    out = _cerrar(cliente, ident, {"confirmado": True}).json()
     assert out["enviado"]
     pl = [x for x in cliente.get("/api/stock/stock").json()["palets"] if x["sscc"].startswith("LP261000")]
     assert sorted(x["sscc"] for x in pl) == ["LP261000001", "LP261000002"]
@@ -712,7 +718,7 @@ def test_ubicacion_en_la_entrada_el_stock_y_la_salida(cliente, enviados):
     mala = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "LP26-2000009", "ref": "F05182S", "ubicacion": "Z9"})
     assert mala.status_code == 400 and mala.json()["codigo"] == "ubicacion_invalida"   # solo las zonas de la lista
     alta("LP26-2000004", "")               # sin informar: queda sin ubicación
-    cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    _cerrar(cliente, ident, {})
     env = enviados[-1]
     assert env["evento"] == "inventario_cerrado" and env["para"] == "traficolevante@stinsa.com,carmelomartinez@stinsa.com"
     assert "E1 (2)" in env["html"] and "S3 (1)" in env["html"] and "sin ubicación (1)" in env["html"]
@@ -730,7 +736,7 @@ def test_ubicar_palets_del_inventario_con_confirmacion_al_cambiar(cliente, envia
     ident = cliente.post("/api/stock/inventario", json={"cliente": "ALIPLAST", "fecha_entrada": "2026-11-01"}).json()["id"]
     for cod, ub in (("LP26-3000001", ""), ("LP26-3000002", ""), ("LP26-3000003", "E2")):
         cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": cod, "ref": "F05182S", "lote": "L1", "kg": 100, "ubicacion": ub})
-    cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    _cerrar(cliente, ident, {})
     ids = {p["sscc"]: p["id"] for p in cliente.get("/api/stock/stock").json()["palets"]}
     sin = [ids["LP263000001"], ids["LP263000002"]]
     # asignar a los que no tienen: directo, sin confirmación
@@ -776,7 +782,7 @@ def test_corregir_un_palet_en_la_entrada_manual_de_inventario(cliente):
     det = r.json()["entrada"]
     assert [(l["ref"], l["verificados"]) for l in det["lineas"]] == [("F05182S", 2)]   # la referencia mal escrita ya no sale
     assert all(p["linea"] == 0 and p["estado"] == "ok" for p in det["palets"]) and det["palets"][0]["kg"] == 110
-    cierre = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).json()
+    cierre = _cerrar(cliente, ident, {}).json()
     assert cierre["entrada"]["estado"] == "cerrada"
     assert sorted(p["ref"] for p in cliente.get("/api/stock/stock").json()["palets"]) == ["F05182S", "F05182S"]
 
@@ -796,7 +802,7 @@ def test_palet_sin_codigo_solo_en_inventario_y_con_ubicacion(cliente):
     assert alta(sscc="sin código", ubicacion="E6").json()["palet"]["sin_codigo"]   # escribirlo también vale
     # un palet sin nada de código ni «SIN CODIGO» sigue dando aviso
     assert alta(sscc="", ubicacion="E6").json()["palet"]["estado"] == "discrepancia"
-    cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True})
+    _cerrar(cliente, ident, {"confirmado": True})
     st = [x for x in cliente.get("/api/stock/stock").json()["palets"] if x["sin_codigo"]]
     assert len(st) == 3 and {x["ubicacion"] for x in st} == {"S7", "E6"}
     # en una entrada con albarán no vale
@@ -804,3 +810,19 @@ def test_palet_sin_codigo_solo_en_inventario_y_con_ubicacion(cliente):
                      "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 1, "kg": 50}], "dudas": []}}).json()
     r = cliente.post(f"/api/stock/entradas/{e['id']}/palet", json={"sscc": "SIN CODIGO", "ref": "F05182S", "ubicacion": "E1"})
     assert r.status_code == 400 and r.json()["codigo"] == "sin_codigo_no_vale"
+
+
+def test_albaran_firmado_obligatorio_para_cerrar_y_va_en_el_correo(cliente, monkeypatch, enviados):
+    dar_de_alta(cliente)
+    leer_con(monkeypatch, etiquetas=[etiqueta("KK-100", SSCC[0], "L77")])
+    d = cliente.post("/api/stock/entradas/leer", json={"archivos": [FOTO]}).json()
+    ident = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"], "fotos": [FOTO]}).json()["id"]
+    cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
+    r = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True})
+    assert r.status_code == 409 and r.json()["codigo"] == "falta_albaran_firmado"
+    assert not enviados
+    det = cliente.post(f"/api/stock/entradas/{ident}/albaran-firmado", json={"fotos": [FOTO, FOTO]}).json()
+    assert len(det["albaran_firmado"]) == 2 and det["exige_albaran_firmado"] is True
+    assert cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True}).status_code == 200
+    env = [x for x in enviados if x["evento"] == "entrada_cerrada"][-1]
+    assert sum(1 for f in env["fotos"] if f["nombre"].startswith("albaran firmado")) == 2 and "albarán firmado" in env["html"]

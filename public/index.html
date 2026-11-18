@@ -428,6 +428,14 @@
     <div class="field"><label for="se-fentrada">Día de entrada en el almacén</label><input id="se-fentrada" type="date"></div>
     <div class="field"><label for="se-obs">Incidencias de la descarga (se avisa a la oficina en el correo)</label><textarea id="se-obs" maxlength="1000" placeholder="Palet roto, film abierto, falta un palet…"></textarea></div>
     <div class="field"><label for="se-nota">Nota para la oficina y el cliente (opcional)</label><textarea id="se-nota" maxlength="300"></textarea></div>
+    <div id="se-firmado-campo">
+      <p class="hint"><b>Albarán firmado</b> por nosotros como recepción de la mercancía (obligatorio para terminar la descarga; va en el correo de cierre)</p>
+      <label class="btn secondary" for="se-firmado-camara">📷 Hacer foto del albarán firmado</label>
+      <input id="se-firmado-camara" type="file" accept="image/*" capture="environment" hidden>
+      <label class="btn secondary" for="se-firmado-galeria">🖼️ Elegir fotos de la galería (hasta 4)</label>
+      <input id="se-firmado-galeria" type="file" accept="image/*" multiple hidden>
+      <p id="se-firmado-estado" class="hint"></p>
+    </div>
     <button id="se-cerrar" class="btn primary huge">Terminar la descarga</button>
   </div>
   <div id="se-descargas" class="actions"></div>
