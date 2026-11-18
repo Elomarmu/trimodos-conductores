@@ -528,6 +528,46 @@ def entrada_palet_manual(ident: str, body: PaletManual):
     return {"palet": palet, "entrada": _detalle_entrada(e)}
 
 
+class Corregir(PaletManual):
+    palet: str = Field(max_length=40)
+
+
+@router.post("/entradas/{ident}/corregir")
+def entrada_corregir(ident: str, body: Corregir):
+    """Corrige los datos de un palet ya apuntado (referencia, lote, kg, código…) y lo vuelve a comprobar con el albarán.
+    Conserva su foto, su ubicación y sus incidencias."""
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
+    p = next((p for p in e["palets"] if p["id"] == body.palet and p.get("estado_alta") != "quitado"), None)
+    if not p:
+        raise AppError("No encuentro ese palet.", 404, "no_encontrado")
+    codigo = R.sscc(body.sscc)
+    if not (body.ref or body.descripcion or codigo):
+        raise AppError("Escribe el código del palet o su referencia.", 400, "sin_referencia")
+    datos = {"sscc": body.sscc, "referencia": body.ref, "descripcion": body.descripcion, "lote": body.lote, "kg": body.kg, "bultos": body.bultos}
+    exp = next((x for x in e.get("esperados") or [] if codigo and x["codigo"] == codigo), None)
+    if exp and not body.ref:   # solo se ha puesto el código: lo demás sale del albarán
+        datos.update(referencia=exp.get("ref") or "", lote=body.lote or exp.get("lote") or "", kg=body.kg if body.kg is not None else exp.get("kg"))
+    etiqueta = R.limpiar_etiqueta(datos)
+    etiqueta = {**etiqueta, "ref": R.canonica(_cliente_de(store, e), etiqueta.get("ref"))}
+    entradas, salidas = store.listar("entrada"), store.listar("salida")
+    en_stock = _sscc_en_stock(store, [x for x in entradas if x["id"] != e["id"]], salidas)
+    p["estado_alta"] = "quitado"   # mientras se comprueba, el palet no cuenta (si no, saldría repetido de sí mismo)
+    try:
+        nuevo = R.verificar_palet(e, etiqueta, en_stock)
+    finally:
+        del p["estado_alta"]
+    for k in ("duplicado", "aceptado", "motivo", "estado"):
+        p.pop(k, None)
+    p.update(nuevo)
+    p.update(manual=True, corregido=ahora())
+    if e.get("tipo") == "inventario":
+        R.recontar_inventario(e)
+    store.escribir("entrada", e["id"], e)
+    return {"palet": p, "entrada": _detalle_entrada(e)}
+
+
 @router.post("/entradas/{ident}/quitar")
 def entrada_quitar(ident: str, body: Quitar):
     store = get_store()

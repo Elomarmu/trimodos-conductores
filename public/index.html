@@ -412,6 +412,7 @@
   <div id="se-palets" class="lista"></div>
   <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
     <form id="se-manual" novalidate>
+      <div id="se-m-corrigiendo" class="banner warn" hidden><span id="se-m-corrigiendo-txt"></span> <button type="button" id="se-m-cancelar" class="btn ghost small">Cancelar</button></div>
       <div class="field" id="se-lista-campo" hidden><label for="se-m-lista">Palets del albarán que faltan por apuntar</label><select id="se-m-lista"></select></div>
       <div class="field"><label for="se-m-ref">Referencia</label><input id="se-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
       <div class="row2">
@@ -419,7 +420,7 @@
         <div class="field"><label for="se-m-kg">Kg</label><input id="se-m-kg" type="text" inputmode="numeric" autocomplete="off"></div>
       </div>
       <div class="field"><label for="se-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="se-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
-      <button type="submit" class="btn secondary small">Añadir el palet</button>
+      <button type="submit" id="se-m-guardar" class="btn secondary small">Añadir el palet</button>
     </form>
   </details>
   <div id="se-cierre">

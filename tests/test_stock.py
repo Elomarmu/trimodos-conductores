@@ -746,3 +746,22 @@ def test_ubicar_palets_del_inventario_con_confirmacion_al_cambiar(cliente, envia
     assert st == {"LP263000001": "E5", "LP263000002": "S4", "LP263000003": "E5"}
     assert cliente.post("/api/stock/stock/ubicacion", json={"palets": sin, "ubicacion": "X1"}).status_code == 400
     assert cliente.post("/api/stock/stock/ubicacion", json={"palets": ["E-2026-9999-01"], "ubicacion": "E1"}).status_code == 409   # no está en el stock
+
+
+def test_corregir_un_palet_con_error_en_la_entrada(cliente):
+    e = cliente.post("/api/stock/entradas", json={"cliente": "ALIPLAST", "fotos": [FOTO], "albaran": {"numero": "DDT-COR-1", "fecha": "2026-11-18", "total_palets": 2, "total_kg": 200,
+                     "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 2, "kg": 200, "lote": "L1"}], "dudas": []}}).json()
+    ident = e["id"]
+    mal = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "LP26-4000001", "ref": "F99999X", "kg": 100, "lote": "L1", "ubicacion": "E3"}).json()["palet"]
+    assert mal["estado"] == "discrepancia" and "no figura" in mal["motivo"]
+    cliente.post(f"/api/stock/entradas/{ident}/incidencia", json={"palet": mal["id"], "texto": "etiqueta borrosa"})
+    r = cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": mal["id"], "ref": "F05182S", "kg": 100, "lote": "L1", "sscc": "LP26-4000001"})
+    assert r.status_code == 200, r.text
+    p = r.json()["palet"]
+    assert p["id"] == mal["id"] and p["estado"] == "ok" and p["ref"] == "F05182S" and not p.get("motivo")
+    assert p["ubicacion"] == "E3" and p["incidencias"][0]["texto"] == "etiqueta borrosa"   # conserva ubicación e incidencias
+    det = r.json()["entrada"]
+    assert len(det["palets"]) == 1 and det["lineas"][0]["verificados"] == 1
+    # corregir un palet con su mismo código no lo marca como repetido de sí mismo
+    assert cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": mal["id"], "ref": "F05182S", "sscc": "LP26-4000001", "kg": 120}).json()["palet"]["estado"] == "ok"
+    assert cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": "no-existe", "ref": "F05182S"}).status_code == 404

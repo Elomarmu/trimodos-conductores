@@ -221,6 +221,7 @@ function pintarEntrada(e) {
       h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       h("br"), h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación"),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
+    cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => corregirPaletEntrada(p) }, "Corregir"),
     cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("entrada", p.id, p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
     cerrada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletEntrada(p) }, "Quitar"))));
   $("se-descargas").replaceChildren();
@@ -265,12 +266,37 @@ $("se-barras").addEventListener("click", () => stk.entrada.tipo === "inventario"
     return p.estado === "ok" ? { ok: true, texto: `✓ ${p.ref} · ${codigo}${p.kg ? " · " + n(p.kg) + " kg" : ""}: coincide con el albarán.` } : { ok: false, texto: `⚠ ${codigo}: ${p.motivo}` };
   },
 }));
+// Corregir un palet ya apuntado: sus datos pasan al formulario de «apuntar a mano»; al guardar se sustituyen y se vuelve a comprobar con el albarán.
+function corregirPaletEntrada(p) {
+  stk.corrigiendo = p.id;
+  const det = $("se-manual").closest("details");
+  det.hidden = false; det.open = true;
+  $("se-m-ref").value = p.ref || ""; $("se-m-lote").value = p.lote || ""; $("se-m-kg").value = p.kg ? String(p.kg) : ""; $("se-m-sscc").value = p.sscc || "";
+  $("se-m-corrigiendo").hidden = false;
+  $("se-m-corrigiendo-txt").textContent = `Corrigiendo el palet ${p.id}. Cambia lo que esté mal y pulsa «Guardar corrección».`;
+  $("se-m-guardar").textContent = "Guardar corrección";
+  det.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function terminarCorreccion() {
+  stk.corrigiendo = null;
+  $("se-m-corrigiendo").hidden = true;
+  $("se-m-guardar").textContent = "Añadir el palet";
+  $("se-manual").reset();
+}
+$("se-m-cancelar").addEventListener("click", terminarCorreccion);
 $("se-manual").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const kg = parseNum($("se-m-kg").value);
-  const r = await conCarga("Añadiendo…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`,
-    { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim(), ubicacion: $("se-ubic").value.trim() }));
-  if (r) { $("se-manual").reset(); pintarEntrada(r.entrada); }
+  const datos = { ref: $("se-m-ref").value.trim(), lote: $("se-m-lote").value.trim(), kg: isNaN(kg) ? null : kg, sscc: $("se-m-sscc").value.trim() };
+  const corr = stk.corrigiendo;
+  const r = corr
+    ? await conCarga("Guardando la corrección…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/corregir`, { ...datos, palet: corr }))
+    : await conCarga("Añadiendo…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/palet`, { ...datos, ubicacion: $("se-ubic").value.trim() }));
+  if (!r) return;
+  if (corr) terminarCorreccion(); else $("se-manual").reset();
+  pintarEntrada(r.entrada);
+  if (corr) $("se-aviso-palet").replaceChildren(h("div", { class: "banner " + (r.palet.estado === "ok" ? "info" : "warn") },
+    r.palet.estado === "ok" ? `✓ Palet ${r.palet.id} corregido: ahora coincide con el albarán.` : "⚠ Corregido, pero sigue con aviso: " + r.palet.motivo));
 });
 async function quitarPaletEntrada(p) {
   confirmar(`El palet ${p.id} (${p.ref || "sin referencia"}) deja de contar en esta entrada.`, "Sí, quitarlo", async () => {
