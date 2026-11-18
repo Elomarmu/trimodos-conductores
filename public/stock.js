@@ -180,6 +180,15 @@ async function guardarEntrada(confirmado) {
   }
 }
 
+// Botones de cada palet, pequeños y juntos: 📝 corregir (solo entradas), ⚠️ incidencia (con su número si ya hay) y Quitar.
+function accionesPalet(p, f) {
+  const n = (p.incidencias || []).length;
+  return h("span", { class: "acciones" },
+    f.corregir ? h("button", { type: "button", class: "btn ghost mini", title: "Corregir los datos del palet", "aria-label": "Corregir los datos del palet", onclick: f.corregir }, "📝") : null,
+    h("button", { type: "button", class: "btn ghost mini", title: "Incidencia del bulto", "aria-label": "Incidencia del bulto" + (n ? ` (${n})` : ""), onclick: f.incidencia }, n ? `⚠️${n}` : "⚠️"),
+    h("button", { type: "button", class: "btn ghost quitar", onclick: f.quitar }, "Quitar"));
+}
+
 // ---------- entradas: descarga con etiquetas (almacén) ----------
 async function abrirEntrada(id) {
   const e = await conCarga("Cargando la entrada…", () => api("/api/stock/entradas/" + encodeURIComponent(id)));
@@ -222,9 +231,7 @@ function pintarEntrada(e) {
       h("span", { class: "hint" }, p.id + (p.sin_codigo ? " · SIN CÓDIGO" : p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       h("br"), h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación"),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
-    cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => corregirPaletEntrada(p) }, "Corregir"),
-    cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("entrada", p.id, p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
-    cerrada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletEntrada(p) }, "Quitar"))));
+    cerrada ? null : accionesPalet(p, { corregir: () => corregirPaletEntrada(p), incidencia: () => abrirIncidencia("entrada", p.id, p), quitar: () => quitarPaletEntrada(p) }))));
   $("se-descargas").replaceChildren();
 }
 $("se-etq-camara").addEventListener("change", async (ev) => {
@@ -436,8 +443,7 @@ function pintarSalida(s) {
       p.palet_id ? h("br") : null, p.palet_id ? h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación") : null,
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null,
       p.aviso ? h("br") : null, p.aviso ? h("span", { class: "hint" }, "ℹ " + p.aviso) : null),
-    cargada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("salida", String(p.n), p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
-    cargada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletSalida(p) }, "Quitar"))));
+    cargada ? null : accionesPalet(p, { incidencia: () => abrirIncidencia("salida", String(p.n), p), quitar: () => quitarPaletSalida(p) }))));
   $("ss-descargas").replaceChildren();
 }
 $("ss-etq-camara").addEventListener("change", async (ev) => {

@@ -330,3 +330,5 @@ textarea { min-height: 72px; resize: vertical; font-family: inherit; line-height
 
 .sp-aviso ul { margin: 6px 0; padding-left: 20px; }
 .sp-aviso p { margin: 6px 0; }
+.acciones { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
+.btn.mini { width: auto; min-width: 44px; min-height: 44px; padding: 4px 10px; font-size: 1.1rem; line-height: 1; }
