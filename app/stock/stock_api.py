@@ -564,6 +564,7 @@ def entrada_corregir(ident: str, body: Corregir):
     p.update(manual=True, corregido=ahora())
     if e.get("tipo") == "inventario":
         R.recontar_inventario(e)
+        R.quitar_lineas_vacias(e)
     store.escribir("entrada", e["id"], e)
     return {"palet": p, "entrada": _detalle_entrada(e)}
 

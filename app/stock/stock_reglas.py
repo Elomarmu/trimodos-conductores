@@ -425,6 +425,18 @@ def recontar_inventario(entrada: dict) -> None:
         l["palets"] = sum(1 for p in activos(entrada) if p.get("linea") == i)
 
 
+def quitar_lineas_vacias(entrada: dict) -> None:
+    """Entrada de inventario: una referencia que se ha quedado sin palets (corregida o quitada) deja de salir en la lista."""
+    if any(not l["palets"] for l in entrada["lineas"]):   # una referencia que se ha quedado sin palets (corregida o quitada) ya no sale
+        nuevo = {}
+        for i, l in enumerate(entrada["lineas"]):
+            if l["palets"]:
+                nuevo[i] = len(nuevo)
+        entrada["lineas"] = [l for l in entrada["lineas"] if l["palets"]]
+        for p in entrada["palets"]:
+            p["linea"] = nuevo.get(p.get("linea")) if p.get("estado_alta") != "quitado" else None
+
+
 def activos(entrada: dict) -> list[dict]:
     return [p for p in entrada["palets"] if p.get("estado_alta") != "quitado"]
 

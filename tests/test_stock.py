@@ -765,3 +765,17 @@ def test_corregir_un_palet_con_error_en_la_entrada(cliente):
     # corregir un palet con su mismo código no lo marca como repetido de sí mismo
     assert cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": mal["id"], "ref": "F05182S", "sscc": "LP26-4000001", "kg": 120}).json()["palet"]["estado"] == "ok"
     assert cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": "no-existe", "ref": "F05182S"}).status_code == 404
+
+
+def test_corregir_un_palet_en_la_entrada_manual_de_inventario(cliente):
+    ident = cliente.post("/api/stock/inventario", json={"cliente": "ALIPLAST", "fecha_entrada": "2026-11-01"}).json()["id"]
+    a = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "LP26-5000001", "ref": "F0518XX", "lote": "L1", "kg": 100, "ubicacion": "S1"}).json()["palet"]
+    cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "LP26-5000002", "ref": "F05182S", "lote": "L1", "kg": 100, "ubicacion": "S1"})
+    r = cliente.post(f"/api/stock/entradas/{ident}/corregir", json={"palet": a["id"], "ref": "F05182S", "lote": "L1", "kg": 110, "sscc": "LP26-5000001"})
+    assert r.status_code == 200, r.text
+    det = r.json()["entrada"]
+    assert [(l["ref"], l["verificados"]) for l in det["lineas"]] == [("F05182S", 2)]   # la referencia mal escrita ya no sale
+    assert all(p["linea"] == 0 and p["estado"] == "ok" for p in det["palets"]) and det["palets"][0]["kg"] == 110
+    cierre = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).json()
+    assert cierre["entrada"]["estado"] == "cerrada"
+    assert sorted(p["ref"] for p in cliente.get("/api/stock/stock").json()["palets"]) == ["F05182S", "F05182S"]
