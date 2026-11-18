@@ -520,6 +520,18 @@
   <div id="sa-descargas" class="actions"></div>
 </main>
 
+<!-- Incidencia de un bulto (entrada o salida): qué ha pasado + fotos; sale en el correo de oficina -->
+<main id="s-stock-incidencia" class="screen" hidden>
+  <h1>Incidencia del bulto</h1>
+  <p id="sin2-cabecera" class="banner info"></p>
+  <div class="field"><label for="sin2-texto">¿Qué ha pasado? (palet roto, film abierto, golpe, mojado…)</label><textarea id="sin2-texto" maxlength="500"></textarea></div>
+  <label class="btn secondary" for="sin2-foto">📷 Hacer o elegir fotos del bulto (hasta 4)</label>
+  <input id="sin2-foto" type="file" accept="image/*" capture="environment" multiple hidden>
+  <p id="sin2-fotos" class="hint"></p>
+  <button id="sin2-guardar" class="btn primary huge">Guardar la incidencia</button>
+  <button class="btn ghost" id="sin2-volver">Volver sin guardar</button>
+</main>
+
 <!-- Inventario: entrada manual (mercancía que ya estaba en la nave o aparece sin albarán) -->
 <main id="s-stock-inv-nueva" class="screen" hidden>
   <h1>Entrada manual de inventario</h1>

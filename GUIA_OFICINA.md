@@ -177,6 +177,10 @@ El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans
 
 **Una entrada no se puede declarar dos veces:** si el albarán ya está cargado para ese cliente, la app da error y dice con qué entrada coincide (ni confirmando se puede repetir). Si una entrada está duplicada o mal hecha, ábrela y pulsa **«Anular esta entrada»**: deja de contar (si ya estaba cerrada, sus palets salen del inventario) y el albarán puede volver a declararse. No se puede anular si algún palet suyo ya está en una salida; en ese caso se corrige primero la salida. El correo que se envió al cerrar no se puede retirar.
 
+**Palets leídos dos veces y fuera de lista:** si un palet se lee dos veces, el primero queda como bueno y el repetido sale como **advertencia** para depurar (puedes quitarlo con «Quitar»); si no lo quitas, se descarta solo al cerrar y no entra dos veces en el inventario. Los palets repetidos o que no figuran en la lista no cuentan para decir que «sobran» otros: los palets declarados en el albarán se dan por buenos.
+
+**Incidencia de un bulto:** junto a «Quitar», cada palet (en entradas y en salidas) tiene el botón **«Incidencia»**: escribes qué ha pasado y haces hasta 4 fotos del bulto. Al terminar, el correo a oficina (con la Excel y el enlace) trae una sección **«Incidencias por bulto»** con la explicación y las fotos dentro del propio correo; las fotos también se guardan en la carpeta de SharePoint y la Excel lleva la columna «Incidencia».
+
 ### Salida de mercancía
 
 1. **La oficina** pulsa **Salidas → «Nueva salida»**, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).

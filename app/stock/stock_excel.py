@@ -162,6 +162,10 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
 
 # ---- Excel de una entrada ------------------------------------------------------------------------------------------
 
+def _incidencia_txt(p: dict) -> str:
+    return " | ".join(i["texto"] + (f" ({len(i['fotos'])} foto{'s' if len(i['fotos']) != 1 else ''})" if i.get("fotos") else "") for i in p.get("incidencias") or [] if i.get("texto") or i.get("fotos"))
+
+
 def nombre_entrada(e: dict) -> str:
     return f"{'INVENTARIO' if e.get('tipo') == 'inventario' else 'ENTRADA'} {e['id']}.xlsx"
 
@@ -196,9 +200,9 @@ def excel_entrada(e: dict) -> bytes:
                   R.estado_lineas(e), relleno=lambda l: X.VERDE if l["verificados"] == l["esperados"] else X.ROJO, formatos={"kg_albaran": KG, "kg_etiquetas": KG})
     ws.freeze_panes = None
     ws.cell(fila + 1, 1, "Palets verificados con su etiqueta").font = Font(bold=True, color=M.TEAL_OSCURO)
-    palets = [dict(p, estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA"), linea_txt=(R.estado_lineas(e)[p["linea"]]["ref"] if p.get("linea") is not None else "")) for p in R.activos(e)]
+    palets = [dict(p, incidencia_txt=_incidencia_txt(p), estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA"), linea_txt=(R.estado_lineas(e)[p["linea"]]["ref"] if p.get("linea") is not None else "")) for p in R.activos(e)]
     fila = _tabla(ws, fila + 2, [("id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote", 15), ("fecha_prod", "Fecha producción", 13), ("kg", "Kg", 11),
-                  ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets,
+                  ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50), ("incidencia_txt", "Incidencia", 50)], palets,
                   relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
     ws.freeze_panes = None
     ws.auto_filter.ref = None
@@ -229,9 +233,9 @@ def excel_salida(s: dict) -> bytes:
     ws.freeze_panes = None
     ws.cell(fila, 1, f"TOTAL: {sum(l['cargados'] for l in lineas)} palets · {sum(l['kg'] or 0 for l in lineas):,.0f} kg".replace(",", ".")).font = Font(bold=True, color=M.TEAL_OSCURO)
     ws.cell(fila + 2, 1, "Palets cargados").font = Font(bold=True, color=M.TEAL_OSCURO)
-    palets = [dict(p, estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA")) for p in s["palets"] if p.get("estado_alta") != "quitado"]
+    palets = [dict(p, incidencia_txt=_incidencia_txt(p), estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA")) for p in s["palets"] if p.get("estado_alta") != "quitado"]
     fila = _tabla(ws, fila + 3, [("palet_id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote", 15), ("fecha_prod", "Fecha producción", 13), ("kg", "Kg", 11),
-                  ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets, relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
+                  ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50), ("incidencia_txt", "Incidencia", 50)], palets, relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
     ws.freeze_panes = None
     ws.auto_filter.ref = None
     disc = s.get("discrepancias_cierre") or []

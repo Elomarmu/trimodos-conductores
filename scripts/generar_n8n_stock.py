@@ -69,7 +69,8 @@ const borrador = $('Crear borrador').first().json;
 const buzon = d.buzon || $('Configuración').first().json.buzonEnvio;
 const url = `https://graph.microsoft.com/v1.0/users/${buzon}/messages/${borrador.id}/attachments`;
 const todos = [...(d.archivos || []).filter(a => a.correo !== false).map(a => ({ name: a.nombre, contentBytes: a.b64, contentType: a.tipo })),
-               ...(d.fotos || []).map(f => ({ name: f.nombre, contentBytes: f.b64, contentType: f.tipo }))];
+               ...(d.fotos || []).map(f => f.inline ? { name: f.nombre, contentBytes: f.b64, contentType: f.tipo, isInline: true, contentId: f.inline }   // foto de una incidencia: se ve dentro del cuerpo del correo (<img src="cid:…">)
+                                                  : { name: f.nombre, contentBytes: f.b64, contentType: f.tipo })];
 if (!todos.length) return [{ json: { sinAdjuntos: true } }];
 return todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.type': '#microsoft.graph.fileAttachment', ...a } } }));
 """
@@ -77,6 +78,7 @@ return todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.typ
 NOTA = """## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo
 **Desde la app** (POST con cabecera X-Clave, una llamada por operación):
 - entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.
+- Las fotos con `inline` (incidencias de un bulto) se adjuntan «en línea» con contentId para que salgan dentro del cuerpo del correo; además se suben a la carpeta como el resto.
 - inventario_cerrado / control_cerrado: igual que arriba (el control solo actualiza el libro y manda el resumen por correo).
 - aviso_llegada: NO se envía. Deja un BORRADOR en el buzón indicado por la app (traficolevante@stinsa.com) dirigido al contacto del cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Una persona lo revisa y lo manda. Requiere que la credencial «Outlook Agente Trafico» tenga acceso a ese buzón.
 - libro: solo rehace el libro de control en SharePoint (sin correo).

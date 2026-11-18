@@ -529,13 +529,54 @@ def entrada_quitar(ident: str, body: Quitar):
     return _detalle_entrada(e)
 
 
-def _cuerpo_correo(titulo: str, cabecera: str, filas_cab: list[str], tabla: str, disc: list[str], nota: str, observaciones: str = "") -> str:
+def _anotar_incidencia(store, op: dict, tipo: str, clave, body: IncidenciaIn) -> dict:
+    """Incidencia de un bulto (palet roto, film abierto…): texto y fotos. Sale en el correo de oficina al cerrar."""
+    p = next((p for p in op["palets"] if (str(p.get("n")) if tipo == "salida" else p["id"]) == clave and p.get("estado_alta") != "quitado"), None)
+    if not p:
+        raise AppError("No encuentro ese palet.", 404, "no_encontrado")
+    texto = body.texto.strip()
+    if not texto and not body.fotos:
+        raise AppError("Escribe qué ha pasado o haz una foto del bulto.", 400, "incidencia_vacia")
+    previas = p.setdefault("incidencias", [])
+    nombres = []
+    for f in body.fotos:
+        nombres.append(_guardar_foto(store, op["id"], f"incidencia {clave} {len(previas) + 1}-{len(nombres) + 1}", f))
+    previas.append({"texto": texto, "fotos": nombres, "hora": ahora()})
+    store.escribir(tipo, op["id"], op)
+    return p
+
+
+def _incidencias_correo(store, op: dict) -> tuple[str, dict[str, str]]:
+    """HTML con las incidencias por bulto (explicación + fotos incrustadas) y {nombre de foto: cid} para adjuntarlas en línea."""
+    estilo = "font:11pt Calibri,Arial"
+    cids: dict[str, str] = {}
+    bloques = []
+    for p in op["palets"]:
+        if p.get("estado_alta") == "quitado" or not p.get("incidencias"):
+            continue
+        cab = f"{p.get('ref') or p.get('descripcion') or 'Palet'}" + (f" · código {p['sscc']}" if p.get("sscc") else "") + (f" · lote {p['lote']}" if p.get("lote") else "")
+        for inc in p["incidencias"]:
+            imgs = ""
+            for n in inc.get("fotos", []):
+                cids[n] = f"inc{len(cids) + 1}@stinsa"
+                imgs += f"<br><img src='cid:{cids[n]}' style='max-width:420px;margin:4px 0;border:1px solid #ccc'>"
+            bloques.append(f"<p style='{estilo}'><b>{html.escape(cab)}</b><br>{html.escape(inc.get('texto') or '(sin descripción)').replace(chr(10), '<br>')}{imgs}</p>")
+    if not bloques:
+        return "", {}
+    return f"<p style='{estilo};color:#C00000'><b>Incidencias por bulto:</b></p>" + "".join(bloques), cids
+
+
+def _fotos_envio(store, op: dict, carpeta: str, cids: dict[str, str]) -> list[dict]:
+    return [dict(f, carpeta=carpeta, **({"inline": cids[f["nombre"]]} if f["nombre"] in cids else {})) for f in _fotos_de(store, op["id"])]
+
+
+def _cuerpo_correo(titulo: str, cabecera: str, filas_cab: list[str], tabla: str, disc: list[str], nota: str, observaciones: str = "", incidencias: str = "") -> str:
     estilo = "font:11pt Calibri,Arial"
     inc = (f"<p style='{estilo};color:#C00000'><b>Incidencias en el almacén:</b><br>" + html.escape(observaciones).replace("\n", "<br>") + "</p>") if observaciones else ""
     d = (f"<p style='{estilo};color:#C00000'><b>Discrepancias aceptadas:</b><br>" + "<br>".join(html.escape(x) for x in disc)
          + (f"<br><i>{html.escape(nota)}</i>" if nota else "") + "</p>") if disc else f"<p style='{estilo}'>Sin discrepancias.</p>"
     return (f"<p style='{estilo}'><b>{html.escape(titulo)}</b></p><p style='{estilo}'>{cabecera}</p>"
-            + "".join(f"<p style='{estilo}'>{x}</p>" for x in filas_cab) + inc + tabla + d
+            + "".join(f"<p style='{estilo}'>{x}</p>" for x in filas_cab) + inc + incidencias + tabla + d
             + f"<p style='{estilo};color:#595959'>Se adjuntan la Excel y las fotos para reenviar al cliente. {html.escape(R.ALMACEN)}.</p>")
 
 
@@ -553,13 +594,32 @@ def _nota_antiguedad(store, codigo: str) -> list[str]:
             + ", ".join(f"{html.escape(r)}: {n}" for r, n in sorted(por_ref.items())) + f"); el más antiguo entró el {'-'.join(reversed(mas.split('-')))}."]
 
 
+@router.post("/entradas/{ident}/incidencia")
+def entrada_incidencia(ident: str, body: IncidenciaIn):
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    _esperar_abierta(e, R.ENTRADA_CERRADA, "entrada")
+    _anotar_incidencia(store, e, "entrada", body.palet, body)
+    return _detalle_entrada(e)
+
+
+@router.post("/salidas/{ident}/incidencia")
+def salida_incidencia(ident: str, body: IncidenciaIn):
+    store = get_store()
+    s = _documento(store, "salida", ident)
+    _esperar_abierta(s, R.SALIDA_CARGADA, "salida")
+    _anotar_incidencia(store, s, "salida", body.palet, body)
+    return _detalle_salida(s)
+
+
 def _enviar_entrada(store, e: dict) -> tuple[bool, list[dict]]:
     """Correo (Excel de la entrada + fotos) y libro de control en SharePoint, en UNA llamada a n8n."""
     entradas, salidas, cli = _todo(store)
     carpeta = X.carpeta(e)
     archivos = [{"nombre": X.nombre_entrada(e), "carpeta": carpeta, "correo": True, "b64": base64.b64encode(X.excel_entrada(e)).decode()},
                 {"nombre": X.LIBRO, "carpeta": "", "correo": False, "b64": base64.b64encode(X.libro_control(entradas, salidas, cli, controles=store.listar("control"))).decode()}]
-    fotos = [dict(f, carpeta=carpeta) for f in _fotos_de(store, e["id"])]
+    inc_html, cids = _incidencias_correo(store, e)
+    fotos = _fotos_envio(store, e, carpeta, cids)
     lineas = R.estado_lineas(e)
     tabla = PA.tabla_html(["Referencia", "Descripción", "Palets albarán", "Palets verificados", "Kg albarán", "Kg etiquetas"],
                           [[l["ref"], l["descripcion"], l["esperados"], l["verificados"], l["kg_albaran"], l["kg_etiquetas"]] for l in lineas])
@@ -569,7 +629,7 @@ def _enviar_entrada(store, e: dict) -> tuple[bool, list[dict]]:
                            f"{html.escape(a.get('matricula') or '')} · {html.escape(a.get('transportista') or '')}",
                            [f"{sum(l['verificados'] for l in lineas)} de {sum(l['esperados'] for l in lineas)} palets verificados con su etiqueta."]
                            + _nota_antiguedad(store, e["cliente"]["codigo"]),
-                           tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "", e.get("observaciones") or "")
+                           tabla, e.get("discrepancias_cierre") or [], e.get("nota_cierre") or "", e.get("observaciones") or "", inc_html)
     inventario = e.get("tipo") == "inventario"
     ok = enviar_n8n({"evento": "inventario_cerrado" if inventario else "entrada_cerrada", "carpeta": carpeta,
                      "asunto": ("⚠ " if e.get("observaciones") else "") + (f"Almacén Burriana · Entrada manual de inventario {e['id']} · {e['cliente']['nombre']}" if inventario
@@ -637,6 +697,12 @@ def entrada_aviso(ident: str):
     return {"aviso_cliente": _aviso_llegada(store, e)}
 
 
+class IncidenciaIn(BaseModel):
+    palet: str = Field(max_length=40)
+    texto: str = Field("", max_length=500)
+    fotos: list[PA.Archivo] = Field(default_factory=list, max_length=4)
+
+
 class Anular(BaseModel):
     motivo: str = Field("", max_length=300)
 
@@ -672,8 +738,12 @@ def entrada_cerrar(ident: str, body: Cerrar):
     if disc and not body.confirmado:
         raise AppError("Hay discrepancias entre el albarán y las etiquetas:\n" + "\n".join("· " + d for d in disc) + "\n¿Cierras la entrada igualmente?", 409, "discrepancias")
     for p in R.activos(e):
-        if p["estado"] == "discrepancia":
+        if p.get("duplicado"):   # el mismo palet leído otra vez: no entra dos veces en el stock
+            p["estado_alta"] = "quitado"
+        elif p["estado"] == "discrepancia":
             p["aceptado"] = True
+    if e.get("tipo") == "inventario":
+        R.recontar_inventario(e)
     if body.observaciones is not None:
         e["observaciones"] = body.observaciones.strip()
     e.update(estado=R.ENTRADA_CERRADA, cerrada=ahora(), discrepancias_cierre=disc, nota_cierre=body.nota.strip())
@@ -863,14 +933,15 @@ def _enviar_salida(store, s: dict) -> tuple[bool, list[dict]]:
     carpeta = X.carpeta(s)
     archivos = [{"nombre": X.nombre_salida(s), "carpeta": carpeta, "correo": True, "b64": base64.b64encode(X.excel_salida(s)).decode()},
                 {"nombre": X.LIBRO, "carpeta": "", "correo": False, "b64": base64.b64encode(X.libro_control(entradas, salidas, cli, controles=store.listar("control"))).decode()}]
-    fotos = [dict(f, carpeta=carpeta) for f in _fotos_de(store, s["id"])]
+    inc_html, cids = _incidencias_correo(store, s)
+    fotos = _fotos_envio(store, s, carpeta, cids)
     lineas = R.estado_lineas_salida(s)
     tabla = PA.tabla_html(["Referencia", "Descripción", "Palets pedidos", "Palets cargados", "Kg"],
                           [[l["ref"], l["descripcion"], l["pedidos"], l["cargados"], l["kg"]] for l in lineas])
     html_ = _cuerpo_correo(f"Salida {s['id']} · {s['cliente']['nombre']}",
                            f"Pedido <b>{html.escape(s.get('referencia') or '—')}</b> · destino {html.escape(s.get('destino') or '—')} · {html.escape(s.get('transportista') or '')}",
                            [f"{sum(l['cargados'] for l in lineas)} de {sum(l['pedidos'] for l in lineas)} palets cargados."] + _nota_antiguedad(store, s["cliente"]["codigo"]),
-                           tabla, s.get("discrepancias_cierre") or [], s.get("nota_cierre") or "", s.get("observaciones") or "")
+                           tabla, s.get("discrepancias_cierre") or [], s.get("nota_cierre") or "", s.get("observaciones") or "", inc_html)
     ok = enviar_n8n({"evento": "salida_cargada", "carpeta": carpeta, "asunto": ("⚠ " if s.get("observaciones") else "") + f"Almacén Burriana · Salida {s['id']} · {s['cliente']['nombre']}"
                      + (f" · pedido {s['referencia']}" if s.get("referencia") else ""), "html": html_, "archivos": archivos, "fotos": fotos})
     return ok, archivos[:1]

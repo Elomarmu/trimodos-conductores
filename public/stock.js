@@ -215,6 +215,7 @@ function pintarEntrada(e) {
     h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", p.fecha_prod ? ` · prod. ${fechaEs(p.fecha_prod)}` : "", h("br"),
       h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
+    cerrada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("entrada", p.id, p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
     cerrada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletEntrada(p) }, "Quitar"))));
   $("se-descargas").replaceChildren();
 }
@@ -394,6 +395,7 @@ function pintarSalida(s) {
       h("span", { class: "hint" }, (p.palet_id || "sin stock") + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null,
       p.aviso ? h("br") : null, p.aviso ? h("span", { class: "hint" }, "ℹ " + p.aviso) : null),
+    cargada ? null : h("button", { type: "button", class: "btn ghost", onclick: () => abrirIncidencia("salida", String(p.n), p) }, "Incidencia" + ((p.incidencias || []).length ? ` (${p.incidencias.length})` : "")),
     cargada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletSalida(p) }, "Quitar"))));
   $("ss-descargas").replaceChildren();
 }
@@ -581,4 +583,29 @@ $("sc2-cerrar").addEventListener("click", () => {
     pintarControl(x.control);
     $("sc2-descargas").replaceChildren(h("div", { class: "banner info" }, x.enviado ? `Control cerrado. Resumen enviado a ${x.para}.` : "Control cerrado. El envío del resumen no está configurado o ha fallado."));
   });
+});
+
+// ---------- incidencia de un bulto (entrada o salida) ----------
+function abrirIncidencia(tipo, clave, p) {
+  stk.inc = { tipo, clave, fotos: [], vuelta: tipo === "entrada" ? "stock-entrada" : "stock-salida" };
+  $("sin2-cabecera").textContent = `${tipo === "entrada" ? "Entrada " + stk.entrada.id : "Salida " + stk.salida.id} · ${p.ref || "palet"}${p.sscc ? " · " + p.sscc : ""}`
+    + ((p.incidencias || []).length ? ` · ya tiene ${p.incidencias.length} incidencia(s) anotada(s)` : "");
+  $("sin2-texto").value = ""; $("sin2-fotos").textContent = "";
+  go("stock-incidencia");
+}
+$("sin2-foto").addEventListener("change", async (ev) => {
+  const files = [...(ev.target.files || [])].slice(0, 4 - stk.inc.fotos.length);
+  ev.target.value = "";
+  try { for (const f of files) stk.inc.fotos.push(await reducir(f)); } catch (e) { return showError(e.message); }
+  $("sin2-fotos").textContent = stk.inc.fotos.length ? `📷 ${stk.inc.fotos.length} foto${stk.inc.fotos.length === 1 ? "" : "s"} lista${stk.inc.fotos.length === 1 ? "" : "s"}` : "";
+});
+$("sin2-volver").addEventListener("click", () => go(stk.inc.vuelta));
+$("sin2-guardar").addEventListener("click", async () => {
+  const { tipo, clave, fotos, vuelta } = stk.inc, texto = $("sin2-texto").value.trim();
+  if (!texto && !fotos.length) return showError("Escribe qué ha pasado o haz una foto del bulto.");
+  const id = tipo === "entrada" ? stk.entrada.id : stk.salida.id;
+  const r = await conCarga("Guardando la incidencia…", () => post(`/api/stock/${tipo === "entrada" ? "entradas" : "salidas"}/${encodeURIComponent(id)}/incidencia`, { palet: clave, texto, fotos }));
+  if (!r) return;
+  if (tipo === "entrada") pintarEntrada(r); else pintarSalida(r);
+  go(vuelta);
 });

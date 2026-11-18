@@ -353,7 +353,7 @@ def verificar_palet(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> d
     if exp and not palet.get("fecha_prod") and exp.get("fecha_prod"):
         palet["fecha_prod"] = exp["fecha_prod"]
     if codigo and (any(p.get("sscc") == codigo for p in ya) or codigo in sscc_en_stock):
-        palet.update(estado="discrepancia", motivo="Esta etiqueta (código de palet) ya está registrada: palet repetido.")
+        palet.update(estado="discrepancia", duplicado=True, motivo="Esta etiqueta (código de palet) ya está registrada: palet repetido (se descarta al cerrar).")
     elif idx is None:
         palet.update(estado="discrepancia", motivo="Este palet no figura en el albarán"
                      + (f" (referencia {etiqueta['ref']})." if etiqueta.get("ref") else " (no se lee la referencia)."))
@@ -363,9 +363,9 @@ def verificar_palet(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> d
         palet.update(estado="discrepancia", motivo=f"El albarán dice que el palet {codigo} es de {exp['ref']} y la etiqueta es de {etiqueta['ref']}.")
     else:
         pedidos = lineas[idx].get("palets") or 0
-        verificados = sum(1 for p in ya if p.get("linea") == idx)
+        verificados = sum(1 for p in ya if p.get("linea") == idx and p["estado"] == "ok")   # solo cuentan los buenos: un repetido o un fuera de lista no hace «sobrar» al siguiente
         l = lineas[idx]
-        if verificados >= pedidos:
+        if verificados >= pedidos and not exp:   # un palet que figura en la lista del albarán es bueno aunque las cuentas de la línea no cuadren
             palet.update(estado="discrepancia", motivo=f"Sobra: el albarán trae {pedidos} palets de {l['ref'] or l['descripcion']} y ya están todos.")
         elif l.get("lote") and etiqueta.get("lote") and norm(l["lote"]) != norm(etiqueta["lote"]):
             palet.update(estado="discrepancia", motivo=f"Lote distinto: etiqueta {etiqueta['lote']}, albarán {l['lote']}.")
@@ -391,7 +391,7 @@ def _verificar_inventario(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]
         idx = len(lineas) - 1
     palet = {**etiqueta, "linea": idx, "estado": "ok", "motivo": ""}
     if codigo and (any(p.get("sscc") == codigo for p in ya) or codigo in sscc_en_stock):
-        palet.update(estado="discrepancia", motivo="Este código de palet ya está registrado: palet repetido.")
+        palet.update(estado="discrepancia", duplicado=True, motivo="Este código de palet ya está registrado: palet repetido (se descarta al cerrar).")
     elif idx is None:
         palet.update(estado="discrepancia", motivo="Falta la referencia del palet: escríbela o haz foto de su etiqueta.")
     elif not codigo:

@@ -672,3 +672,28 @@ def test_entrada_repetida_da_error_y_se_puede_anular(cliente):
     assert cliente.post(f"/api/stock/entradas/{ident}/anular", json={}).status_code == 409   # ya anulada
     assert ident not in [x["id"] for x in cliente.get("/api/stock/entradas").json()["entradas"]]
     assert cliente.post("/api/stock/entradas", json=cuerpo).status_code == 200   # anulada: se puede volver a declarar
+
+
+def test_repetido_no_hace_sobrar_al_siguiente_e_incidencia_en_el_correo(cliente, enviados):
+    e = cliente.post("/api/stock/entradas", json={"cliente": "ALIPLAST", "fotos": [FOTO], "albaran": {"numero": "DDT-INC-1", "fecha": "2026-11-18", "total_palets": 2, "total_kg": 200,
+                     "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 2, "kg": 200}], "dudas": []}}).json()
+    ident = e["id"]
+    pal = lambda cod: cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": cod, "ref": "F05182S", "kg": 100, "lote": "L1"}).json()["palet"]
+    a = pal("LP26-1000001")
+    dup = pal("LP26-1000001")             # leído dos veces: queda como advertencia a depurar
+    b = pal("LP26-1000002")               # y el siguiente NO se marca como «sobra»
+    assert (a["estado"], dup["estado"], b["estado"]) == ("ok", "discrepancia", "ok") and "repetido" in dup["motivo"]
+    # incidencia de un bulto con foto
+    assert cliente.post(f"/api/stock/entradas/{ident}/incidencia", json={"palet": b["id"]}).status_code == 400   # vacía
+    r = cliente.post(f"/api/stock/entradas/{ident}/incidencia", json={"palet": b["id"], "texto": "Film roto en una esquina", "fotos": [FOTO]})
+    assert r.status_code == 200, r.text
+    # al cerrar (confirmando la advertencia) el repetido se descarta y solo entran 2 palets
+    out = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True}).json()
+    assert out["enviado"]
+    pl = [x for x in cliente.get("/api/stock/stock").json()["palets"] if x["sscc"].startswith("LP261000")]
+    assert sorted(x["sscc"] for x in pl) == ["LP261000001", "LP261000002"]
+    env = [x for x in enviados if x["evento"] == "entrada_cerrada"][-1]
+    assert "Incidencias por bulto" in env["html"] and "Film roto en una esquina" in env["html"] and "cid:inc1@stinsa" in env["html"]
+    inline = [f for f in env["fotos"] if f.get("inline")]
+    assert len(inline) == 1 and inline[0]["inline"] == "inc1@stinsa" and inline[0]["nombre"].startswith("incidencia")
+    assert cliente.post(f"/api/stock/entradas/{ident}/incidencia", json={"palet": b["id"], "texto": "x"}).status_code == 409   # cerrada
