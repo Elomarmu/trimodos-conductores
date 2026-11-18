@@ -52,7 +52,11 @@ async function cargarClientes() {
 function editarCliente(c) {
   stk.cliEdit = c.codigo;
   $("sc-nombre").value = c.nombre; $("sc-alias").value = (c.alias || []).join(", ");
-  $("sc-refs").value = (c.referencias || []).map((r) => `${r.ref};${r.descripcion || ""}`).join("\n");
+  $("sc-refs").value = (c.referencias || []).map((r) => `${r.ref};${r.descripcion || ""}` + ((r.alias || []).length ? ";" + r.alias.join("/") : "")).join("\n");
+  $("sc-porpalet").checked = !!c.salida_por_palet;
+  const av = c.aviso_llegada || {};
+  $("sc-aviso").checked = !!av.activo; $("sc-contacto").value = av.contacto || ""; $("sc-correo").value = av.correo || "";
+  $("sc-contactos").replaceChildren(); avisoCampos();
   $("sc-guardar").textContent = "Guardar los cambios de " + c.nombre;
   $("sc-nombre").scrollIntoView({ behavior: "smooth" });
 }
@@ -60,11 +64,32 @@ $("sc-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const nombre = $("sc-nombre").value.trim();
   if (nombre.length < 2) return showError("Escribe el nombre del cliente.");
-  const referencias = $("sc-refs").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const [ref, ...d] = l.split(";"); return { ref: ref.trim(), descripcion: d.join(";").trim() }; });
-  const r = await conCarga("Guardando…", () => post("/api/stock/clientes", { codigo: stk.cliEdit || "", nombre, referencias,
+  const referencias = $("sc-refs").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [ref, desc, eq] = l.split(";");   // referencia;descripción;códigos equivalentes (separados por /)
+    return { ref: ref.trim(), descripcion: (desc || "").trim(), alias: (eq || "").split("/").map((x) => x.trim()).filter(Boolean) };
+  });
+  const aviso = { activo: $("sc-aviso").checked, contacto: $("sc-contacto").value.trim(), correo: $("sc-correo").value.trim() };
+  if (aviso.activo && !aviso.correo) return showError("Para avisar al cliente de las llegadas hace falta el correo de su contacto (puedes buscarlo en Odoo).");
+  const r = await conCarga("Guardando…", () => post("/api/stock/clientes", { codigo: stk.cliEdit || "", nombre, referencias, salida_por_palet: $("sc-porpalet").checked, aviso_llegada: aviso,
     alias: $("sc-alias").value.split(",").map((s) => s.trim()).filter(Boolean) }));
-  if (r) { $("sc-nombre").value = ""; $("sc-alias").value = ""; $("sc-refs").value = ""; $("sc-guardar").textContent = "Guardar el cliente"; cargarClientes(); }
+  if (r) {
+    for (const i of ["sc-nombre", "sc-alias", "sc-refs", "sc-contacto", "sc-correo"]) $(i).value = "";
+    $("sc-porpalet").checked = false; $("sc-aviso").checked = false; $("sc-contactos").replaceChildren(); avisoCampos();
+    $("sc-guardar").textContent = "Guardar el cliente"; cargarClientes();
+  }
 });
+const avisoCampos = () => { $("sc-aviso-campos").hidden = !$("sc-aviso").checked; };
+$("sc-aviso").addEventListener("change", avisoCampos);
+$("sc-buscar-odoo").addEventListener("click", async () => {
+  if (!stk.cliEdit) return showError("Guarda primero el cliente y vuelve a tocarlo para buscar su contacto en Odoo.");
+  const q = $("sc-contacto").value.trim();
+  const r = await conCarga("Buscando en Odoo…", () => api(`/api/stock/clientes/${encodeURIComponent(stk.cliEdit)}/contactos` + (q ? "?q=" + encodeURIComponent(q) : "")));
+  if (!r) return;
+  $("sc-contactos").replaceChildren(...(r.contactos.length ? r.contactos.map((c) => h("button", { type: "button", class: "btn secondary",
+    onclick: () => { $("sc-contacto").value = c.nombre; $("sc-correo").value = c.correo; $("sc-contactos").replaceChildren(); } },
+    `${c.nombre}${c.empresa ? " · " + c.empresa : ""} · ${c.correo}`)) : [h("p", { class: "hint" }, `No hay contactos con correo para «${r.busqueda}». Escribe el nombre y vuelve a buscar, o pon el correo a mano.`)]));
+});
+avisoCampos();
 function opcionesClientes(sel, elegido) {
   sel.replaceChildren(h("option", { value: "" }, "— Elige el cliente —"), ...stk.clientes.map((c) => h("option", { value: c.codigo, selected: c.codigo === elegido }, c.nombre)));
 }
@@ -75,7 +100,7 @@ async function cargarEntradas() {
   if (!r) return;
   $("se-todas").textContent = stk.todas ? "Ver solo las que faltan" : "Ver también las cerradas";
   $("se-lista").replaceChildren(...(r.entradas.length ? r.entradas.map((e) => h("button", { type: "button", class: "btn secondary", onclick: () => abrirEntrada(e.id) },
-    `${e.cliente.nombre} · albarán ${e.albaran || "—"} · ${e.verificados}/${e.esperados} palets · ${tipoTxt[e.estado]}` + (e.discrepancias ? ` · ⚠ ${e.discrepancias}` : "") + (e.por_revisar ? " · 📧 POR REVISAR" : "")))
+    (e.tipo === "inventario" ? `📦 Inventario ${e.id} · ${e.cliente.nombre} · ${e.verificados} palets · ${tipoTxt[e.estado]}` : `${e.cliente.nombre} · albarán ${e.albaran || "—"} · ${e.verificados}/${e.esperados} palets · ${tipoTxt[e.estado]}`) + (e.discrepancias ? ` · ⚠ ${e.discrepancias}` : "") + (e.por_revisar ? " · 📧 POR REVISAR" : "")))
     : [h("p", { class: "hint" }, "No hay entradas pendientes.")]));
 }
 $("se-todas").addEventListener("click", () => { stk.todas = !stk.todas; cargarEntradas(); });
@@ -167,8 +192,13 @@ async function abrirEntrada(id) {
 function pintarEntrada(e) {
   stk.entrada = e;
   const cerrada = e.estado === "cerrada";
-  $("se-titulo").textContent = `Entrada ${e.id}`;
-  $("se-cabecera").textContent = `${e.cliente.nombre}${e.cliente_final ? " (para " + e.cliente_final + ")" : ""} · albarán ${e.albaran || "—"} del ${fechaEs(e.fecha)} · entrada en almacén ${fechaEs(e.fecha_entrada)} · ${e.verificados} de ${e.esperados} palets verificados` + (cerrada ? " · CERRADA" : "");
+  const inv = e.tipo === "inventario";
+  $("se-titulo").textContent = inv ? `Entrada manual de inventario ${e.id}` : `Entrada ${e.id}`;
+  $("se-lineas-titulo").textContent = inv ? "Referencias apuntadas" : "Lo que dice el albarán";
+  $("se-cerrar").textContent = inv ? "Terminar la entrada de inventario" : "Terminar la descarga";
+  $("se-barras").textContent = inv ? "Leer el código de barras de un palet" : "Escanear códigos de barras";
+  $("se-cabecera").textContent = inv ? `${e.cliente.nombre} · en el almacén desde ${fechaEs(e.fecha_entrada)} · ${e.verificados} palets apuntados` + (cerrada ? " · CERRADA" : "")
+    : `${e.cliente.nombre}${e.cliente_final ? " (para " + e.cliente_final + ")" : ""} · albarán ${e.albaran || "—"} del ${fechaEs(e.fecha)} · entrada en almacén ${fechaEs(e.fecha_entrada)} · ${e.verificados} de ${e.esperados} palets verificados` + (cerrada ? " · CERRADA" : "");
   document.querySelector('label[for="se-etq-camara"]').hidden = cerrada;
   $("se-barras").hidden = cerrada;
   pintarListaEntrada(e);
@@ -179,11 +209,11 @@ function pintarEntrada(e) {
   $("se-manual").closest("details").hidden = cerrada;
   $("se-lineas").replaceChildren(...e.lineas.map((l) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, l.ref || l.descripcion), l.ref && l.descripcion ? " · " + l.descripcion : "", h("br"),
-      h("span", { class: "hint" }, `Albarán ${l.esperados} palets${l.kg_albaran ? " · " + n(l.kg_albaran) + " kg" : ""}`)),
-    h("span", { class: l.verificados === l.esperados ? "code" : "nota" }, `${l.verificados}/${l.esperados}`))));
+      h("span", { class: "hint" }, inv ? `${l.verificados} palets${l.kg_etiquetas ? " · " + n(l.kg_etiquetas) + " kg" : ""}` : `Albarán ${l.esperados} palets${l.kg_albaran ? " · " + n(l.kg_albaran) + " kg" : ""}`)),
+    inv ? null : h("span", { class: l.verificados === l.esperados ? "code" : "nota" }, `${l.verificados}/${l.esperados}`))));
   $("se-palets-titulo").hidden = !e.palets.length;
   $("se-palets").replaceChildren(...e.palets.map((p) => h("div", { class: "fila" },
-    h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
+    h("span", {}, h("b", {}, p.ref || "¿?"), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", p.fecha_prod ? ` · prod. ${fechaEs(p.fecha_prod)}` : "", h("br"),
       h("span", { class: "hint" }, p.id + (p.sscc ? " · " + p.sscc : "") + (p.origen === "barras" ? " · escaneado" : p.manual ? " · a mano" : "")),
       p.estado === "discrepancia" ? h("br") : null, p.estado === "discrepancia" ? h("span", { class: "nota" }, "⚠ " + p.motivo) : null),
     cerrada ? null : h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarPaletEntrada(p) }, "Quitar"))));
@@ -212,7 +242,14 @@ $("se-m-lista").addEventListener("change", () => {
   if (!x) return;
   $("se-m-sscc").value = x.codigo; $("se-m-ref").value = x.ref || ""; $("se-m-lote").value = x.lote || ""; $("se-m-kg").value = x.kg ? String(x.kg) : "";
 });
-$("se-barras").addEventListener("click", () => abrirLectorBarras({
+$("se-barras").addEventListener("click", () => stk.entrada.tipo === "inventario" ? abrirLectorBarras({
+  titulo: `Inventario ${stk.entrada.id}: leer el código del palet`,
+  yaEsta: (c) => stk.entrada.palets.some((p) => p.sscc === c),
+  alLeer: async (codigo) => {   // en el inventario el código solo no dice qué producto es: se pasa al formulario para poner la referencia, el lote y los kg
+    $("se-m-sscc").value = codigo; $("se-manual").closest("details").open = true; $("se-m-ref").focus();
+    return { ok: true, texto: `✓ Código ${codigo} leído. Cierra el escáner y escribe la referencia, el lote y los kg (o haz la foto de la etiqueta, que lo lee todo).` };
+  },
+}) : abrirLectorBarras({
   titulo: `Entrada ${stk.entrada.id}: escanear palets`,
   yaEsta: (c) => stk.entrada.palets.some((p) => p.sscc === c),
   alLeer: async (codigo) => {
@@ -246,6 +283,16 @@ $("se-revisar-btn").addEventListener("click", async () => {
 });
 $("se-recargar").addEventListener("click", () => abrirEntrada(stk.entrada.id));
 $("se-cerrar").addEventListener("click", () => cerrarEntrada(false));
+// Aviso de llegada al cliente: borrador en traficolevante@ (nunca se envía solo). Solo se dice algo si el cliente lo tiene activado.
+function avisoClienteHtml(a) {
+  if (!a || !a.activo) return [];
+  if (a.creado) return [h("div", { class: "banner info" }, `📧 Borrador del aviso a ${a.para} dejado en ${a.buzon} (con ${a.adjuntos} documento${a.adjuntos === 1 ? "" : "s"} adjunto${a.adjuntos === 1 ? "" : "s"}). Revísalo y envíalo desde Outlook.`)];
+  return [h("div", { class: "banner warn" }, "⚠ No se ha dejado el borrador del aviso al cliente. " + (a.motivo || "Inténtalo otra vez.")),
+    h("button", { class: "btn secondary", onclick: async () => {
+      const r = await conCarga("Preparando el borrador…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/aviso`, {}));
+      if (r) $("se-descargas").prepend(...avisoClienteHtml(r.aviso_cliente));
+    } }, "Volver a preparar el borrador")];
+}
 async function cerrarEntrada(confirmado) {
   clearError(); busy("Terminando la descarga y mandando la documentación…");
   try {
@@ -254,6 +301,7 @@ async function cerrarEntrada(confirmado) {
     pintarEntrada(r.entrada);
     $("se-descargas").replaceChildren(
       h("div", { class: "banner info" }, r.enviado ? `Entrada cerrada. Documentación enviada a ${r.para}.` : "Entrada cerrada. El envío automático no está configurado o ha fallado: descarga la Excel aquí."),
+      ...avisoClienteHtml(r.aviso_cliente),
       ...r.archivos.map((a) => h("button", { class: "btn secondary", onclick: () => descargarXlsx(a) }, "Descargar " + a.nombre)));
   } catch (err) {
     busy(null);
@@ -329,7 +377,7 @@ function pintarSalida(s) {
   stk.salida = s;
   const cargada = s.estado === "cargada";
   $("ss-titulo").textContent = `Salida ${s.id}`;
-  $("ss-cabecera").textContent = `${s.cliente.nombre}${s.datos.referencia ? " · pedido " + s.datos.referencia : ""}${s.datos.destino ? " · destino " + s.datos.destino : ""} · ${s.cargados} de ${s.pedidos} palets` + (cargada ? " · CARGADA" : "");
+  $("ss-cabecera").textContent = `${s.cliente.nombre}${s.datos.referencia ? " · pedido " + s.datos.referencia : ""}${s.datos.destino ? " · destino " + s.datos.destino : ""} · ${s.cargados} de ${s.pedidos} palets` + (s.por_palet ? " · hay que cargar los palets concretos pedidos (por su código)" : "") + (cargada ? " · CARGADA" : "");
   document.querySelector('label[for="ss-etq-camara"]').hidden = cargada;
   $("ss-barras").hidden = cargada;
   pintarListaSalida(s);
@@ -428,9 +476,16 @@ async function cargarStock() {
   const r = await conCarga("Calculando el stock…", () => api("/api/stock/stock"));
   if (!r) return;
   $("sa-total").textContent = `${r.total_palets} palets · ${n(r.total_kg)} kg en el almacén.`;
+  // Aviso (solo informativo, no hay FIFO): mercancía que lleva más de un mes en el almacén
+  const viejos = r.palets.filter((p) => p.antiguo);
+  $("sa-antiguos").replaceChildren(...(viejos.length ? [h("div", { class: "banner warn" },
+    `⏳ ${viejos.length} palet${viejos.length === 1 ? "" : "s"} lleva${viejos.length === 1 ? "" : "n"} más de un mes en el almacén: ` +
+    r.resumen.filter((g) => g.antiguos).map((g) => `${g.cliente_nombre} · ${g.ref || "—"} (${g.antiguos})`).join(" · "))] : []));
+  const lotes = (g) => [...new Set(r.palets.filter((p) => p.cliente === g.cliente && p.ref === g.ref && p.lote).map((p) => p.lote))].join(", ");
   $("sa-lista").replaceChildren(...(r.resumen.length ? r.resumen.map((g) => h("div", { class: "fila" },
     h("span", {}, h("b", {}, g.cliente_nombre), h("br"), `${g.ref || "—"}${g.descripcion ? " · " + g.descripcion : ""}`, h("br"),
-      h("span", { class: "hint" }, `${n(g.kg)} kg · desde hace ${g.dias} días`)),
+      h("span", { class: "hint" }, `${n(g.kg)} kg · desde hace ${g.dias} días` + (lotes(g) ? " · lote " + lotes(g) : "")),
+      g.antiguos ? h("br") : null, g.antiguos ? h("span", { class: "nota" }, `⏳ ${g.antiguos} con más de un mes`) : null),
     h("span", { class: "code" }, `${g.palets} palets`))) : [h("p", { class: "hint" }, "El almacén está vacío (todavía no hay entradas cerradas).")]));
   $("sa-descargas").replaceChildren();
 }
@@ -439,4 +494,92 @@ $("sa-libro").addEventListener("click", async () => {
   if (r) $("sa-descargas").replaceChildren(
     h("div", { class: "banner info" }, r.enviado ? "Excel de control actualizada en SharePoint." : "No se ha podido subir a SharePoint: descárgala aquí."),
     h("button", { class: "btn secondary", onclick: () => descargarXlsx(r.archivo) }, "Descargar " + r.archivo.nombre));
+});
+
+// ---------- inventario: entrada manual ----------
+$("sa-nueva-inv").addEventListener("click", async () => {
+  const r = await conCarga("Cargando…", () => api("/api/stock/clientes"));
+  if (!r) return;
+  stk.clientes = r.clientes;
+  opcionesClientes($("sin-cliente"), null);
+  $("sin-form").reset();
+  go("stock-inv-nueva");
+});
+$("sin-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const cliente = $("sin-cliente").value;
+  if (!cliente) return showError("Elige el cliente de la lista.");
+  const e = await conCarga("Creando la entrada de inventario…", () => post("/api/stock/inventario", { cliente, fecha_entrada: $("sin-fecha").value, nota: $("sin-nota").value.trim() }));
+  if (!e) return;
+  pintarEntrada(e);
+  $("se-aviso-palet").replaceChildren();
+  go("stock-entrada");
+});
+
+// ---------- inventario: control (contar lo que hay y compararlo con el sistema) ----------
+$("sa-control").addEventListener("click", async () => {
+  const [c, r] = await conCarga("Cargando…", () => Promise.all([api("/api/stock/clientes"), api("/api/stock/controles")])) || [];
+  if (!c) return;
+  stk.clientes = c.clientes;
+  $("sco-cliente").replaceChildren(h("option", { value: "" }, "Todos los clientes"), ...c.clientes.map((x) => h("option", { value: x.codigo }, x.nombre)));
+  $("sco-lista").replaceChildren(...(r.controles.length ? r.controles.map((k) => h("button", { type: "button", class: "btn secondary", onclick: () => abrirControl(k.id) },
+    `${k.id} · ${k.cliente.nombre} · ${k.contados} palets contados · ${k.estado === "cerrado" ? "Cerrado" : "Abierto"}`)) : [h("p", { class: "hint" }, "Todavía no se ha hecho ningún control.")]));
+  go("stock-controles");
+});
+$("sco-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const k = await conCarga("Abriendo el control…", () => post("/api/stock/controles", { cliente: $("sco-cliente").value }));
+  if (k) { pintarControl(k); $("sc2-aviso").replaceChildren(); $("sc2-descargas").replaceChildren(); go("stock-control"); }
+});
+async function abrirControl(id) {
+  const k = await conCarga("Cargando el control…", () => api("/api/stock/controles/" + encodeURIComponent(id)));
+  if (k) { pintarControl(k); $("sc2-aviso").replaceChildren(); $("sc2-descargas").replaceChildren(); go("stock-control"); }
+}
+function pintarControl(k) {
+  stk.control = k;
+  const cerrado = k.estado === "cerrado", r = k.resultado;
+  $("sc2-titulo").textContent = `Control de inventario ${k.id}`;
+  $("sc2-cabecera").textContent = `${k.cliente.nombre} · en el sistema ${r.esperados} palets · contados ${r.contados} · correctos ${r.bien} · faltan ${r.faltan.length} · sobran ${r.sobran.length}` + (cerrado ? " · CERRADO" : "");
+  for (const i of ["sc2-barras", "sc2-form", "sc2-cierre"]) $(i).hidden = cerrado;
+  const caja = (clase, texto) => h("div", { class: "fila" }, h("span", { class: clase }, texto));
+  $("sc2-resultado").replaceChildren(
+    ...(r.sobran.length ? [h("h2", {}, `Sobran (${r.sobran.length}): encontrados y no están en el sistema`)] : []),
+    ...r.sobran.map((x) => caja("nota", `${x.sscc} · ${x.motivo}`)),
+    ...(r.faltan.length ? [h("h2", {}, `Faltan (${r.faltan.length}): en el sistema y sin contar`)] : []),
+    ...r.faltan.map((x) => caja("", `${x.sscc} · ${x.ref || "—"}${x.lote ? " · lote " + x.lote : ""}${x.kg ? " · " + n(x.kg) + " kg" : ""}${k.cliente.codigo ? "" : " · " + x.cliente}`)),
+    ...(!r.faltan.length && !r.sobran.length ? [h("p", { class: "hint" }, r.contados ? "De momento todo lo contado coincide con el sistema." : "Escanea el primer palet.")] : []),
+    ...(cerrado && k.bajas.length ? [h("div", { class: "banner warn" }, `Se dieron de baja ${k.bajas.length} palets del sistema.`)] : []));
+}
+const contarPalet = async (codigo, origen) => {
+  const r = await post(`/api/stock/controles/${encodeURIComponent(stk.control.id)}/palet`, { sscc: codigo, origen });
+  pintarControl(r.control);
+  return r;
+};
+$("sc2-barras").addEventListener("click", () => abrirLectorBarras({
+  titulo: `Control ${stk.control.id}: escanear palets`,
+  yaEsta: () => false,   // un repetido lo avisa el servidor
+  alLeer: async (codigo) => {
+    const r = await contarPalet(codigo, "barras");
+    if (r.repetido) return { ok: false, texto: `⚠ ${codigo} ya estaba contado.` };
+    return r.palet.estado === "ok" ? { ok: true, texto: `✓ ${r.palet.ref || ""} · ${codigo}` } : { ok: false, texto: `⚠ ${codigo}: ${r.palet.motivo}` };
+  },
+}));
+$("sc2-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const codigo = $("sc2-codigo").value.trim();
+  if (!codigo) return;
+  const r = await conCarga("Contando…", () => contarPalet(codigo, ""));
+  if (!r) return;
+  $("sc2-codigo").value = "";
+  $("sc2-aviso").replaceChildren(h("div", { class: "banner " + (!r.repetido && r.palet.estado === "ok" ? "info" : "warn") },
+    r.repetido ? `⚠ ${codigo} ya estaba contado.` : r.palet.estado === "ok" ? `✓ ${r.palet.ref || ""} · ${codigo}` : `⚠ ${codigo}: ${r.palet.motivo}`));
+});
+$("sc2-cerrar").addEventListener("click", () => {
+  const r = stk.control.resultado, baja = $("sc2-baja").checked;
+  confirmar(`Contados ${r.contados} palets; faltan ${r.faltan.length} y sobran ${r.sobran.length}.\n` + (baja && r.faltan.length ? `Se darán de baja del sistema los ${r.faltan.length} que faltan.` : "No se dará de baja ningún palet.") + "\nSe avisará por correo.", "Sí, terminar el control", async () => {
+    const x = await conCarga("Cerrando el control…", () => post(`/api/stock/controles/${encodeURIComponent(stk.control.id)}/cerrar`, { baja_faltantes: baja, nota: $("sc2-nota").value.trim() }));
+    if (!x) return;
+    pintarControl(x.control);
+    $("sc2-descargas").replaceChildren(h("div", { class: "banner info" }, x.enviado ? `Control cerrado. Resumen enviado a ${x.para}.` : "Control cerrado. El envío del resumen no está configurado o ha fallado."));
+  });
 });

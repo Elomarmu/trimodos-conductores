@@ -27,6 +27,14 @@ Datos que necesito:
   Las líneas de resumen (referencia con el total de palets) van en «lineas»; no cuentes dos veces.
 - observaciones: anotaciones a mano, incidencias o condiciones especiales.
 
+Si el PDF/las fotos reúnen VARIOS documentos del mismo envío (p. ej. albarán de entrega «DDT», packing list y CMR de un
+transporte internacional), el albarán es el de entrega (DDT): su número y su fecha son los del albarán; el remitente es quien
+vende/envía la mercancía (p. ej. «Aliplast S.p.A.»). El packing list da la lista de palets: una entrada en palets_detalle por
+fila, con codigo = la matrícula del palet (columna «Targa»/«License plate», p. ej. LP26-0236823), referencia = el artículo,
+lote = el lote de producción («Lotto»/«Batch»), fecha_produccion (AAAA-MM-DD, «Data produzione»), kg = PESO NETO (no el bruto).
+total_palets y total_kg son los totales del albarán (nº de palets/colli y peso neto). Del CMR solo anota en observaciones lo
+relevante (reservas, daños, sellos); matrícula y transportista pueden salir de él.
+
 Reglas: los pesos usan punto de miles («24.800» son 24800 kg); da los números enteros. Si un dato no aparece, null.
 En «dudas» explica brevemente cualquier dato que no se lea con seguridad. NO anotes como duda: que falten transportista o
 matrícula, que el remitente salga del membrete, ni nada de bultos o unidades (no se controlan). Solo dudas que afecten a
@@ -46,7 +54,8 @@ ESQUEMA_ALBARAN = {
             "kg": {"type": ["integer", "null"]}, "lote": {"type": ["string", "null"]}}}},
         "palets_detalle": {"type": "array", "items": {"type": "object", "properties": {
             "codigo": {"type": "string"}, "referencia": {"type": ["string", "null"]},
-            "entrada": {"type": ["string", "null"]}, "kg": {"type": ["integer", "null"]}}, "required": ["codigo"]}},
+            "entrada": {"type": ["string", "null"]}, "kg": {"type": ["integer", "null"]},
+            "lote": {"type": ["string", "null"]}, "fecha_produccion": {"type": ["string", "null"], "description": "AAAA-MM-DD"}}, "required": ["codigo"]}},
         "observaciones": {"type": ["string", "null"]},
         "dudas": {"type": "array", "items": {"type": "string"}},
     },
@@ -60,6 +69,9 @@ en grande arriba, seguido de la descripcion), lote (null si «Lote:» está vac�
 ECS26-3696), kg (peso, solo si la etiqueta lo trae; si no, null), caducidad (AAAA-MM-DD, si hay), cliente = la empresa del
 membrete o logotipo de la etiqueta (p. ej. «Grupo …») y cliente_final = el nombre junto a «Identificador», si hay.
 NO me interesan las unidades ni el «Total».
+Etiquetas de bobinas (p. ej. Aliplast): sscc = «License plate» (LP26-…, el código de barras); referencia = «Articolo»
+(el «Cross-reference» es solo un código equivalente: no lo uses); lote = «Lotto/Batch» (p. ej. P03-015457); kg = el PESO NETO
+(«netto»), nunca el bruto ni la tara; fecha_produccion = «Data prod.» (AAAA-MM-DD). Ignora «Pallet nr» y las estimaciones.
 No inventes: lo que no se vea es null. En «dudas» anota lo que no se lea con seguridad (un número borroso, dos etiquetas
 en la foto…)."""
 
@@ -68,17 +80,21 @@ ESQUEMA_ETIQUETA = {
     "properties": {
         "sscc": {"type": ["string", "null"]}, "referencia": {"type": ["string", "null"]}, "descripcion": {"type": ["string", "null"]},
         "lote": {"type": ["string", "null"]}, "entrada": {"type": ["string", "null"]}, "kg": {"type": ["integer", "null"]},
-        "caducidad": {"type": ["string", "null"]}, "cliente": {"type": ["string", "null"]}, "cliente_final": {"type": ["string", "null"]},
+        "caducidad": {"type": ["string", "null"]}, "fecha_produccion": {"type": ["string", "null"], "description": "AAAA-MM-DD"}, "cliente": {"type": ["string", "null"]}, "cliente_final": {"type": ["string", "null"]},
         "dudas": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["sscc", "referencia", "lote", "dudas"],
 }
 
 PROMPT_PETICION = """Esta es una petición de salida de mercancía de un cliente de un almacén (foto, captura o PDF de un correo
-o de un pedido). Lee: cliente (quién la pide), referencia_cliente (su nº de pedido o de petición), destino (dónde se envía),
-fecha (AAAA-MM-DD, de la petición o de la recogida) y lineas: una por cada tipo de palet pedido con su referencia o código
+o de un pedido). Lee: cliente (quién la pide: la empresa que emite el documento, la del membrete o el pie, NO la de «Datos del cliente»,
+que suele ser el destinatario), referencia_cliente (su nº de pedido, de petición o de albarán, p. ej. «M-2026/154»), destino
+(el cliente final/fábrica a la que va la mercancía, p. ej. Peronda Cerámicas), fecha (AAAA-MM-DD, de la petición o de la recogida) y lineas: una por cada tipo de palet pedido con su referencia o código
 de artículo, descripcion y nº de palets (si lo dan en bultos o kg y no en palets, pon palets null y explícalo en dudas).
-Si la petición lista los palets uno a uno (con su código), ponlos en palets_detalle (codigo tal como se imprime, referencia).
+Si la petición lista los palets uno a uno (con su código, p. ej. LP26-0236823), ponlos en palets_detalle (codigo tal como se
+imprime, referencia, lote si sale, kg). Una sola línea por producto: si el mismo artículo sale repetido (variantes como «-MV»,
+líneas partidas por reciclado/no reciclado o por impuestos), júntalas en una y suma los palets; ignora el reparto de kg entre
+reciclado y no reciclado y las líneas de impuestos o tasas.
 No inventes. En «dudas» anota lo que no se lea con seguridad."""
 
 ESQUEMA_PETICION = {

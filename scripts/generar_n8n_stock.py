@@ -49,12 +49,14 @@ const d = $('Datos').first().json;
 const ruta = (...partes) => partes.filter(Boolean).map(encodeURIComponent).join('/');
 const tipoDe = (n, t) => t || (/\\.xlsx$/i.test(n) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   : /\\.pdf$/i.test(n) ? 'application/pdf' : /\\.png$/i.test(n) ? 'image/png' : 'image/jpeg');
-const subir = [...(d.archivos || []), ...(d.fotos || [])].map(a => ({
+// Los archivos con sharepoint:false (p. ej. la documentación del aviso a un cliente) solo van al correo.
+const subir = [...(d.archivos || []), ...(d.fotos || [])].filter(a => a.sharepoint !== false).map(a => ({
   json: { tipo: 'sharepoint', nombre: a.nombre, url: `${d.base}:/${ruta(a.carpeta, a.nombre)}:/content?@microsoft.graph.conflictBehavior=replace` },
   binary: { archivo: { data: a.b64, mimeType: tipoDe(a.nombre, a.tipo), fileName: a.nombre } } }));
 const para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);
 const salida = [...subir];
-if (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio,
+// buzon: la app puede pedir otro buzón (p. ej. traficolevante@stinsa.com para los avisos a clientes); si no, el de la credencial.
+if (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: d.buzon || cfg.buzonEnvio,
   mensaje: { subject: d.asunto || 'Almacén Burriana', body: { contentType: 'HTML', content: String(d.html || '') },
              toRecipients: para.map(a => ({ emailAddress: { address: a } })) } } });
 return salida;
@@ -64,9 +66,9 @@ JS_ADJUNTOS = """// La Excel de la operación y las fotos se añaden de una en u
 // El libro de control (correo: false) solo va a SharePoint: lleva el stock de todos los clientes y no se reenvía.
 const d = $('Datos').first().json;
 const borrador = $('Crear borrador').first().json;
-const buzon = $('Configuración').first().json.buzonEnvio;
+const buzon = d.buzon || $('Configuración').first().json.buzonEnvio;
 const url = `https://graph.microsoft.com/v1.0/users/${buzon}/messages/${borrador.id}/attachments`;
-const todos = [...(d.archivos || []).filter(a => a.correo !== false).map(a => ({ name: a.nombre, contentBytes: a.b64 })),
+const todos = [...(d.archivos || []).filter(a => a.correo !== false).map(a => ({ name: a.nombre, contentBytes: a.b64, contentType: a.tipo })),
                ...(d.fotos || []).map(f => ({ name: f.nombre, contentBytes: f.b64, contentType: f.tipo }))];
 if (!todos.length) return [{ json: { sinAdjuntos: true } }];
 return todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.type': '#microsoft.graph.fileAttachment', ...a } } }));
@@ -75,6 +77,8 @@ return todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.typ
 NOTA = """## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo
 **Desde la app** (POST con cabecera X-Clave, una llamada por operación):
 - entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.
+- inventario_cerrado / control_cerrado: igual que arriba (el control solo actualiza el libro y manda el resumen por correo).
+- aviso_llegada: NO se envía. Deja un BORRADOR en el buzón indicado por la app (traficolevante@stinsa.com) dirigido al contacto del cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Una persona lo revisa y lo manda. Requiere que la credencial «Outlook Agente Trafico» tenga acceso a ese buzón.
 - libro: solo rehace el libro de control en SharePoint (sin correo).
 
 Los correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.
@@ -110,6 +114,14 @@ def generar() -> dict:
     lleva.update(name="¿Lleva carpeta?", id=str(uuid.uuid4()), position=[1120, 200])
     lleva["parameters"]["conditions"]["conditions"][0]["leftValue"] = "={{ $json.llevaCarpeta }}"
     res.insert(res.index(carpeta), lleva)
+    # ¿Se envía? (enviar:false = solo deja el borrador, p. ej. el aviso de llegada al cliente)
+    envia = copy.deepcopy(nodos["¿Sin adjuntos?"])
+    envia.update(name="¿Se envía?", id=str(uuid.uuid4()), position=[2660, 300], executeOnce=True)
+    envia["parameters"]["conditions"]["conditions"][0]["leftValue"] = "={{ $('Datos').first().json.enviar !== false }}"
+    res.insert(res.index(por_nombre["Enviar correo"]), envia)
+    por_nombre["Enviar correo"]["parameters"]["url"] = ("=https://graph.microsoft.com/v1.0/users/{{ $('Datos').first().json.buzon || $('Configuración').first().json.buzonEnvio }}"
+                                                       "/messages/{{ $('Crear borrador').first().json.id }}/send")
+    por_nombre["Enviar correo"]["position"] = [2880, 300]
     flujo["nodes"] = res
     flujo["connections"] = {
         "Desde la app": {"main": [[{"node": "Configuración", "type": "main", "index": 0}]]},
@@ -122,8 +134,9 @@ def generar() -> dict:
         "¿SharePoint o correo?": {"main": [[{"node": "Subir a SharePoint", "type": "main", "index": 0}], [{"node": "Crear borrador", "type": "main", "index": 0}]]},
         "Crear borrador": {"main": [[{"node": "Adjuntos", "type": "main", "index": 0}]]},
         "Adjuntos": {"main": [[{"node": "¿Sin adjuntos?", "type": "main", "index": 0}]]},
-        "¿Sin adjuntos?": {"main": [[{"node": "Enviar correo", "type": "main", "index": 0}], [{"node": "Añadir adjunto", "type": "main", "index": 0}]]},
-        "Añadir adjunto": {"main": [[{"node": "Enviar correo", "type": "main", "index": 0}]]},
+        "¿Sin adjuntos?": {"main": [[{"node": "¿Se envía?", "type": "main", "index": 0}], [{"node": "Añadir adjunto", "type": "main", "index": 0}]]},
+        "Añadir adjunto": {"main": [[{"node": "¿Se envía?", "type": "main", "index": 0}]]},
+        "¿Se envía?": {"main": [[{"node": "Enviar correo", "type": "main", "index": 0}]]},
     }
     flujo["active"] = False
     return flujo

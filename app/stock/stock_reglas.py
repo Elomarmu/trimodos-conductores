@@ -18,8 +18,10 @@ TOLERANCIA_KG = 0.02          # diferencia de peso admitida entre albarán y eti
 MIN_CODIGO = 8                # caracteres mínimos para tomar el código de la etiqueta como identificador del palet (SSCC de 18 o código de fábrica de 10)
 DIAS_ALBARAN_FUTURO = 3       # un albarán fechado como mucho 3 días después de hoy es normal (se emite para el viaje de mañana)
 DIAS_ALBARAN_ANTIGUO = 30     # un albarán más viejo que esto se avisa
+DIAS_ESTOCAJE_AVISO = 30      # mercancía que lleva en el almacén más de un mes (solo se avisa: no hay FIFO obligatorio)
 
 ENTRADA_PENDIENTE, ENTRADA_DESCARGANDO, ENTRADA_CERRADA, ENTRADA_ANULADA = "pendiente", "descargando", "cerrada", "anulada"
+CONTROL_ABIERTO, CONTROL_CERRADO = "abierto", "cerrado"
 SALIDA_PEDIDA, SALIDA_PREPARANDO, SALIDA_CARGADA, SALIDA_ANULADA = "pedida", "preparando", "cargada", "anulada"
 
 
@@ -136,7 +138,8 @@ def textos_cliente(albaran: dict) -> list[str]:
 
 
 def limpiar_esperados(lista) -> list[dict]:
-    """Palets que el albarán dice que vienen: [{codigo, ref, kg, lote}] (sin repetidos). El lote es el código de «Entrada»."""
+    """Palets que el albarán dice que vienen: [{codigo, ref, kg, lote, fecha_prod}] (sin repetidos). El lote es el de producción o, si el albarán
+    no lo trae, el código de «Entrada»."""
     vistos, res = set(), []
     for x in lista or []:
         c = sscc(x.get("codigo"))
@@ -144,12 +147,61 @@ def limpiar_esperados(lista) -> list[dict]:
             continue
         vistos.add(c)
         res.append({"codigo": c, "ref": str(x.get("referencia") or x.get("ref") or "").strip(), "kg": entero(x.get("kg")),
-                    "lote": str(x.get("lote") or x.get("entrada") or "").strip()})
+                    "lote": str(x.get("lote") or x.get("entrada") or "").strip(), "fecha_prod": fecha(x.get("fecha_produccion") or x.get("fecha_prod"))})
     return res
 
 
 def cliente_por_codigo(clientes: list[dict], codigo: str) -> dict | None:
     return next((c for c in clientes if c.get("codigo") == codigo), None)
+
+
+def claves_catalogo(cliente: dict | None) -> dict[str, str]:
+    """{referencia normalizada → referencia principal} del catálogo del cliente, con sus códigos alternativos
+    (p. ej. «F05182S-MV» y el código numérico de cruce valen como «F05182S»)."""
+    res: dict[str, str] = {}
+    for r in (cliente or {}).get("referencias") or []:
+        principal = str(r.get("ref") or "").strip()
+        if not principal:
+            continue
+        res[referencia(principal)] = principal
+        for a in r.get("alias") or []:
+            if referencia(a):
+                res.setdefault(referencia(a), principal)
+    return res
+
+
+def canonica(cliente: dict | None, ref) -> str:
+    """La referencia principal del catálogo si `ref` es una de sus equivalentes; si no, la misma referencia."""
+    t = str(ref or "").strip()
+    return claves_catalogo(cliente).get(referencia(t), t) if t else t
+
+
+def unificar_lineas(lineas: list[dict], esperados: list[dict], cliente: dict | None, clave_ref: str = "ref") -> list[dict]:
+    """Con el catálogo del cliente: pone la referencia principal en las líneas y en los palets de la lista, junta las líneas
+    de la misma referencia y, si hay lista de palets, cuenta los palets de cada línea por esa lista. Las líneas sin palets y
+    sin ninguna fila en la lista (p. ej. el reparto reciclado / no reciclado de un albarán) se descartan."""
+    for x in esperados:
+        x["ref"] = canonica(cliente, x.get("ref"))
+    juntas: dict[str, dict] = {}
+    for l in lineas:
+        l["ref"] = canonica(cliente, l.get(clave_ref))
+        k = referencia(l["ref"]) or norm(l.get("descripcion"))
+        if k in juntas:
+            j = juntas[k]
+            for c in ("palets", "bultos", "kg"):
+                if l.get(c) is not None:
+                    j[c] = (j.get(c) or 0) + l[c]
+            j["lote"] = j.get("lote") or l.get("lote") or ""
+        else:
+            juntas[k] = l
+    res = list(juntas.values())
+    if esperados:
+        for l in res:
+            cuenta = sum(1 for x in esperados if referencia(x["ref"]) == referencia(l["ref"]))
+            if cuenta:
+                l["palets"] = cuenta
+        res = [l for l in res if l.get("palets")]
+    return res
 
 
 # ---- entradas: conflictos al cargar el albarán ---------------------------------------------------------------------
@@ -179,7 +231,7 @@ def limpiar_albaran(leido: dict, hoy: dt.date | None = None) -> dict:
 
 
 def conflictos_entrada(albaran: dict, cliente: dict | None, clientes: list[dict], entradas: list[dict],
-                       hoy: dt.date | None = None) -> list[dict]:
+                       hoy: dt.date | None = None, esperados: list[dict] | None = None) -> list[dict]:
     """Avisos de una entrada antes de guardarla. `entradas` = las ya guardadas (para duplicados e historial del cliente)."""
     hoy = hoy or dt.date.today()
     av: list[dict] = []
@@ -229,8 +281,14 @@ def conflictos_entrada(albaran: dict, cliente: dict | None, clientes: list[dict]
     suma_kg = sum(l.get("kg") or 0 for l in lineas)
     if albaran.get("total_kg") and suma_kg and abs(albaran["total_kg"] - suma_kg) > TOLERANCIA_KG * albaran["total_kg"]:
         av.append(aviso("aviso", f"El albarán dice {albaran['total_kg']} kg en total y las líneas suman {suma_kg} kg."))
+    if esperados:   # la lista de palets (packing list / Excel) tiene que cuadrar con los totales del albarán
+        if albaran.get("total_palets") and albaran["total_palets"] != len(esperados):
+            av.append(aviso("error", f"El albarán dice {albaran['total_palets']} palets y la lista trae {len(esperados)} códigos: puede que falte alguna fila al leerla."))
+        kg_lista = sum(x.get("kg") or 0 for x in esperados)
+        if albaran.get("total_kg") and kg_lista and abs(albaran["total_kg"] - kg_lista) > 0.005 * albaran["total_kg"]:
+            av.append(aviso("error", f"El albarán dice {albaran['total_kg']} kg y los pesos de la lista suman {kg_lista} kg: revisa la lectura de los pesos."))
     if cliente and cliente.get("referencias"):   # catálogo de referencias del cliente
-        catalogo = {referencia(r.get("ref")) for r in cliente["referencias"]}
+        catalogo = set(claves_catalogo(cliente))
         for l in lineas:
             if l.get("ref") and referencia(l["ref"]) not in catalogo:
                 av.append(aviso("aviso", f"La referencia {l['ref']} no está en el catálogo de {cliente['nombre']}: ¿está bien escrita o es un producto nuevo?"))
@@ -253,6 +311,7 @@ def limpiar_etiqueta(leida: dict) -> dict:
             "lote": str(leida.get("lote") or leida.get("entrada") or "").strip(),   # sin lote, el código de «Entrada» hace de lote
             "kg": entero(leida.get("kg")), "bultos": entero(leida.get("bultos")),
             "cliente_texto": str(leida.get("cliente") or "").strip(), "caducidad": fecha(leida.get("caducidad")),
+            "fecha_prod": fecha(leida.get("fecha_produccion") or leida.get("fecha_prod")),
             "dudas": [str(d) for d in leida.get("dudas") or []]}
 
 
@@ -270,6 +329,8 @@ def verificar_palet(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> d
     """Casa la etiqueta de un palet con el albarán. Devuelve el palet listo para guardar:
     estado «ok» o «discrepancia» (con el motivo). Nunca se rechaza una etiqueta: queda anotada y se resuelve al cerrar.
     Si el albarán trae la lista de palets (código de cada uno) se casa por código; si no, por referencia y lote."""
+    if entrada.get("tipo") == "inventario":
+        return _verificar_inventario(entrada, etiqueta, sscc_en_stock)
     lineas = entrada["lineas"]
     codigo = etiqueta.get("sscc") if len(etiqueta.get("sscc") or "") >= MIN_CODIGO else ""
     esperados = {x["codigo"]: x for x in entrada.get("esperados") or []}
@@ -281,6 +342,8 @@ def verificar_palet(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> d
         palet["kg"] = exp["kg"]   # la etiqueta no trae peso: se toma el del albarán
     if exp and not palet.get("lote") and exp.get("lote"):
         palet["lote"] = exp["lote"]
+    if exp and not palet.get("fecha_prod") and exp.get("fecha_prod"):
+        palet["fecha_prod"] = exp["fecha_prod"]
     if codigo and (any(p.get("sscc") == codigo for p in ya) or codigo in sscc_en_stock):
         palet.update(estado="discrepancia", motivo="Esta etiqueta (código de palet) ya está registrada: palet repetido.")
     elif idx is None:
@@ -307,6 +370,33 @@ def verificar_palet(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> d
     return palet
 
 
+def _verificar_inventario(entrada: dict, etiqueta: dict, sscc_en_stock: set[str]) -> dict:
+    """Entrada manual de inventario (mercancía que ya estaba en el almacén o aparece sin albarán): no hay albarán con el que casar.
+    Se acepta el palet con lo que diga su etiqueta; solo se avisa si repite un código o no tiene referencia."""
+    codigo = etiqueta.get("sscc") if len(etiqueta.get("sscc") or "") >= MIN_CODIGO else ""
+    ya = [p for p in entrada["palets"] if p.get("estado_alta") != "quitado"]
+    lineas = entrada["lineas"]
+    ref = etiqueta.get("ref") or ""
+    idx = next((i for i, l in enumerate(lineas) if (ref and referencia(l.get("ref")) == referencia(ref)) or (not ref and norm(l.get("descripcion")) == norm(etiqueta.get("descripcion")))), None)
+    if idx is None and (ref or etiqueta.get("descripcion")):
+        lineas.append({"ref": ref, "descripcion": etiqueta.get("descripcion") or "", "palets": 0, "bultos": None, "kg": None, "lote": ""})
+        idx = len(lineas) - 1
+    palet = {**etiqueta, "linea": idx, "estado": "ok", "motivo": ""}
+    if codigo and (any(p.get("sscc") == codigo for p in ya) or codigo in sscc_en_stock):
+        palet.update(estado="discrepancia", motivo="Este código de palet ya está registrado: palet repetido.")
+    elif idx is None:
+        palet.update(estado="discrepancia", motivo="Falta la referencia del palet: escríbela o haz foto de su etiqueta.")
+    elif not codigo:
+        palet.update(estado="discrepancia", motivo="Falta el código del palet (hace falta para poder controlarlo y sacarlo después).")
+    return palet
+
+
+def recontar_inventario(entrada: dict) -> None:
+    """En una entrada de inventario, los palets de cada línea son los que se han apuntado (no hay albarán que los espere)."""
+    for i, l in enumerate(entrada["lineas"]):
+        l["palets"] = sum(1 for p in activos(entrada) if p.get("linea") == i)
+
+
 def activos(entrada: dict) -> list[dict]:
     return [p for p in entrada["palets"] if p.get("estado_alta") != "quitado"]
 
@@ -324,7 +414,7 @@ def disponibles_salida(salida: dict, existencias: list[dict], otras_salidas: lis
     antiguos primero (FIFO)."""
     cod = salida["cliente"]["codigo"]
     tomados = {p.get("palet_id") for p in salida["palets"] if p.get("estado_alta") != "quitado" and p.get("palet_id")} | reservados(otras_salidas, salida["id"])
-    lista = {x["codigo"] for x in salida.get("esperados") or []}
+    lista = {x["codigo"] for x in salida.get("esperados") or []} if salida.get("por_palet") else set()
     refs = {referencia(l.get("ref")) for l in salida["lineas"] if l.get("ref")}
     res = [p for p in existencias if p["cliente"] == cod and p["id"] not in tomados and p.get("sscc")
            and ((p["sscc"] in lista) if lista else (not refs or referencia(p["ref"]) in refs))]
@@ -371,11 +461,13 @@ def fecha_entrada(e: dict) -> str:
     return e.get("fecha_entrada") or (e.get("cerrada") or e.get("creada") or "")[:10]
 
 
-def stock(entradas: list[dict], salidas: list[dict]) -> list[dict]:
-    """Palets en el almacén: los verificados de entradas cerradas menos los de salidas cargadas.
+def stock(entradas: list[dict], salidas: list[dict], controles: list[dict] | None = None) -> list[dict]:
+    """Palets en el almacén: los verificados de entradas cerradas menos los de salidas cargadas y los dados de baja en un control
+    de inventario cerrado.
     Palet de stock: {id, cliente, ref, descripcion, lote, sscc, kg, bultos, entrada, albaran, fecha_entrada}."""
     fuera = {p["palet_id"] for s in salidas if s["estado"] == SALIDA_CARGADA for p in s["palets"]
              if p.get("palet_id") and p.get("estado_alta") != "quitado" and (p["estado"] == "ok" or p.get("aceptado"))}
+    fuera |= bajas_control(controles)
     res = []
     for e in sorted(entradas, key=lambda e: e["id"]):
         if e["estado"] != ENTRADA_CERRADA:
@@ -387,9 +479,19 @@ def stock(entradas: list[dict], salidas: list[dict]) -> list[dict]:
                 continue
             res.append({"id": p["id"], "cliente": e["cliente"]["codigo"], "cliente_nombre": e["cliente"]["nombre"], "ref": p["ref"],
                         "descripcion": p["descripcion"], "lote": p["lote"], "sscc": p["sscc"], "kg": p["kg"], "bultos": p.get("bultos"),
-                        "entrada": e["id"], "albaran": e["albaran"].get("numero"), "fecha_entrada": fecha_entrada(e),
+                        "fecha_prod": p.get("fecha_prod") or "", "inventario": e.get("tipo") == "inventario", "entrada": e["id"], "albaran": e["albaran"].get("numero"), "fecha_entrada": fecha_entrada(e),
                         "cliente_final": e["albaran"].get("cliente_final") or ""})
     return res
+
+
+def bajas_control(controles: list[dict] | None) -> set[str]:
+    """Palets que un control de inventario cerrado ha dado de baja (estaban en el stock y no se encontraron)."""
+    return {pid for c in controles or [] if c.get("estado") == CONTROL_CERRADO for pid in c.get("bajas") or []}
+
+
+def antiguedad(palets: list[dict], hoy: str, dias: int = DIAS_ESTOCAJE_AVISO) -> list[dict]:
+    """Palets del stock que llevan en el almacén más de `dias` días (solo se avisa, no hay FIFO obligatorio)."""
+    return [p for p in palets if dias_entre(p["fecha_entrada"], hoy) > dias]
 
 
 def reservados(salidas: list[dict], salvo: str = "") -> set[str]:
@@ -408,8 +510,12 @@ def limpiar_peticion(leida: dict) -> dict:
 
 
 def conflictos_salida(salida: dict, existencias: list[dict]) -> list[dict]:
-    """Avisos al cargar la petición: pide más de lo que hay en stock de ese cliente, o algo que no tiene."""
+    """Avisos al cargar la petición: pide más de lo que hay en stock de ese cliente, o algo que no tiene.
+    Con clientes que exigen palets concretos (`por_palet`), la petición tiene que traer los códigos."""
     av = []
+    if salida.get("por_palet") and not salida.get("esperados"):
+        av.append(aviso("error", f"{salida['cliente']['nombre']} exige cargar los palets concretos que pide y la petición no trae sus códigos (LP…): "
+                                 "súbela otra vez con la lista de códigos o apúntalos a mano."))
     suyo = [p for p in existencias if p["cliente"] == salida["cliente"]["codigo"]]
     for i, l in enumerate(salida["lineas"], start=1):
         if not l.get("palets"):
@@ -449,7 +555,7 @@ def cargar_palet(salida: dict, etiqueta: dict, existencias: list[dict], otras_sa
         return _salida_palet(None, etiqueta, "discrepancia", "Este palet no está en el stock del almacén (¿no se dio de alta en la entrada?).")
     if hallado["cliente"] != cod:
         return _salida_palet(hallado, etiqueta, "discrepancia", f"Este palet es de {hallado['cliente_nombre']}, no de {salida['cliente']['nombre']}.")
-    if salida.get("esperados") and hallado.get("sscc") not in {x["codigo"] for x in salida["esperados"]}:
+    if salida.get("por_palet") and salida.get("esperados") and hallado.get("sscc") not in {x["codigo"] for x in salida["esperados"]}:
         return _salida_palet(hallado, etiqueta, "discrepancia", f"El palet {hallado.get('sscc')} no está en la lista de palets de la petición.")
     idx = _linea_salida(salida["lineas"], hallado)
     if idx is None:
@@ -458,10 +564,6 @@ def cargar_palet(salida: dict, etiqueta: dict, existencias: list[dict], otras_sa
     if cargados >= (salida["lineas"][idx].get("palets") or 0):
         return _salida_palet(hallado, etiqueta, "discrepancia", f"Sobra: ya están los {salida['lineas'][idx]['palets']} palets pedidos de {hallado['ref'] or hallado['descripcion']}.", idx)
     p = _salida_palet(hallado, etiqueta, "ok", "", idx)
-    antiguo = [x for x in candidatos if x["id"] != hallado["id"] and referencia(x["ref"]) == referencia(hallado["ref"])
-               and x["fecha_entrada"] < hallado["fecha_entrada"]]
-    if antiguo:
-        p["aviso"] = f"Hay un palet más antiguo de la misma referencia ({antiguo[0]['id']}, entrada del {antiguo[0]['fecha_entrada']})."
     return p
 
 
@@ -488,7 +590,24 @@ def discrepancias_salida(salida: dict) -> list[str]:
         if e["cargados"] < e["pedidos"]:
             res.append(f"Faltan {e['pedidos'] - e['cargados']} palets de {e['ref'] or e['descripcion']} (pedidos {e['pedidos']}, cargados {e['cargados']}).")
     cargados = {p.get("sscc") for p in salida["palets"] if p.get("estado_alta") != "quitado" and p["estado"] == "ok"}
-    faltan = [x["codigo"] for x in salida.get("esperados") or [] if x["codigo"] not in cargados]
-    if faltan and len(faltan) <= 12:
-        res.append("Códigos pedidos sin cargar: " + ", ".join(faltan) + ".")
+    faltan = [x["codigo"] for x in salida.get("esperados") or [] if x["codigo"] not in cargados] if salida.get("por_palet") else []
+    if faltan:
+        res.append("Códigos pedidos sin cargar: " + ", ".join(faltan[:60]) + ("…" if len(faltan) > 60 else "") + ".")
     return res
+
+
+# ---- control de inventario -----------------------------------------------------------------------------------------
+
+def control_resultado(control: dict, existencias: list[dict]) -> dict:
+    """Compara lo que hay en el stock (del cliente del control, o de todos) con los palets contados.
+    «faltan»: están en el stock y no se han contado; «sobran»: se han contado y no están en el stock (o son de otro cliente)."""
+    cod = (control.get("cliente") or {}).get("codigo")
+    esperados = [p for p in existencias if not cod or p["cliente"] == cod]
+    contados = {p["sscc"] for p in control["palets"] if p.get("estado_alta") != "quitado"}
+    en_stock = {p["sscc"]: p for p in existencias if p.get("sscc")}
+    faltan = [p for p in esperados if p.get("sscc") not in contados]
+    sobran = [p for p in control["palets"] if p.get("estado_alta") != "quitado" and p["sscc"] not in {x["sscc"] for x in esperados}]
+    return {"esperados": len(esperados), "contados": len(contados), "bien": len(contados) - len(sobran),
+            "faltan": [{"palet": p["id"], "sscc": p["sscc"], "ref": p["ref"], "lote": p["lote"], "kg": p["kg"], "cliente": p["cliente_nombre"]} for p in faltan],
+            "sobran": [{"sscc": p["sscc"], "motivo": (f"es de {en_stock[p['sscc']]['cliente_nombre']}, no de {control['cliente']['nombre']}" if p["sscc"] in en_stock
+                                                        else "no está en el stock del sistema")} for p in sobran]}

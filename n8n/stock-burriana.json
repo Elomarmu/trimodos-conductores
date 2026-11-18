@@ -15,7 +15,7 @@
         0,
         0
       ],
-      "webhookId": "7c4786c9-f92c-4c86-8f82-81be23e94ce2"
+      "webhookId": "5d2efc7b-4739-4e00-9dcd-a264af8e6e3c"
     },
     {
       "parameters": {
@@ -94,7 +94,7 @@
         },
         "options": {}
       },
-      "id": "27fb548c-da6d-4860-bc98-8b57e3385805",
+      "id": "71859197-292c-4dd0-ac85-c3fe0acd07ad",
       "name": "¿Lleva carpeta?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -136,7 +136,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Un elemento por archivo o foto que subir a SharePoint y uno para el correo (si lo lleva).\nconst cfg = $('Configuración').first().json;\nconst d = $('Datos').first().json;\nconst ruta = (...partes) => partes.filter(Boolean).map(encodeURIComponent).join('/');\nconst tipoDe = (n, t) => t || (/\\.xlsx$/i.test(n) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'\n  : /\\.pdf$/i.test(n) ? 'application/pdf' : /\\.png$/i.test(n) ? 'image/png' : 'image/jpeg');\nconst subir = [...(d.archivos || []), ...(d.fotos || [])].map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre, url: `${d.base}:/${ruta(a.carpeta, a.nombre)}:/content?@microsoft.graph.conflictBehavior=replace` },\n  binary: { archivo: { data: a.b64, mimeType: tipoDe(a.nombre, a.tipo), fileName: a.nombre } } }));\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = [...subir];\nif (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: cfg.buzonEnvio,\n  mensaje: { subject: d.asunto || 'Almacén Burriana', body: { contentType: 'HTML', content: String(d.html || '') },\n             toRecipients: para.map(a => ({ emailAddress: { address: a } })) } } });\nreturn salida;\n"
+        "jsCode": "// Un elemento por archivo o foto que subir a SharePoint y uno para el correo (si lo lleva).\nconst cfg = $('Configuración').first().json;\nconst d = $('Datos').first().json;\nconst ruta = (...partes) => partes.filter(Boolean).map(encodeURIComponent).join('/');\nconst tipoDe = (n, t) => t || (/\\.xlsx$/i.test(n) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'\n  : /\\.pdf$/i.test(n) ? 'application/pdf' : /\\.png$/i.test(n) ? 'image/png' : 'image/jpeg');\n// Los archivos con sharepoint:false (p. ej. la documentación del aviso a un cliente) solo van al correo.\nconst subir = [...(d.archivos || []), ...(d.fotos || [])].filter(a => a.sharepoint !== false).map(a => ({\n  json: { tipo: 'sharepoint', nombre: a.nombre, url: `${d.base}:/${ruta(a.carpeta, a.nombre)}:/content?@microsoft.graph.conflictBehavior=replace` },\n  binary: { archivo: { data: a.b64, mimeType: tipoDe(a.nombre, a.tipo), fileName: a.nombre } } }));\nconst para = String(d.para || cfg.paraPorDefecto).split(/[;,]/).map(s => s.trim()).filter(Boolean);\nconst salida = [...subir];\n// buzon: la app puede pedir otro buzón (p. ej. traficolevante@stinsa.com para los avisos a clientes); si no, el de la credencial.\nif (d.correo !== false) salida.push({ json: { tipo: 'correo', buzon: d.buzon || cfg.buzonEnvio,\n  mensaje: { subject: d.asunto || 'Almacén Burriana', body: { contentType: 'HTML', content: String(d.html || '') },\n             toRecipients: para.map(a => ({ emailAddress: { address: a } })) } } });\nreturn salida;\n"
       },
       "id": "c5720d8d-72d1-417f-b027-fa34ad60764f",
       "name": "Preparar SharePoint y correo",
@@ -248,7 +248,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// La Excel de la operación y las fotos se añaden de una en una al borrador (así no hay límite de tamaño del correo).\n// El libro de control (correo: false) solo va a SharePoint: lleva el stock de todos los clientes y no se reenvía.\nconst d = $('Datos').first().json;\nconst borrador = $('Crear borrador').first().json;\nconst buzon = $('Configuración').first().json.buzonEnvio;\nconst url = `https://graph.microsoft.com/v1.0/users/${buzon}/messages/${borrador.id}/attachments`;\nconst todos = [...(d.archivos || []).filter(a => a.correo !== false).map(a => ({ name: a.nombre, contentBytes: a.b64 })),\n               ...(d.fotos || []).map(f => ({ name: f.nombre, contentBytes: f.b64, contentType: f.tipo }))];\nif (!todos.length) return [{ json: { sinAdjuntos: true } }];\nreturn todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.type': '#microsoft.graph.fileAttachment', ...a } } }));\n"
+        "jsCode": "// La Excel de la operación y las fotos se añaden de una en una al borrador (así no hay límite de tamaño del correo).\n// El libro de control (correo: false) solo va a SharePoint: lleva el stock de todos los clientes y no se reenvía.\nconst d = $('Datos').first().json;\nconst borrador = $('Crear borrador').first().json;\nconst buzon = d.buzon || $('Configuración').first().json.buzonEnvio;\nconst url = `https://graph.microsoft.com/v1.0/users/${buzon}/messages/${borrador.id}/attachments`;\nconst todos = [...(d.archivos || []).filter(a => a.correo !== false).map(a => ({ name: a.nombre, contentBytes: a.b64, contentType: a.tipo })),\n               ...(d.fotos || []).map(f => ({ name: f.nombre, contentBytes: f.b64, contentType: f.tipo }))];\nif (!todos.length) return [{ json: { sinAdjuntos: true } }];\nreturn todos.map(a => ({ json: { sinAdjuntos: false, url, adjunto: { '@odata.type': '#microsoft.graph.fileAttachment', ...a } } }));\n"
       },
       "id": "729ea3dc-da0e-4d1b-9dd4-7b3cc313c80c",
       "name": "Adjuntos",
@@ -331,8 +331,43 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5dfa22a1-7d7f-44f9-82f5-5b76fe89df30",
+              "leftValue": "={{ $('Datos').first().json.enviar !== false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e8c6bbde-6c82-4422-b08c-3647609cdaec",
+      "name": "¿Se envía?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2660,
+        300
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "=https://graph.microsoft.com/v1.0/users/{{ $('Configuración').first().json.buzonEnvio }}/messages/{{ $('Crear borrador').first().json.id }}/send",
+        "url": "=https://graph.microsoft.com/v1.0/users/{{ $('Datos').first().json.buzon || $('Configuración').first().json.buzonEnvio }}/messages/{{ $('Crear borrador').first().json.id }}/send",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "microsoftOutlookOAuth2Api",
         "options": {}
@@ -342,8 +377,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2660,
-        420
+        2880,
+        300
       ],
       "credentials": {
         "microsoftOutlookOAuth2Api": {
@@ -358,7 +393,7 @@
     },
     {
       "parameters": {
-        "content": "## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave, una llamada por operación):\n- entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.\n- libro: solo rehace el libro de control en SharePoint (sin correo).\n\nLos correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.\nEn «Configuración»: la clave del webhook (la misma que STOCK_AVISOS_CLAVE en Vercel). Destinatarios: los decide la app (STOCK_CORREO_PARA).\nFlujo APARTE del de PR: no lo toques desde allí.",
+        "content": "## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave, una llamada por operación):\n- entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.\n- inventario_cerrado / control_cerrado: igual que arriba (el control solo actualiza el libro y manda el resumen por correo).\n- aviso_llegada: NO se envía. Deja un BORRADOR en el buzón indicado por la app (traficolevante@stinsa.com) dirigido al contacto del cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Una persona lo revisa y lo manda. Requiere que la credencial «Outlook Agente Trafico» tenga acceso a ese buzón.\n- libro: solo rehace el libro de control en SharePoint (sin correo).\n\nLos correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.\nEn «Configuración»: la clave del webhook (la misma que STOCK_AVISOS_CLAVE en Vercel). Destinatarios: los decide la app (STOCK_CORREO_PARA).\nFlujo APARTE del de PR: no lo toques desde allí.",
         "height": 380,
         "width": 640
       },
@@ -501,7 +536,7 @@
       "main": [
         [
           {
-            "node": "Enviar correo",
+            "node": "¿Se envía?",
             "type": "main",
             "index": 0
           }
@@ -516,6 +551,17 @@
       ]
     },
     "Añadir adjunto": {
+      "main": [
+        [
+          {
+            "node": "¿Se envía?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Se envía?": {
       "main": [
         [
           {

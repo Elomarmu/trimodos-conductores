@@ -347,7 +347,7 @@
   <h1>Oficina Burriana · stock del almacén</h1>
   <button id="st-entradas" class="btn primary">Entrada de mercancía</button>
   <button id="st-salidas" class="btn primary">Salidas</button>
-  <button id="st-stock" class="btn secondary">Stock actual</button>
+  <button id="st-stock" class="btn secondary">Inventario</button>
   <button id="st-clientes" class="btn secondary">Clientes del almacén</button>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
 </main>
@@ -405,7 +405,7 @@
   <input id="se-etq-camara" class="oculto" type="file" accept="image/*" capture="environment">
   <button id="se-barras" type="button" class="btn secondary huge">Escanear códigos de barras</button>
   <div id="se-aviso-palet" class="avisos"></div>
-  <h2>Lo que dice el albarán</h2>
+  <h2 id="se-lineas-titulo">Lo que dice el albarán</h2>
   <div id="se-lineas" class="lista"></div>
   <h2 id="se-palets-titulo">Palets verificados</h2>
   <div id="se-palets" class="lista"></div>
@@ -506,14 +506,63 @@
 </main>
 
 <main id="s-stock-actual" class="screen" hidden>
-  <h1>Stock actual</h1>
+  <h1>Inventario</h1>
+  <button id="sa-nueva-inv" class="btn primary">Entrada manual de inventario</button>
+  <button id="sa-control" class="btn primary">Control de inventario</button>
   <p id="sa-total" class="banner info"></p>
+  <div id="sa-antiguos" class="avisos"></div>
   <div id="sa-lista" class="lista"></div>
   <div class="actions">
     <button id="sa-libro" class="btn secondary solo-oficina">Rehacer la Excel de control en SharePoint</button>
     <button class="btn ghost" data-go="stock">Volver</button>
   </div>
   <div id="sa-descargas" class="actions"></div>
+</main>
+
+<!-- Inventario: entrada manual (mercancía que ya estaba en la nave o aparece sin albarán) -->
+<main id="s-stock-inv-nueva" class="screen" hidden>
+  <h1>Entrada manual de inventario</h1>
+  <p class="hint">Para dar de alta mercancía que ya está en el almacén (por ejemplo, al empezar con un cliente) o que aparece sin albarán. Después apuntas sus palets con la foto de la etiqueta, y al terminar queda en el inventario.</p>
+  <form id="sin-form" class="pkg" novalidate>
+    <div class="field"><label for="sin-cliente">Cliente</label><select id="sin-cliente"></select></div>
+    <div class="field"><label for="sin-fecha">Fecha desde la que está en el almacén (si no la sabes, hoy)</label><input id="sin-fecha" type="date"></div>
+    <div class="field"><label for="sin-nota">Nota (opcional)</label><input id="sin-nota" type="text" maxlength="300" autocomplete="off" placeholder="Existencias iniciales, regularización…"></div>
+    <button type="submit" class="btn primary huge">Empezar a apuntar palets</button>
+  </form>
+  <button class="btn ghost" data-go="stock-actual">Volver</button>
+</main>
+
+<!-- Inventario: controles (contar lo que hay y compararlo con el sistema) -->
+<main id="s-stock-controles" class="screen" hidden>
+  <h1>Control de inventario</h1>
+  <p class="hint">Escaneas los palets que hay físicamente y la app te dice cuáles faltan y cuáles sobran respecto al sistema.</p>
+  <form id="sco-form" class="pkg" novalidate>
+    <div class="field"><label for="sco-cliente">Cliente a controlar</label><select id="sco-cliente"></select></div>
+    <button type="submit" class="btn primary huge">Empezar o seguir el control</button>
+  </form>
+  <h2>Controles anteriores</h2>
+  <div id="sco-lista" class="lista"></div>
+  <button class="btn ghost" data-go="stock-actual">Volver</button>
+</main>
+
+<main id="s-stock-control" class="screen" hidden>
+  <h1 id="sc2-titulo">Control</h1>
+  <p id="sc2-cabecera" class="banner info"></p>
+  <button id="sc2-barras" type="button" class="btn primary huge">Escanear códigos de barras</button>
+  <form id="sc2-form" class="pkg" novalidate>
+    <div class="field"><label for="sc2-codigo">O escribe el código del palet</label><input id="sc2-codigo" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <button type="submit" class="btn secondary small">Contar el palet</button>
+  </form>
+  <div id="sc2-aviso" class="avisos"></div>
+  <h2>Resultado hasta ahora</h2>
+  <div id="sc2-resultado" class="lista"></div>
+  <div id="sc2-cierre">
+    <label class="hint"><input id="sc2-baja" type="checkbox"> Dar de baja del sistema los palets que faltan (solo si ya los has buscado)</label>
+    <div class="field"><label for="sc2-nota">Nota (opcional)</label><textarea id="sc2-nota" maxlength="300"></textarea></div>
+    <button id="sc2-cerrar" class="btn primary huge">Terminar el control</button>
+  </div>
+  <div id="sc2-descargas" class="actions"></div>
+  <button class="btn ghost" data-go="stock-controles">Volver</button>
 </main>
 
 <main id="s-stock-clientes" class="screen" hidden>
@@ -524,7 +573,15 @@
     <h2>Nuevo cliente</h2>
     <div class="field"><label for="sc-nombre">Nombre</label><input id="sc-nombre" type="text" autocomplete="off"></div>
     <div class="field"><label for="sc-alias">Otros nombres con los que aparece en los albaranes (separados por comas)</label><input id="sc-alias" type="text" autocomplete="off"></div>
-    <div class="field"><label for="sc-refs">Catálogo de referencias (una por línea: referencia;descripción). Avisa si llega una que no está.</label><textarea id="sc-refs" rows="6" autocomplete="off"></textarea></div>
+    <div class="field"><label for="sc-refs">Catálogo de referencias (una por línea: referencia;descripción;códigos equivalentes separados por /). Avisa si llega una que no está.</label><textarea id="sc-refs" rows="6" autocomplete="off"></textarea></div>
+    <label class="hint"><input id="sc-porpalet" type="checkbox"> En las salidas hay que localizar el palet concreto (por su código), no solo la referencia</label>
+    <label class="hint"><input id="sc-aviso" type="checkbox"> Avisar al cliente de cada llegada (deja un borrador de correo con la documentación, sin enviarlo)</label>
+    <div id="sc-aviso-campos">
+      <div class="field"><label for="sc-contacto">Contacto del cliente (nombre)</label><input id="sc-contacto" type="text" autocomplete="off"></div>
+      <div class="field"><label for="sc-correo">Correo del contacto</label><input id="sc-correo" type="email" autocomplete="off"></div>
+      <button type="button" id="sc-buscar-odoo" class="btn ghost small">Buscar el contacto en Odoo</button>
+      <div id="sc-contactos" class="lista"></div>
+    </div>
     <button type="submit" class="btn primary" id="sc-guardar">Guardar el cliente</button>
   </form>
   <button class="btn ghost" data-go="stock">Volver</button>

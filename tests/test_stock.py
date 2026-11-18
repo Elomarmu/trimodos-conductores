@@ -131,7 +131,7 @@ def test_stock_y_salidas():
     assert "solo hay 4" in texto and "no tiene en stock XX" in texto
     # FIFO: se carga primero un palet de la entrada nueva → aviso de que hay uno más antiguo
     p = R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[5])), existencias, [])
-    assert p["estado"] == "ok" and p["palet_id"] == "E-2026-0002-01" and "más antiguo" in p["aviso"]
+    assert p["estado"] == "ok" and p["palet_id"] == "E-2026-0002-01" and p["aviso"] == ""
     s["palets"].append(p)
     assert R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[5])), existencias, [])["estado"] == "discrepancia"   # ya cargado
     s["palets"].append(R.cargar_palet(s, R.limpiar_etiqueta(etiqueta("KK-100", SSCC[0])), existencias, []))
@@ -496,7 +496,7 @@ def test_entrada_con_pdf_y_excel_fecha_editable_observaciones_y_salida_con_codig
     st = cliente.get("/api/stock/stock").json()
     assert sum(p["kg"] for p in st["palets"]) == 3 * 348 and {p["fecha_entrada"] for p in st["palets"]} == {"2026-11-20"}
     assert {p["cliente_final"] for p in st["palets"]} == {"BECRISA 2011 S.L.U."}
-    # salida con lista de códigos: lo declarado se comprueba contra el stock y al cargar
+    # salida con lista de códigos (Raminatrans no los exige)
     monkeypatch.setattr(A.L, "leer_etiqueta", lambda datos, tipo, cli=None: etiquetas.pop(0))
     etiquetas[:] = [{"sscc": "2600044888", "referencia": "6030100800103", "cliente": "Grupo Raminatrans", "dudas": []},
                     {"sscc": "2600044860", "referencia": "6030100800103", "cliente": "Grupo Raminatrans", "dudas": []}]
@@ -506,10 +506,11 @@ def test_entrada_con_pdf_y_excel_fecha_editable_observaciones_y_salida_con_codig
     s = cliente.post("/api/stock/salidas", json={"cliente": "RAMINATRANS", "lineas": [{"ref": "6030100800103", "palets": 2}], "esperados": pet["esperados"]}).json()
     assert cliente.post(f"/api/stock/salidas/{s['id']}/etiqueta", json={"foto": FOTO}).json()["palet"]["estado"] == "ok"
     p2 = cliente.post(f"/api/stock/salidas/{s['id']}/etiqueta", json={"foto": FOTO}).json()["palet"]
-    assert p2["estado"] == "discrepancia" and "no está en la lista de palets de la petición" in p2["motivo"]
-    pedido_falso = cliente.post("/api/stock/salidas", json={"cliente": "RAMINATRANS", "lineas": [{"ref": "6030100800103", "palets": 1}],
-                                                            "esperados": [{"codigo": "2600099999", "referencia": "6030100800103"}]})
-    assert pedido_falso.status_code == 409 and "no están en el stock" in pedido_falso.json()["error"]
+    # Raminatrans: el palet concreto NO es obligatorio (basta la referencia), así que uno fuera de la lista también vale
+    assert p2["estado"] == "ok"
+    sin_palet = cliente.post("/api/stock/salidas", json={"cliente": "RAMINATRANS", "lineas": [{"ref": "6030100800103", "palets": 1}],
+                                                         "esperados": [{"codigo": "2600099999", "referencia": "6030100800103"}]})
+    assert sin_palet.status_code == 200
 
 
 def test_correo_del_buzon_prepara_la_entrada_para_revisar_y_no_se_duplica(cliente, monkeypatch, enviados):
@@ -605,3 +606,68 @@ def test_palets_con_codigo_alfanumerico_tipo_aliplast_se_apuntan_y_se_casan_en_e
     # un QR (dirección web) no se acepta como código de palet
     r = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "https://www.aliplastspa.com/etichettatura-ambientale", "origen": "barras"})
     assert r.status_code == 400
+
+
+def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
+    """Entrada manual de inventario (con alias de referencia), control de inventario con bajas y aviso de llegada en borrador."""
+    # inventario: mercancía que ya estaba en la nave, sin albarán; F05182S-MV es la misma referencia que F05182S
+    r = cliente.post("/api/stock/inventario", json={"cliente": "ALIPLAST", "fecha_entrada": "2026-10-01"})
+    assert r.status_code == 200, r.text
+    ident = r.json()["id"]
+    assert ident.startswith("I-") and r.json()["tipo"] == "inventario"
+    for cod, ref in (("LP26-0000001", "F05182S"), ("LP26-0000002", "F05182S-MV"), ("LP26-0000003", "F02891S")):
+        p = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": cod, "ref": ref, "lote": "P03-014037", "kg": 376, "fecha_prod": "", "origen": "barras"})
+        assert p.status_code == 200, p.text
+        assert p.json()["palet"]["estado"] == "ok"
+    det = cliente.get(f"/api/stock/entradas/{ident}").json()
+    assert sorted((l["ref"], l["verificados"]) for l in det["lineas"]) == [("F02891S", 1), ("F05182S", 2)]
+    # repetir un código se avisa
+    rep = cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": "lp26 0000001", "ref": "F05182S"}).json()["palet"]
+    assert rep["estado"] == "discrepancia"
+    cliente.post(f"/api/stock/entradas/{ident}/quitar", json={"palet": rep["id"]})
+    cerrada = cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={}).json()
+    assert cerrada["enviado"] and cerrada["aviso_cliente"] == {"activo": False}
+    assert enviados[-1]["evento"] == "inventario_cerrado" and "inventario" in enviados[-1]["asunto"].lower()
+    resp = cliente.get("/api/stock/stock"); assert resp.status_code == 200, resp.text
+    stock = resp.json()
+    assert len(stock["palets"]) == 3 and stock["antiguos"] == 3   # entraron el 1-10: llevan más de un mes
+    # control: se cuentan 2 de los 3 y aparece uno que no está en el sistema
+    c = cliente.post("/api/stock/controles", json={"cliente": "ALIPLAST"}).json()
+    assert c["id"].startswith("C-")
+    assert cliente.post("/api/stock/controles", json={"cliente": "ALIPLAST"}).json()["id"] == c["id"]   # sigue el abierto
+    for cod in ("LP260000001", "LP26-0000002", "LP26-9999999"):
+        assert cliente.post(f"/api/stock/controles/{c['id']}/palet", json={"sscc": cod}).status_code == 200
+    assert cliente.post(f"/api/stock/controles/{c['id']}/palet", json={"sscc": "LP26 0000001"}).json()["repetido"] is True
+    res = cliente.get(f"/api/stock/controles/{c['id']}").json()["resultado"]
+    assert (res["esperados"], res["bien"], len(res["faltan"]), len(res["sobran"])) == (3, 2, 1, 1)
+    assert res["faltan"][0]["sscc"] == "LP260000003"
+    cierre = cliente.post(f"/api/stock/controles/{c['id']}/cerrar", json={"baja_faltantes": True}).json()
+    assert cierre["enviado"] and enviados[-1]["evento"] == "control_cerrado" and len(cierre["control"]["bajas"]) == 1
+    assert [p["sscc"] for p in cliente.get("/api/stock/stock").json()["palets"]] == ["LP260000001", "LP260000002"]
+    assert cliente.post(f"/api/stock/controles/{c['id']}/palet", json={"sscc": "LP26-0000004"}).status_code == 409   # cerrado
+    # aviso de llegada: borrador en traficolevante, dirigido al contacto del cliente, con la documentación adjunta y sin enviarse
+    assert cliente.post("/api/stock/clientes", json={"codigo": "ALIPLAST", "nombre": "Aliplast Iberia, S.L.U.", "aviso_llegada": {"activo": True, "correo": "contacto@aliplast.test", "contacto": "Marta"}}).status_code == 200
+    e = cliente.post("/api/stock/entradas", json={"cliente": "ALIPLAST", "fotos": [FOTO], "confirmado": True,
+                     "albaran": {"numero": "DDT26-012082", "fecha": "2026-11-18", "total_palets": 1, "total_kg": 376,
+                                 "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 1, "kg": 376, "lote": "P03-015457"}], "dudas": []}}).json()
+    assert cliente.post(f"/api/stock/entradas/{e['id']}/palet", json={"sscc": "LP26-0000010", "ref": "F05182S", "lote": "P03-015457", "kg": 376}).status_code == 200
+    out = cliente.post(f"/api/stock/entradas/{e['id']}/cerrar", json={"confirmado": True}).json()
+    assert out["aviso_cliente"]["creado"] is True and out["aviso_cliente"]["para"] == "contacto@aliplast.test"
+    av = [x for x in enviados if x["evento"] == "aviso_llegada"][-1]
+    assert av["enviar"] is False and av["buzon"] == "traficolevante@stinsa.com" and av["para"] == "contacto@aliplast.test"
+    assert "DDT26-012082" in av["html"] and "Marta" in av["html"] and len(av["archivos"]) == 1 and av["archivos"][0]["sharepoint"] is False
+
+
+def test_contactos_de_odoo_del_cliente_solo_lectura(cliente, monkeypatch):
+    llamadas = []
+
+    def falso(modelo, metodo, args, **kw):
+        llamadas.append((modelo, metodo, args, kw))
+        return [{"id": 7, "name": "Marta Ruiz", "email": "marta@aliplast.test; otra@x.test", "parent_id": [3, "Aliplast Iberia, S.L.U."], "function": "Logística"}]
+    monkeypatch.setattr(A.PA, "odoo_pr", lambda: falso)
+    r = cliente.get("/api/stock/clientes/ALIPLAST/contactos")
+    assert r.status_code == 200, r.text
+    assert r.json()["contactos"] == [{"id": 7, "nombre": "Marta Ruiz", "correo": "marta@aliplast.test", "empresa": "Aliplast Iberia, S.L.U.", "cargo": "Logística"}]
+    assert r.json()["busqueda"] == "Aliplast Iberia" and llamadas[0][:2] == ("res.partner", "search_read")
+    assert ("res.partner", "search_read") in A.PA.O.PERMITIDO and ("res.partner", "write") not in A.PA.O.PERMITIDO
+    assert cliente.get("/api/stock/clientes/NOEXISTE/contactos").status_code == 404

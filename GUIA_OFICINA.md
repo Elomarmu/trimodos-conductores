@@ -178,17 +178,23 @@ El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans
 ### Salida de mercancía
 
 1. **La oficina** pulsa **Salidas → «Nueva salida»**, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).
-2. **El almacén** abre la salida y apunta cada palet que carga, con **«Escanear códigos de barras»**, con la foto de la etiqueta o eligiéndolo en la lista desplegable (salen los palets del cliente que se pueden cargar, los más antiguos primero). La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. Avisa si hay un palet más antiguo de la misma referencia (conviene sacar primero el más antiguo).
+2. **El almacén** abre la salida y apunta cada palet que carga, con **«Escanear códigos de barras»**, con la foto de la etiqueta o eligiéndolo en la lista desplegable (salen los palets del cliente que se pueden cargar). La app comprueba que ese palet está en el almacén, que es del cliente y que es lo que se pidió. **No hay que respetar el orden de entrada (FIFO).** En los clientes marcados «hay que localizar el palet concreto» (Aliplast) hay que cargar exactamente los palets de la lista de la petición y la app avisa de los que faltan; en los demás (Raminatrans) basta con la referencia y el número de palets.
 3. Incidencias de la carga en **«Incidencias de la carga»**. Al terminar, **«Terminar la carga y expedir la Excel»**: sale un correo con la Excel de lo cargado y las fotos.
 
 ### Correos que llegan solos (agente.burriana@stinsa.com)
 
 Si el cliente manda el albarán a **agente.burriana@stinsa.com**, la app prepara la entrada sola (o la salida, si el correo habla de recoger o retirar mercancía). En la lista aparece con **📧 POR REVISAR**: ábrela, comprueba el cliente, el día de entrada y los palets, y pulsa **«Está bien: confirmar»**. **Hasta que no se confirme no se puede cerrar.** Si la app no ha podido prepararla (cliente que no reconoce, albarán ya cargado, sin adjuntos), la oficina recibe un correo «No he podido procesar…» y hay que cargarla a mano.
 
-### Stock actual y clientes
+### Inventario y clientes
 
-- **Stock actual**: palets y kilos que hay ahora en el almacén, por cliente y referencia. El botón **«Rehacer la Excel de control»** vuelve a generar el libro en SharePoint.
-- **Clientes del almacén**: toca un cliente para cambiar su nombre, sus otros nombres o su **catálogo de referencias** (una por línea: `referencia;descripción`). Si llega una referencia que no está en el catálogo, la app avisa: suele ser un error de escritura.
+- **Inventario** (antes «Stock actual»): palets y kilos que hay ahora en el almacén, por cliente y referencia, con el lote. Avisa (⏳) de la mercancía que **lleva más de un mes** en el almacén. El botón **«Rehacer la Excel de control»** vuelve a generar el libro en SharePoint. Dentro hay dos opciones:
+  - **Entrada manual de inventario**: para dar de alta mercancía que ya estaba en la nave (por ejemplo, las existencias de un cliente nuevo) o que aparece sin albarán. Eliges cliente y fecha, apuntas los palets con la foto de la etiqueta (lee código, referencia, lote y kg) o a mano, y **«Terminar la entrada de inventario»**. No se compara con ningún albarán, no se avisa al cliente y no cuenta como manipulación de entrada para facturar (sí para el estocaje).
+  - **Control de inventario**: eliges el cliente (o todos), escaneas o escribes los palets que hay físicamente y la app te dice los que **faltan** (están en el sistema y no los has contado) y los que **sobran** (los has encontrado y no están en el sistema, o son de otro cliente). Al terminar puedes marcar **«Dar de baja los que faltan»**; se manda un resumen por correo.
+- **Clientes del almacén**: toca un cliente para cambiar su nombre, sus otros nombres o su **catálogo de referencias** (una por línea: `referencia;descripción;códigos equivalentes separados por /`, por ejemplo `F05182S;Film;F05182S-MV`). Si llega una referencia que no está en el catálogo, la app avisa; los códigos equivalentes se tratan como la misma referencia. También se configura si en las salidas hay que localizar el palet concreto y el **aviso de llegada** al cliente.
+
+### Aviso de llegada al cliente (Aliplast)
+
+Si el cliente tiene activado el aviso, al **terminar la descarga** la app deja un **borrador** de correo en el buzón **traficolevante@stinsa.com**, dirigido al contacto del cliente (se busca en Odoo con **«Buscar el contacto en Odoo»** en Clientes del almacén), con la explicación de la llegada (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list) que se fotografió al abrir la entrada. **Nunca se envía solo**: una persona lo revisa y lo manda desde Outlook. Si no se ha podido crear, aparece un botón para repetirlo. Para entradas de Aliplast la app compara además la lista del packing list con los totales del albarán (palets y kilos) y avisa si no cuadran.
 
 ### Dónde queda en SharePoint (Almacen Burriana)
 

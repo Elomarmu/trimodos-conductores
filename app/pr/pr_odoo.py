@@ -33,6 +33,7 @@ PERMITIDO = {
     ("tms.equipment", "search_read"), ("tms.equipment", "create"),
     ("fleet.vehicle", "search_read"), ("ir.sequence", "next_by_code"),
     ("ir.attachment", "search_read"), ("ir.attachment", "create"), ("ir.attachment", "write"),  # composición del tren
+    ("res.partner", "search_read"),   # solo lectura: buscar el correo del contacto de un cliente (aviso de llegada del almacén de Burriana)
 }
 GOODS_PAPEL_RECUPERADO = 233   # tms.goods «PAPEL RECUPERADO»
 COSTE_VIAJE_DEFECTO = 85.0     # € por viaje al colaborador (decisión 09/11/2026); el recargo por gasóleo se añade a mano

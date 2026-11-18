@@ -72,9 +72,9 @@ KG = "#,##0"
 # ---- libro de control ----------------------------------------------------------------------------------------------
 
 def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict], hoy: dt.date | None = None,
-                  generado: dt.datetime | None = None) -> bytes:
+                  generado: dt.datetime | None = None, controles: list[dict] | None = None) -> bytes:
     hoy = hoy or dt.date.today()
-    existencias = R.stock(entradas, salidas)
+    existencias = R.stock(entradas, salidas, controles)
     cuando = f"{generado or dt.datetime.now():%d/%m/%Y %H:%M}"
     nota = f"Generado por la app el {cuando}. No escribir aquí: se rehace tras cada entrada o salida."
     wb = Workbook()
@@ -97,12 +97,14 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
     _apaisada(ws)
 
     # STOCK: un palet por fila
-    ws = _hoja(wb, "STOCK", "PALETS EN EL ALMACÉN", nota, 11)
+    ws = _hoja(wb, "STOCK", "PALETS EN EL ALMACÉN", nota, 13)
     por_cli = lambda p: p["cliente_nombre"]
     filas = [dict(p, dias=R.dias_entre(p["fecha_entrada"], hoy.isoformat())) for p in sorted(existencias, key=lambda p: (por_cli(p), p["ref"], p["fecha_entrada"]))]
-    _tabla(ws, 4, [("id", "Palet", 17), ("cliente_nombre", "Cliente", 28), ("ref", "Referencia", 16), ("descripcion", "Descripción", 32), ("lote", "Lote (entrada)", 15),
-                   ("sscc", "Código palet", 21), ("kg", "Kg", 9), ("cliente_final", "Cliente final", 24), ("entrada", "Entrada", 14), ("albaran", "Albarán", 14),
-                   ("fecha_entrada", "Fecha entrada", 13), ("dias", "Días", 7)], filas, formatos={"kg": KG})
+    for f in filas:
+        f["aviso"] = "Más de un mes" if f["dias"] > R.DIAS_ESTOCAJE_AVISO else ""
+    _tabla(ws, 4, [("id", "Palet", 17), ("cliente_nombre", "Cliente", 28), ("ref", "Referencia", 16), ("descripcion", "Descripción", 32), ("lote", "Lote", 15),
+                   ("sscc", "Código palet", 21), ("kg", "Kg", 9), ("fecha_prod", "Fecha producción", 13), ("cliente_final", "Cliente final", 24), ("entrada", "Entrada", 14), ("albaran", "Albarán", 14),
+                   ("fecha_entrada", "Fecha entrada", 13), ("dias", "Días", 7), ("aviso", "Aviso", 14)], filas, relleno=lambda f: X.AMARILLO if f["aviso"] else None, formatos={"kg": KG})
     _apaisada(ws)
 
     # ENTRADAS: una fila por línea del albarán
@@ -144,7 +146,7 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
     # MOVIMIENTOS: base de la facturación (entradas, salidas y estocaje)
     ws = _hoja(wb, "MOVIMIENTOS", "MOVIMIENTOS · BASE DE LA FACTURACIÓN", "Un movimiento por palet. De aquí saldrán la manipulación de entrada, la de salida y el estocaje.", 9)
     nombres = {c["codigo"]: c["nombre"] for c in clientes}
-    filas = [dict(m, cliente=nombres.get(m["cliente"], m["cliente"])) for m in F.movimientos(entradas, salidas)]
+    filas = [dict(m, cliente=nombres.get(m["cliente"], m["cliente"])) for m in F.movimientos(entradas, salidas, controles)]
     _tabla(ws, 4, [("fecha", "Fecha", 11), ("tipo", "Tipo", 10), ("cliente", "Cliente", 28), ("ref", "Referencia", 16), ("lote", "Lote", 14), ("sscc", "Código palet", 21),
                    ("palet_id", "Palet", 17), ("kg", "Kg", 9), ("documento", "Documento", 14)], filas,
           relleno=lambda f: X.VERDE if f["tipo"] == "ENTRADA" else X.ROJO, formatos={"kg": KG})
@@ -161,7 +163,7 @@ def libro_control(entradas: list[dict], salidas: list[dict], clientes: list[dict
 # ---- Excel de una entrada ------------------------------------------------------------------------------------------
 
 def nombre_entrada(e: dict) -> str:
-    return f"ENTRADA {e['id']}.xlsx"
+    return f"{'INVENTARIO' if e.get('tipo') == 'inventario' else 'ENTRADA'} {e['id']}.xlsx"
 
 
 def nombre_salida(s: dict) -> str:
@@ -170,12 +172,12 @@ def nombre_salida(s: dict) -> str:
 
 def carpeta(op: dict) -> str:
     """Carpeta de SharePoint con las fotos y la Excel de la operación: «ENTRADA E-2026-0001» (dentro de Almacen Burriana)."""
-    return f"{'ENTRADA' if op['id'].startswith('E') else 'SALIDA'} {op['id']}"
+    return f"{ {'E': 'ENTRADA', 'I': 'INVENTARIO', 'C': 'CONTROL'}.get(op['id'][:1], 'SALIDA') } {op['id']}"
 
 
 def excel_entrada(e: dict) -> bytes:
     wb = Workbook()
-    ws = _hoja(wb, "ENTRADA", f"ENTRADA {e['id']} · {e['cliente']['nombre']}", R.ALMACEN, 9, primera=True)
+    ws = _hoja(wb, "ENTRADA", f"{'ENTRADA MANUAL DE INVENTARIO' if e.get('tipo') == 'inventario' else 'ENTRADA'} {e['id']} · {e['cliente']['nombre']}", R.ALMACEN, 9, primera=True)
     a = e["albaran"]
     datos = [("Albarán", a.get("numero")), ("Fecha albarán", _fecha(a.get("fecha"))), ("Fecha entrada en almacén", _fecha(R.fecha_entrada(e))),
              ("Remitente", a.get("remitente")), ("Cliente final (informativo)", " · ".join(x for x in (a.get("cliente_final"), a.get("codigo_cliente_final")) if x)),
@@ -195,7 +197,7 @@ def excel_entrada(e: dict) -> bytes:
     ws.freeze_panes = None
     ws.cell(fila + 1, 1, "Palets verificados con su etiqueta").font = Font(bold=True, color=M.TEAL_OSCURO)
     palets = [dict(p, estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA"), linea_txt=(R.estado_lineas(e)[p["linea"]]["ref"] if p.get("linea") is not None else "")) for p in R.activos(e)]
-    fila = _tabla(ws, fila + 2, [("id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote (entrada)", 15), ("kg", "Kg", 11),
+    fila = _tabla(ws, fila + 2, [("id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote", 15), ("fecha_prod", "Fecha producción", 13), ("kg", "Kg", 11),
                   ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets,
                   relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
     ws.freeze_panes = None
@@ -228,7 +230,7 @@ def excel_salida(s: dict) -> bytes:
     ws.cell(fila, 1, f"TOTAL: {sum(l['cargados'] for l in lineas)} palets · {sum(l['kg'] or 0 for l in lineas):,.0f} kg".replace(",", ".")).font = Font(bold=True, color=M.TEAL_OSCURO)
     ws.cell(fila + 2, 1, "Palets cargados").font = Font(bold=True, color=M.TEAL_OSCURO)
     palets = [dict(p, estado_txt="OK" if p["estado"] == "ok" else ("ACEPTADO" if p.get("aceptado") else "DISCREPANCIA")) for p in s["palets"] if p.get("estado_alta") != "quitado"]
-    fila = _tabla(ws, fila + 3, [("palet_id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote (entrada)", 15), ("kg", "Kg", 11),
+    fila = _tabla(ws, fila + 3, [("palet_id", "Palet", 18), ("sscc", "Código palet", 22), ("ref", "Referencia", 18), ("lote", "Lote", 15), ("fecha_prod", "Fecha producción", 13), ("kg", "Kg", 11),
                   ("estado_txt", "Estado", 14), ("motivo", "Motivo", 50)], palets, relleno=lambda p: None if p["estado_txt"] == "OK" else X.AMARILLO, formatos={"kg": KG})
     ws.freeze_panes = None
     ws.auto_filter.ref = None
