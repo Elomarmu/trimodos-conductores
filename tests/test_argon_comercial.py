@@ -44,9 +44,14 @@ def test_comercial_y_presupuesto(monkeypatch):
     assert o.confirmados == []
 
 
-def test_por_defecto_confirma_y_sin_comercial(monkeypatch):
+def test_por_defecto_presupuesto_y_sin_comercial(monkeypatch):
     o = _lanza(monkeypatch, {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41})
     assert "user_id" not in o.creados[0]
+    assert o.confirmados == []  # lo confirma el personal al revisarlo
+
+
+def test_confirmar_si_se_pide(monkeypatch):
+    o = _lanza(monkeypatch, {"cliente_id": 1585, "empresa_id": 1, "tipo_pedido_id": 41, "confirmar": True})
     assert len(o.confirmados) == 1
 
 

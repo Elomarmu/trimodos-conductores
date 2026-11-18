@@ -71,15 +71,56 @@ def test_crea_y_no_duplica():
     assert all(v["equipment_id"] for v in o.lineas.values())
 
 
-def test_continuacion_si_facturado():
+def test_quedan_en_presupuesto_y_lo_confirmado_no_se_toca(monkeypatch):
     o = OdooFalso()
     E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
-    pid = next(iter(o.pedidos)); o.pedidos[pid]["invoice_status"] = "invoiced"
-    # una línea del pedido facturado desaparece del Odoo simulado → se vuelve a crear, pero en un pedido «| 2»
+    assert o.pedidos and all(p["state"] == "draft" for p in o.pedidos.values())  # los confirma el personal
+    pid = next(iter(o.pedidos)); o.pedidos[pid]["state"] = "sale"
+    # una línea del pedido confirmado desaparece de Odoo: no se vuelve a añadir; se avisa la primera noche
     lid = next(i for i, v in o.lineas.items() if v["order_id"][0] == pid)
     del o.lineas[lid]
+    monkeypatch.setattr(E, "leer_control", lambda ruta: {})
+    n = len(o.lineas)
     r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
-    assert any(p["origin"].endswith("|2") for p in o.pedidos.values()), r
+    assert len(o.lineas) == n and any("servicio nuevo" in x["cambio"] for x in r["avisos_confirmados"]), r["avisos_confirmados"]
+    assert r["escrituras_control"]  # foto de esta noche para la próxima
+
+
+def test_confirmado_avisa_solo_si_cambia_la_excel(monkeypatch):
+    o = OdooFalso()
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    lid = _primera_de_pago(o)
+    oid = o.lineas[lid]["order_id"][0]
+    o.pedidos[oid]["state"] = "sale"
+    bien = dict(o.lineas[lid])
+    o.lineas[lid].update(price_unit=bien["price_unit"] + 100)  # el personal cambió el precio en Odoo
+    clave = E.clave_txt(E.clave_linea(bien["product_id"][0], bien["pickup_date"], bien["equipment_id"][0]))
+    actual = E.huella({c: bien.get(c, False) for c in E.CAMPOS})
+    # la Excel no ha cambiado desde anoche: no se toca ni se avisa (lo ajustado en Odoo se respeta)
+    monkeypatch.setattr(E, "leer_control", lambda ruta: {clave: actual})
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert not r["avisos_confirmados"] and not r["lineas_corregidas"]
+    assert o.lineas[lid]["price_unit"] == bien["price_unit"] + 100
+    # la celda cambió desde anoche: se avisa, pero el pedido confirmado sigue sin tocarse
+    monkeypatch.setattr(E, "leer_control", lambda ruta: {clave: "otra"})
+    r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
+    assert len(r["avisos_confirmados"]) == 1 and "precio" in r["avisos_confirmados"][0]["cambio"]
+    assert o.lineas[lid]["price_unit"] == bien["price_unit"] + 100 and not r["lineas_corregidas"]
+    # sin foto de la noche anterior (primera vez): no se avisa de nada
+    monkeypatch.setattr(E, "leer_control", lambda ruta: None)
+    assert not E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)["avisos_confirmados"]
+
+
+def test_control_crea_la_hoja_y_luego_escribe(tmp_path):
+    import openpyxl
+    x = tmp_path / "a.xlsx"
+    wb = openpyxl.Workbook(); wb.save(x)
+    assert E.escrituras_control(x, {"1|2026-11-02|3": "abc"})[0]["metodo"] == "POST"
+    wb.create_sheet(E.HOJA_CONTROL); wb.save(x)
+    escr = E.escrituras_control(x, {"1|2026-11-02|3": "abc"})
+    assert escr[0]["cuerpo"] == {"visibility": "Hidden"} and escr[1]["valores"][1] == ["1|2026-11-02|3", "abc"]
+    ws = wb[E.HOJA_CONTROL]; ws.append(["Clave", "Huella"]); ws.append(["1|2026-11-02|3", "abc"]); wb.save(x)
+    assert E.leer_control(x) == {"1|2026-11-02|3": "abc"}
 
 
 def test_modo_prueba_no_escribe():
@@ -567,7 +608,7 @@ def test_conciliar_anula_lo_que_ya_no_esta_y_respeta_lo_manual_y_lo_facturado():
     o.lineas[sobra] = dict(base, product_id=[999999, ""], name="Tramo que ya no existe")
     o.sig += 1; manual = o.sig  # línea puesta a mano en Odoo
     o.lineas[manual] = dict(base, product_id=[888888, ""], name="Manual", create_uid=[1, ""])
-    o.sig += 1; fact = o.sig    # facturada y ya no está en la Excel
+    o.sig += 1; fact = o.sig    # facturada y ya no está en la Excel (presupuesto facturado: caso raro)
     o.lineas[fact] = dict(base, product_id=[777777, ""], name="Facturada", qty_invoiced=1)
     r = E.procesar(EXCEL, CFG, real=True, odoo=o, limite_s=999)
     assert [x["linea"] for x in r["lineas_anuladas"]] == ["Tramo que ya no existe"]
