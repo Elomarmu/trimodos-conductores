@@ -495,6 +495,7 @@ async function cargarStock() {
   if (!r) return;
   $("sa-total").textContent = `${r.total_palets} palets · ${n(r.total_kg)} kg en el almacén.`;
   // Aviso (solo informativo, no hay FIFO): mercancía que lleva más de un mes en el almacén
+  stk.stockPalets = r.palets; stk.ubicValidas = r.ubicaciones_validas || [];
   const viejos = r.palets.filter((p) => p.antiguo);
   $("sa-antiguos").replaceChildren(...(viejos.length ? [h("div", { class: "banner warn" },
     `⏳ ${viejos.length} palet${viejos.length === 1 ? "" : "s"} lleva${viejos.length === 1 ? "" : "n"} más de un mes en el almacén: ` +
@@ -504,10 +505,52 @@ async function cargarStock() {
     h("span", {}, h("b", {}, g.cliente_nombre), h("br"), `${g.ref || "—"}${g.descripcion ? " · " + g.descripcion : ""}`, h("br"),
       h("span", { class: "hint" }, `${n(g.kg)} kg · desde hace ${g.dias} días` + (lotes(g) ? " · lote " + lotes(g) : "")),
       h("br"), h("span", { class: "hint" }, "📍 " + (g.ubicaciones || []).map((u) => `${u.ubicacion} (${u.palets})`).join(" · ")),
+      h("br"), h("button", { type: "button", class: "btn ghost", onclick: () => abrirUbicar(g) }, "Ubicar / cambiar ubicación"),
       g.antiguos ? h("br") : null, g.antiguos ? h("span", { class: "nota" }, `⏳ ${g.antiguos} con más de un mes`) : null),
     h("span", { class: "code" }, `${g.palets} palets`))) : [h("p", { class: "hint" }, "El almacén está vacío (todavía no hay entradas cerradas).")]));
   $("sa-descargas").replaceChildren();
 }
+// ---------- ubicar palets que ya están en el almacén ----------
+function abrirUbicar(g) {
+  stk.ubicarGrupo = { cliente: g.cliente, ref: g.ref, nombre: g.cliente_nombre };
+  $("su-ubic").replaceChildren(h("option", { value: "" }, "— Sin ubicación —"),
+    ...(stk.ubicValidas || []).map((gr) => h("optgroup", { label: gr.grupo }, ...gr.zonas.map((z) => h("option", { value: z }, z)))));
+  pintarUbicar();
+  go("stock-ubicar");
+}
+function paletsUbicar() {
+  const g = stk.ubicarGrupo;
+  return (stk.stockPalets || []).filter((p) => p.cliente === g.cliente && p.ref === g.ref);
+}
+function pintarUbicar(marcados) {
+  const g = stk.ubicarGrupo, ps = paletsUbicar(), sin = ps.filter((p) => !p.ubicacion).length;
+  $("su-cabecera").textContent = `${g.nombre} · ${g.ref || "—"} · ${ps.length} palets (${sin} sin ubicación)`;
+  $("su-lista").replaceChildren(...ps.map((p) => h("label", { class: "fila" },
+    h("input", { type: "checkbox", value: p.id, checked: !!(marcados && marcados.has(p.id)) }),
+    h("span", {}, h("b", {}, p.sscc || p.id), p.lote ? ` · lote ${p.lote}` : "", p.kg ? ` · ${n(p.kg)} kg` : "", h("br"),
+      h("span", { class: "hint" }, p.id + " · entró " + fechaEs(p.fecha_entrada)), h("br"), h("b", {}, p.ubicacion ? "📍 " + p.ubicacion : "📍 sin ubicación")))));
+}
+const marcadosUbicar = () => [...$("su-lista").querySelectorAll("input:checked")].map((i) => i.value);
+$("su-sin").addEventListener("click", () => pintarUbicar(new Set(paletsUbicar().filter((p) => !p.ubicacion).map((p) => p.id))));
+$("su-todos").addEventListener("click", () => pintarUbicar(marcadosUbicar().length ? new Set() : new Set(paletsUbicar().map((p) => p.id))));
+$("su-volver").addEventListener("click", () => { go("stock-actual"); cargarStock(); });
+async function guardarUbicar(confirmado) {
+  const palets = marcadosUbicar();
+  if (!palets.length) return showError("Marca al menos un palet.");
+  clearError(); busy("Guardando la ubicación…");
+  try {
+    await post("/api/stock/stock/ubicacion", { palets, ubicacion: $("su-ubic").value, confirmado });
+    busy(null);
+    const r = await api("/api/stock/stock");
+    stk.stockPalets = r.palets;
+    pintarUbicar();
+  } catch (err) {
+    busy(null);
+    if (err.code === "cambio_ubicacion") confirmar(err.message, "Sí, cambiar la ubicación", () => guardarUbicar(true));
+    else showError(err.message);
+  }
+}
+$("su-guardar").addEventListener("click", () => guardarUbicar(false));
 $("sa-libro").addEventListener("click", async () => {
   const r = await conCarga("Rehaciendo la Excel de control…", () => post("/api/stock/libro", {}));
   if (r) $("sa-descargas").replaceChildren(

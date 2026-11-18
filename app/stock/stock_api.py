@@ -1187,7 +1187,50 @@ def stock_actual(cliente: str = Query("", max_length=40)):
         g["ubicaciones"] = [{"ubicacion": u, "palets": n} for u, n in R.resumen_ubicaciones(g.pop("_p"))]
     return {"total_palets": len(palets), "total_kg": sum(p["kg"] or 0 for p in palets), "antiguos": sum(1 for p in palets if p["antiguo"]), "dias_aviso": R.DIAS_ESTOCAJE_AVISO,
             "resumen": sorted(grupos.values(), key=lambda g: (g["cliente_nombre"], g["ref"])),
+            "ubicaciones_validas": [{"grupo": g, "zonas": z} for g, z in R.UBICACIONES],
             "palets": palets}
+
+
+class UbicarIn(BaseModel):
+    palets: list[str] = Field(min_length=1, max_length=400)   # ids de palet del stock (E-2026-0002-30…)
+    ubicacion: str = Field("", max_length=40)                  # vacío: dejarlos sin ubicación
+    confirmado: bool = False
+
+
+@router.post("/stock/ubicacion")
+def stock_ubicar(body: UbicarIn):
+    """Asigna (o cambia) la ubicación de palets que ya están en el almacén. Poner ubicación a los que no tenían es directo;
+    cambiar la de un palet que ya la tiene exige confirmación (409 `cambio_ubicacion` hasta que se manda `confirmado`)."""
+    store = get_store()
+    try:
+        destino = R.limpiar_ubicacion(body.ubicacion)
+    except R.ErrorStock as err:
+        raise AppError(str(err), 400, "ubicacion_invalida")
+    entradas, salidas = store.listar("entrada"), store.listar("salida")
+    en_stock = {p["id"]: p for p in _stock(store, entradas, salidas)}
+    desconocidos = [i for i in body.palets if i not in en_stock]
+    if desconocidos:
+        raise AppError(f"El palet {desconocidos[0]} ya no está en el almacén (¿ha salido?). Actualiza la lista.", 409, "no_en_stock")
+    cambian = [en_stock[i] for i in body.palets if en_stock[i].get("ubicacion") and en_stock[i]["ubicacion"] != destino]
+    if cambian and not body.confirmado:
+        desde = ", ".join(f"{u} ({n})" for u, n in R.resumen_ubicaciones(cambian))
+        raise AppError(f"{len(cambian)} palet{'s' if len(cambian) != 1 else ''} ya tiene{'n' if len(cambian) != 1 else ''} ubicación ({desde}). "
+                       f"¿Seguro que quieres pasar{'los' if len(cambian) != 1 else 'lo'} a {destino or 'sin ubicación'}?", 409, "cambio_ubicacion")
+    por_entrada: dict[str, list[str]] = {}
+    for i in body.palets:
+        por_entrada.setdefault(en_stock[i]["entrada"], []).append(i)
+    cambiados = 0
+    for eid, ids in por_entrada.items():
+        e = _documento(store, "entrada", eid)
+        for p in e["palets"]:
+            if p["id"] in ids and (p.get("ubicacion") or "") != destino:
+                if p.get("ubicacion"):
+                    p.setdefault("ubicaciones_previas", []).append({"ubicacion": p["ubicacion"], "hasta": ahora()})
+                p["ubicacion"] = destino
+                cambiados += 1
+        store.escribir("entrada", eid, e)
+    log.info("ubicación %s para %s palets (%s cambiados)", destino or "—", len(body.palets), cambiados)
+    return {"cambiados": cambiados}
 
 
 @router.post("/libro")

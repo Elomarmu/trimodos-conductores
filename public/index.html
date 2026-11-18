@@ -521,6 +521,20 @@
   <div id="sa-descargas" class="actions"></div>
 </main>
 
+<!-- Ubicar palets que ya están en el almacén (poner la ubicación a los que no la tienen o cambiarla con confirmación) -->
+<main id="s-stock-ubicar" class="screen" hidden>
+  <h1>Ubicar palets</h1>
+  <p id="su-cabecera" class="banner info"></p>
+  <div class="field"><label for="su-ubic">Ubicación a asignar a los palets marcados</label><select id="su-ubic"></select></div>
+  <div class="actions">
+    <button id="su-sin" type="button" class="btn secondary">Marcar los que no tienen ubicación</button>
+    <button id="su-todos" type="button" class="btn ghost">Marcar todos / ninguno</button>
+  </div>
+  <div id="su-lista" class="lista"></div>
+  <button id="su-guardar" type="button" class="btn primary huge">Asignar ubicación a los marcados</button>
+  <div class="actions"><button id="su-volver" type="button" class="btn ghost">Volver al inventario</button></div>
+</main>
+
 <!-- Incidencia de un bulto (entrada o salida): qué ha pasado + fotos; sale en el correo de oficina -->
 <main id="s-stock-incidencia" class="screen" hidden>
   <h1>Incidencia del bulto</h1>

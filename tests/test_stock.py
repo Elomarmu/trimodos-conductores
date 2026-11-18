@@ -724,3 +724,25 @@ def test_ubicacion_en_la_entrada_el_stock_y_la_salida(cliente, enviados):
     assert {d["codigo"]: d["ubicacion"] for d in disp}["LP262000003"] == "S3" and all(d["linea"] == 0 for d in disp)
     p = cliente.post(f"/api/stock/salidas/{s['id']}/palet", json={"sscc": "LP26-2000003", "origen": "barras"}).json()["palet"]
     assert p["estado"] == "ok" and p["ubicacion"] == "S3"
+
+
+def test_ubicar_palets_del_inventario_con_confirmacion_al_cambiar(cliente, enviados):
+    ident = cliente.post("/api/stock/inventario", json={"cliente": "ALIPLAST", "fecha_entrada": "2026-11-01"}).json()["id"]
+    for cod, ub in (("LP26-3000001", ""), ("LP26-3000002", ""), ("LP26-3000003", "E2")):
+        cliente.post(f"/api/stock/entradas/{ident}/palet", json={"sscc": cod, "ref": "F05182S", "lote": "L1", "kg": 100, "ubicacion": ub})
+    cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={})
+    ids = {p["sscc"]: p["id"] for p in cliente.get("/api/stock/stock").json()["palets"]}
+    sin = [ids["LP263000001"], ids["LP263000002"]]
+    # asignar a los que no tienen: directo, sin confirmación
+    assert cliente.post("/api/stock/stock/ubicacion", json={"palets": sin, "ubicacion": "S4"}).json()["cambiados"] == 2
+    # cambiar uno que ya tiene ubicación: pide confirmación (409) y no toca nada hasta confirmar
+    r = cliente.post("/api/stock/stock/ubicacion", json={"palets": [ids["LP263000003"], sin[0]], "ubicacion": "E5"})
+    assert r.status_code == 409 and r.json()["codigo"] == "cambio_ubicacion" and "E2 (1)" in r.text and "S4 (1)" in r.text
+    st = {p["sscc"]: p["ubicacion"] for p in cliente.get("/api/stock/stock").json()["palets"]}
+    assert st == {"LP263000001": "S4", "LP263000002": "S4", "LP263000003": "E2"}
+    ok = cliente.post("/api/stock/stock/ubicacion", json={"palets": [ids["LP263000003"], sin[0]], "ubicacion": "E5", "confirmado": True})
+    assert ok.json()["cambiados"] == 2
+    st = {p["sscc"]: p["ubicacion"] for p in cliente.get("/api/stock/stock").json()["palets"]}
+    assert st == {"LP263000001": "E5", "LP263000002": "S4", "LP263000003": "E5"}
+    assert cliente.post("/api/stock/stock/ubicacion", json={"palets": sin, "ubicacion": "X1"}).status_code == 400
+    assert cliente.post("/api/stock/stock/ubicacion", json={"palets": ["E-2026-9999-01"], "ubicacion": "E1"}).status_code == 409   # no está en el stock
