@@ -434,6 +434,10 @@ def entradas_crear(body: EntradaIn):
     entradas = store.listar("entrada")
     esperados = R.limpiar_esperados(body.esperados)
     albaran["lineas"] = R.unificar_lineas(albaran["lineas"], esperados, cliente)
+    previa = R.entrada_repetida(albaran["numero"], cliente, entradas)
+    if previa:   # una entrada no se declara dos veces: no se puede ni confirmando
+        raise AppError(f"El albarán {albaran['numero']} de {cliente['nombre']} ya está cargado como entrada {previa['id']}. No se puede declarar dos veces: "
+                       "abre esa entrada o, si estaba mal, anúlala primero.", 409, "albaran_repetido")
     avisos = R.conflictos_entrada(albaran, cliente, cli, entradas, esperados=esperados)
     errores = [a["texto"] for a in avisos if a["nivel"] == "error"]
     if errores and not body.confirmado:
@@ -631,6 +635,29 @@ def entrada_aviso(ident: str):
     if e["estado"] != R.ENTRADA_CERRADA:
         raise AppError("La entrada todavía no está cerrada.", 409, "abierta")
     return {"aviso_cliente": _aviso_llegada(store, e)}
+
+
+class Anular(BaseModel):
+    motivo: str = Field("", max_length=300)
+
+
+@router.post("/entradas/{ident}/anular")
+def entrada_anular(ident: str, body: Anular):
+    """Anula una entrada (declarada dos veces, por error…). Si ya estaba cerrada sus palets salen del stock; no se puede si alguno ya está en una salida."""
+    store = get_store()
+    e = _documento(store, "entrada", ident)
+    if e["estado"] == R.ENTRADA_ANULADA:
+        raise AppError("Esta entrada ya está anulada.", 409, "anulada")
+    ids = {p["id"] for p in e.get("palets", [])}
+    usados = sorted({s["id"] for s in store.listar("salida") if s["estado"] != R.SALIDA_ANULADA
+                     for p in s["palets"] if p.get("palet_id") in ids and p.get("estado_alta") != "quitado"})
+    if usados:
+        raise AppError(f"No se puede anular: palets de esta entrada ya están en la salida {', '.join(usados)}. Anula o corrige primero esa salida.", 409, "con_salidas")
+    estaba_cerrada = e["estado"] == R.ENTRADA_CERRADA
+    e.update(estado=R.ENTRADA_ANULADA, anulada=ahora(), motivo_anulacion=body.motivo.strip())
+    store.escribir("entrada", e["id"], e)
+    log.info("entrada %s anulada (cerrada antes: %s) %s", e["id"], estaba_cerrada, body.motivo.strip())
+    return {"anulada": e["id"], "estaba_cerrada": estaba_cerrada}
 
 
 @router.post("/entradas/{ident}/cerrar")

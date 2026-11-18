@@ -265,11 +265,11 @@ def test_flujo_entrada_completo(cliente, monkeypatch, enviados):
     assert r.status_code == 200, r.text
     ident = r.json()["id"]
     assert ident.startswith("E-") and r.json()["estado"] == "pendiente"
-    # el mismo albarán otra vez → conflicto, y solo pasa si la oficina confirma
-    r = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"]})
-    assert r.status_code == 409 and r.json()["codigo"] == "entrada_conflicto"
-    assert cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"], "confirmado": True}).status_code == 200
-    assert len(cliente.get("/api/stock/entradas?abiertas=true").json()["entradas"]) == 2
+    # el mismo albarán otra vez → error, ni confirmando se puede declarar dos veces
+    for extra in ({}, {"confirmado": True}):
+        r = cliente.post("/api/stock/entradas", json={"cliente": "KERAKOLL", "albaran": d["albaran"], **extra})
+        assert r.status_code == 409 and r.json()["codigo"] == "albaran_repetido"
+    assert len(cliente.get("/api/stock/entradas?abiertas=true").json()["entradas"]) == 1
     # almacén: 4 etiquetas
     for _ in range(4):
         r = cliente.post(f"/api/stock/entradas/{ident}/etiqueta", json={"foto": FOTO})
@@ -657,3 +657,18 @@ def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
     assert av["enviar"] is False and av["buzon"] == "traficolevante@stinsa.com" and av["para"] == "contacto@aliplast.test"
     assert "DDT26-012082" in av["html"] and "Marta" in av["html"] and len(av["archivos"]) == 1 and av["archivos"][0]["sharepoint"] is False
 
+
+
+def test_entrada_repetida_da_error_y_se_puede_anular(cliente):
+    cuerpo = {"cliente": "ALIPLAST", "fotos": [FOTO], "albaran": {"numero": "DDT-DUP-1", "fecha": "2026-11-18", "total_palets": 1, "total_kg": 100,
+              "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 1, "kg": 100}], "dudas": []}}
+    e = cliente.post("/api/stock/entradas", json=cuerpo)
+    assert e.status_code == 200, e.text
+    ident = e.json()["id"]
+    for extra in ({}, {"confirmado": True}):   # ni siquiera confirmando se puede repetir
+        r = cliente.post("/api/stock/entradas", json={**cuerpo, **extra})
+        assert r.status_code == 409 and r.json()["codigo"] == "albaran_repetido" and ident in r.text
+    assert cliente.post(f"/api/stock/entradas/{ident}/anular", json={"motivo": "duplicada"}).status_code == 200
+    assert cliente.post(f"/api/stock/entradas/{ident}/anular", json={}).status_code == 409   # ya anulada
+    assert ident not in [x["id"] for x in cliente.get("/api/stock/entradas").json()["entradas"]]
+    assert cliente.post("/api/stock/entradas", json=cuerpo).status_code == 200   # anulada: se puede volver a declarar

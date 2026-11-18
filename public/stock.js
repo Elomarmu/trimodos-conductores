@@ -94,6 +94,14 @@ async function cargarEntradas() {
     (e.tipo === "inventario" ? `📦 Inventario ${e.id} · ${e.cliente.nombre} · ${e.verificados} palets · ${tipoTxt[e.estado]}` : `${e.cliente.nombre} · albarán ${e.albaran || "—"} · ${e.verificados}/${e.esperados} palets · ${tipoTxt[e.estado]}`) + (e.discrepancias ? ` · ⚠ ${e.discrepancias}` : "") + (e.por_revisar ? " · 📧 POR REVISAR" : "")))
     : [h("p", { class: "hint" }, "No hay entradas pendientes.")]));
 }
+$("se-anular").addEventListener("click", () => {
+  const e = stk.entrada;
+  confirmar(`¿Anular la entrada ${e.id}${e.albaran ? " (albarán " + e.albaran + ")" : ""}?` + (e.estado === "cerrada" ? "\nYa está cerrada: sus palets dejarán de contar en el inventario. El correo que se envió al cerrarla no se puede retirar." : "\nSus palets no llegarán a entrar en el inventario."),
+    "Sí, anularla", async () => {
+      const r = await conCarga("Anulando…", () => post(`/api/stock/entradas/${encodeURIComponent(e.id)}/anular`, {}));
+      if (r) { go("stock-entradas"); cargarEntradas(); }
+    });
+});
 $("se-todas").addEventListener("click", () => { stk.todas = !stk.todas; cargarEntradas(); });
 
 // ---------- entradas: foto del albarán (oficina) ----------

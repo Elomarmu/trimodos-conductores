@@ -175,6 +175,8 @@ El almacén de Burriana guarda mercancía de clientes (el primero, **Raminatrans
 5. Si pasa algo (palet roto, film abierto, falta un palet…), se escribe en **«Incidencias de la descarga»**: la oficina lo verá en el correo.
 6. Al terminar, **«Terminar la descarga»**. Si hay diferencias (palets de más o de menos, un código que no está en el albarán), la app las lista y pide confirmar. Al cerrar se manda **un correo** a la oficina con la Excel y las fotos, y se actualiza la Excel de control en SharePoint.
 
+**Una entrada no se puede declarar dos veces:** si el albarán ya está cargado para ese cliente, la app da error y dice con qué entrada coincide (ni confirmando se puede repetir). Si una entrada está duplicada o mal hecha, ábrela y pulsa **«Anular esta entrada»**: deja de contar (si ya estaba cerrada, sus palets salen del inventario) y el albarán puede volver a declararse. No se puede anular si algún palet suyo ya está en una salida; en ese caso se corrige primero la salida. El correo que se envió al cerrar no se puede retirar.
+
 ### Salida de mercancía
 
 1. **La oficina** pulsa **Salidas → «Nueva salida»**, elige el cliente y escribe lo que piden (o lee la petición de una foto, un PDF o un Excel con los palets).

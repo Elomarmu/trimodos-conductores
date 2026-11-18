@@ -230,6 +230,14 @@ def limpiar_albaran(leido: dict, hoy: dt.date | None = None) -> dict:
             "dudas": [str(d) for d in leido.get("dudas") or []]}
 
 
+def entrada_repetida(numero: str | None, cliente: dict | None, entradas: list[dict]) -> dict | None:
+    """La entrada ya cargada con ese mismo nº de albarán y el mismo cliente (las anuladas y los inventarios no cuentan)."""
+    if not numero or not cliente:
+        return None
+    return next((e for e in entradas if e.get("estado") != ENTRADA_ANULADA and e.get("tipo") != "inventario"
+                 and e.get("cliente", {}).get("codigo") == cliente["codigo"] and norm(e["albaran"].get("numero")) == norm(numero)), None)
+
+
 def conflictos_entrada(albaran: dict, cliente: dict | None, clientes: list[dict], entradas: list[dict],
                        hoy: dt.date | None = None, esperados: list[dict] | None = None) -> list[dict]:
     """Avisos de una entrada antes de guardarla. `entradas` = las ya guardadas (para duplicados e historial del cliente)."""
@@ -246,7 +254,7 @@ def conflictos_entrada(albaran: dict, cliente: dict | None, clientes: list[dict]
     elif not sugeridos:
         av.append(aviso("aviso", f"El albarán no nombra a {cliente['nombre']}: comprueba que es suyo."))
     num = albaran.get("numero")
-    vivas = [e for e in entradas if e.get("estado") != ENTRADA_ANULADA]
+    vivas = [e for e in entradas if e.get("estado") != ENTRADA_ANULADA and e.get("tipo") != "inventario"]
     if not num:
         av.append(aviso("aviso", "No se lee el número de albarán: escríbelo a mano."))
     else:
