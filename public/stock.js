@@ -299,7 +299,7 @@ async function cerrarEntrada(confirmado) {
     busy(null);
     pintarEntrada(r.entrada);
     $("se-descargas").replaceChildren(
-      h("div", { class: "banner info" }, r.enviado ? `Entrada cerrada. Documentación enviada a ${r.para}.` : "Entrada cerrada. El envío automático no está configurado o ha fallado: descarga la Excel aquí."),
+      h("div", { class: "banner info", style: "overflow-wrap:anywhere" }, r.enviado ? `Entrada cerrada. Documentación enviada a ${String(r.para||'').split(/[,;]\s*/).join(', ')}.` : "Entrada cerrada. El envío automático no está configurado o ha fallado: descarga la Excel aquí."),
       ...avisoClienteHtml(r.aviso_cliente),
       ...r.archivos.map((a) => h("button", { class: "btn secondary", onclick: () => descargarXlsx(a) }, "Descargar " + a.nombre)));
   } catch (err) {
@@ -462,7 +462,7 @@ async function cerrarSalida(confirmado) {
     busy(null);
     pintarSalida(r.salida);
     $("ss-descargas").replaceChildren(
-      h("div", { class: "banner info" }, r.enviado ? `Salida cargada. Documentación enviada a ${r.para}.` : "Salida cargada. El envío automático no está configurado o ha fallado: descarga la Excel aquí."),
+      h("div", { class: "banner info", style: "overflow-wrap:anywhere" }, r.enviado ? `Salida cargada. Documentación enviada a ${String(r.para||'').split(/[,;]\s*/).join(', ')}.` : "Salida cargada. El envío automático no está configurado o ha fallado: descarga la Excel aquí."),
       ...r.archivos.map((a) => h("button", { class: "btn secondary", onclick: () => descargarXlsx(a) }, "Descargar " + a.nombre)));
   } catch (err) {
     busy(null);
@@ -492,7 +492,7 @@ async function cargarStock() {
 $("sa-libro").addEventListener("click", async () => {
   const r = await conCarga("Rehaciendo la Excel de control…", () => post("/api/stock/libro", {}));
   if (r) $("sa-descargas").replaceChildren(
-    h("div", { class: "banner info" }, r.enviado ? "Excel de control actualizada en SharePoint." : "No se ha podido subir a SharePoint: descárgala aquí."),
+    h("div", { class: "banner info", style: "overflow-wrap:anywhere" }, r.enviado ? "Excel de control actualizada en SharePoint." : "No se ha podido subir a SharePoint: descárgala aquí."),
     h("button", { class: "btn secondary", onclick: () => descargarXlsx(r.archivo) }, "Descargar " + r.archivo.nombre));
 });
 
