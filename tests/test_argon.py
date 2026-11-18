@@ -784,3 +784,12 @@ def test_construir_carga_fallida_y_espera_en_descarga():
     from app.argon import argon_odoo as O
     assert O.linea_de(s[0], {})["name"].startswith("Carga fallida en GENT")
     assert O.linea_de(s[3], {})["name"].startswith("Espera en descarga")
+
+
+def test_ll_sl_llega_y_sale_en_tren_del_mismo_sitio():
+    from app.argon import argon_lector as L
+    alias = {"MORROT": "MORROT", "LLAGOSTA": "LA LLAGOSTA"}
+    for txt in ("LL-SL MORROT", "LL - SL MORROT", "LL/SL MORROT 927108"):
+        llegada, salida = L.llega_y_sale(txt, alias)
+        assert llegada == "MORROT" and salida.startswith("SL MORROT"), (txt, llegada, salida)
+    assert L.llega_y_sale("LL-SL LLAGOSTA", alias)[0] == "LA LLAGOSTA"
