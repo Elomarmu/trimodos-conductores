@@ -192,8 +192,11 @@ def llega_y_sale(texto: str, alias: dict) -> tuple[str | None, str]:
     m = RE_LLEGA_SALE.match(norm(texto))
     if not m:
         return None, texto
-    llegada = ubicacion_de(m.group(1), alias)[0]
     salida = m.group(2).strip()
+    if m.group(1).strip() == "LL":
+        # «LL-SL MORROT»: ese día llega en tren a MORROT y sale en tren de MORROT
+        return ubicacion_de(salida, alias)[0], salida
+    llegada = ubicacion_de(m.group(1), alias)[0]
     if llegada and not re.sub(r"^SL\s*", "", RE_REF.sub("", salida)).strip():
         salida = re.sub(r"^SL", f"SL {m.group(1).strip()}", salida, count=1)  # «MORROT/SL 927108» → sale de MORROT
     return llegada, salida
