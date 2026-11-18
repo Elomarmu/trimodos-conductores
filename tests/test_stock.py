@@ -657,17 +657,3 @@ def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
     assert av["enviar"] is False and av["buzon"] == "traficolevante@stinsa.com" and av["para"] == "contacto@aliplast.test"
     assert "DDT26-012082" in av["html"] and "Marta" in av["html"] and len(av["archivos"]) == 1 and av["archivos"][0]["sharepoint"] is False
 
-
-def test_contactos_de_odoo_del_cliente_solo_lectura(cliente, monkeypatch):
-    llamadas = []
-
-    def falso(modelo, metodo, args, **kw):
-        llamadas.append((modelo, metodo, args, kw))
-        return [{"id": 7, "name": "Marta Ruiz", "email": "marta@aliplast.test; otra@x.test", "parent_id": [3, "Aliplast Iberia, S.L.U."], "function": "Logística"}]
-    monkeypatch.setattr(A.PA, "odoo_pr", lambda: falso)
-    r = cliente.get("/api/stock/clientes/ALIPLAST/contactos")
-    assert r.status_code == 200, r.text
-    assert r.json()["contactos"] == [{"id": 7, "nombre": "Marta Ruiz", "correo": "marta@aliplast.test", "empresa": "Aliplast Iberia, S.L.U.", "cargo": "Logística"}]
-    assert r.json()["busqueda"] == "Aliplast Iberia" and llamadas[0][:2] == ("res.partner", "search_read")
-    assert ("res.partner", "search_read") in A.PA.O.PERMITIDO and ("res.partner", "write") not in A.PA.O.PERMITIDO
-    assert cliente.get("/api/stock/clientes/NOEXISTE/contactos").status_code == 404

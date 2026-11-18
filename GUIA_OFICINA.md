@@ -194,7 +194,7 @@ Si el cliente manda el albarán a **agente.burriana@stinsa.com**, la app prepara
 
 ### Aviso de llegada al cliente (Aliplast)
 
-Si el cliente tiene activado el aviso, al **terminar la descarga** la app deja un **borrador** de correo en el buzón **traficolevante@stinsa.com**, dirigido al contacto del cliente (se busca en Odoo con **«Buscar el contacto en Odoo»** en Clientes del almacén), con la explicación de la llegada (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list) que se fotografió al abrir la entrada. **Nunca se envía solo**: una persona lo revisa y lo manda desde Outlook. Si no se ha podido crear, aparece un botón para repetirlo. Para entradas de Aliplast la app compara además la lista del packing list con los totales del albarán (palets y kilos) y avisa si no cuadran.
+Si el cliente tiene activado el aviso, al **terminar la descarga** la app deja un **borrador** de correo en el buzón **traficolevante@stinsa.com**, dirigido al contacto del cliente (nombre y correo se ponen a mano en Clientes del almacén), con la explicación de la llegada (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list) que se fotografió al abrir la entrada. **Nunca se envía solo**: una persona lo revisa y lo manda desde Outlook. Si no se ha podido crear, aparece un botón para repetirlo. Para entradas de Aliplast la app compara además la lista del packing list con los totales del albarán (palets y kilos) y avisa si no cuadran.
 
 ### Dónde queda en SharePoint (Almacen Burriana)
 

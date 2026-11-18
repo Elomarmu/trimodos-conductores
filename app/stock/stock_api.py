@@ -352,21 +352,6 @@ def get_clientes():
     return {"clientes": clientes(get_store())}
 
 
-@router.get("/clientes/{codigo}/contactos")
-def contactos_odoo(codigo: str, q: str = Query("", max_length=80)):
-    """Contactos de Odoo (con correo) del cliente, para elegir a quién va el aviso de llegada. Solo lectura."""
-    cli = R.cliente_por_codigo(clientes(get_store()), codigo)
-    if not cli:
-        raise AppError("No encuentro ese cliente.", 404, "no_encontrado")
-    termino = (q or cli["nombre"].split(",")[0]).strip()
-    odoo = PA.odoo_pr()
-    filas = odoo("res.partner", "search_read",
-                 [["&", ["email", "!=", False], "|", ["name", "ilike", termino], ["parent_id.name", "ilike", termino]]],
-                 fields=["name", "email", "parent_id", "function"], limit=25, order="name")
-    return {"busqueda": termino, "contactos": [{"id": f["id"], "nombre": f.get("name") or "", "correo": (f.get("email") or "").split(";")[0].strip(),
-                                                 "empresa": (f.get("parent_id") or [0, ""])[1] if f.get("parent_id") else "", "cargo": f.get("function") or ""} for f in filas]}
-
-
 @router.post("/clientes")
 def post_cliente(body: ClienteIn):
     store = get_store()

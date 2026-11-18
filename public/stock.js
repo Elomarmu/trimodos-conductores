@@ -56,7 +56,7 @@ function editarCliente(c) {
   $("sc-porpalet").checked = !!c.salida_por_palet;
   const av = c.aviso_llegada || {};
   $("sc-aviso").checked = !!av.activo; $("sc-contacto").value = av.contacto || ""; $("sc-correo").value = av.correo || "";
-  $("sc-contactos").replaceChildren(); avisoCampos();
+  avisoCampos();
   $("sc-guardar").textContent = "Guardar los cambios de " + c.nombre;
   $("sc-nombre").scrollIntoView({ behavior: "smooth" });
 }
@@ -69,26 +69,17 @@ $("sc-form").addEventListener("submit", async (ev) => {
     return { ref: ref.trim(), descripcion: (desc || "").trim(), alias: (eq || "").split("/").map((x) => x.trim()).filter(Boolean) };
   });
   const aviso = { activo: $("sc-aviso").checked, contacto: $("sc-contacto").value.trim(), correo: $("sc-correo").value.trim() };
-  if (aviso.activo && !aviso.correo) return showError("Para avisar al cliente de las llegadas hace falta el correo de su contacto (puedes buscarlo en Odoo).");
+  if (aviso.activo && !aviso.correo) return showError("Para avisar al cliente de las llegadas hace falta el correo de su contacto.");
   const r = await conCarga("Guardando…", () => post("/api/stock/clientes", { codigo: stk.cliEdit || "", nombre, referencias, salida_por_palet: $("sc-porpalet").checked, aviso_llegada: aviso,
     alias: $("sc-alias").value.split(",").map((s) => s.trim()).filter(Boolean) }));
   if (r) {
     for (const i of ["sc-nombre", "sc-alias", "sc-refs", "sc-contacto", "sc-correo"]) $(i).value = "";
-    $("sc-porpalet").checked = false; $("sc-aviso").checked = false; $("sc-contactos").replaceChildren(); avisoCampos();
+    $("sc-porpalet").checked = false; $("sc-aviso").checked = false; avisoCampos();
     $("sc-guardar").textContent = "Guardar el cliente"; cargarClientes();
   }
 });
 const avisoCampos = () => { $("sc-aviso-campos").hidden = !$("sc-aviso").checked; };
 $("sc-aviso").addEventListener("change", avisoCampos);
-$("sc-buscar-odoo").addEventListener("click", async () => {
-  if (!stk.cliEdit) return showError("Guarda primero el cliente y vuelve a tocarlo para buscar su contacto en Odoo.");
-  const q = $("sc-contacto").value.trim();
-  const r = await conCarga("Buscando en Odoo…", () => api(`/api/stock/clientes/${encodeURIComponent(stk.cliEdit)}/contactos` + (q ? "?q=" + encodeURIComponent(q) : "")));
-  if (!r) return;
-  $("sc-contactos").replaceChildren(...(r.contactos.length ? r.contactos.map((c) => h("button", { type: "button", class: "btn secondary",
-    onclick: () => { $("sc-contacto").value = c.nombre; $("sc-correo").value = c.correo; $("sc-contactos").replaceChildren(); } },
-    `${c.nombre}${c.empresa ? " · " + c.empresa : ""} · ${c.correo}`)) : [h("p", { class: "hint" }, `No hay contactos con correo para «${r.busqueda}». Escribe el nombre y vuelve a buscar, o pon el correo a mano.`)]));
-});
 avisoCampos();
 function opcionesClientes(sel, elegido) {
   sel.replaceChildren(h("option", { value: "" }, "— Elige el cliente —"), ...stk.clientes.map((c) => h("option", { value: c.codigo, selected: c.codigo === elegido }, c.nombre)));
