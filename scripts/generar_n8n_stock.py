@@ -80,7 +80,7 @@ NOTA = """## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo
 - entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.
 - Las fotos con `inline` (incidencias de un bulto) se adjuntan «en línea» con contentId para que salgan dentro del cuerpo del correo; además se suben a la carpeta como el resto.
 - inventario_cerrado / control_cerrado: igual que arriba (el control solo actualiza el libro y manda el resumen por correo).
-- aviso_llegada: NO se envía. Deja un BORRADOR en el buzón indicado por la app (traficolevante@stinsa.com) dirigido al contacto del cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Una persona lo revisa y lo manda. Requiere que la credencial «Outlook Agente Trafico» tenga acceso a ese buzón.
+- aviso_llegada: correo a traficolevante@ y Carmelo con el aviso redactado para reenviarlo al cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Se manda desde agente.trafico@ como los demás.
 - libro: solo rehace el libro de control en SharePoint (sin correo).
 
 Los correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.

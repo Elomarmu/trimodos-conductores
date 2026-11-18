@@ -609,7 +609,7 @@ def test_palets_con_codigo_alfanumerico_tipo_aliplast_se_apuntan_y_se_casan_en_e
 
 
 def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
-    """Entrada manual de inventario (con alias de referencia), control de inventario con bajas y aviso de llegada en borrador."""
+    """Entrada manual de inventario (con alias de referencia), control de inventario con bajas y aviso de llegada para reenviar."""
     # inventario: mercancía que ya estaba en la nave, sin albarán; F05182S-MV es la misma referencia que F05182S
     r = cliente.post("/api/stock/inventario", json={"cliente": "ALIPLAST", "fecha_entrada": "2026-10-01"})
     assert r.status_code == 200, r.text
@@ -645,16 +645,17 @@ def test_aliplast_inventario_control_y_aviso_de_llegada(cliente, enviados):
     assert cierre["enviado"] and enviados[-1]["evento"] == "control_cerrado" and len(cierre["control"]["bajas"]) == 1
     assert [p["sscc"] for p in cliente.get("/api/stock/stock").json()["palets"]] == ["LP260000001", "LP260000002"]
     assert cliente.post(f"/api/stock/controles/{c['id']}/palet", json={"sscc": "LP26-0000004"}).status_code == 409   # cerrado
-    # aviso de llegada: borrador en traficolevante, dirigido al contacto del cliente, con la documentación adjunta y sin enviarse
+    # aviso de llegada: va a traficolevante y a Carmelo (no al cliente), con el contacto indicado, la documentación adjunta y listo para reenviar
     assert cliente.post("/api/stock/clientes", json={"codigo": "ALIPLAST", "nombre": "Aliplast Iberia, S.L.U.", "aviso_llegada": {"activo": True, "correo": "contacto@aliplast.test", "contacto": "Marta"}}).status_code == 200
     e = cliente.post("/api/stock/entradas", json={"cliente": "ALIPLAST", "fotos": [FOTO], "confirmado": True,
                      "albaran": {"numero": "DDT26-012082", "fecha": "2026-11-18", "total_palets": 1, "total_kg": 376,
                                  "lineas": [{"ref": "F05182S", "descripcion": "Film", "palets": 1, "kg": 376, "lote": "P03-015457"}], "dudas": []}}).json()
     assert cliente.post(f"/api/stock/entradas/{e['id']}/palet", json={"sscc": "LP26-0000010", "ref": "F05182S", "lote": "P03-015457", "kg": 376}).status_code == 200
     out = cliente.post(f"/api/stock/entradas/{e['id']}/cerrar", json={"confirmado": True}).json()
-    assert out["aviso_cliente"]["creado"] is True and out["aviso_cliente"]["para"] == "contacto@aliplast.test"
+    assert out["aviso_cliente"]["creado"] is True and "traficolevante@stinsa.com" in out["aviso_cliente"]["para"]
     av = [x for x in enviados if x["evento"] == "aviso_llegada"][-1]
-    assert av["enviar"] is False and av["buzon"] == "traficolevante@stinsa.com" and av["para"] == "contacto@aliplast.test"
+    assert "enviar" not in av and "buzon" not in av and "traficolevante@stinsa.com" in av["para"] and "carmelomartinez@stinsa.com" in av["para"]
+    assert "contacto@aliplast.test" in av["html"] and "PARA REENVIAR" in av["html"] and av["asunto"].startswith("Para reenviar a")
     assert "DDT26-012082" in av["html"] and "Marta" in av["html"] and len(av["archivos"]) == 1 and av["archivos"][0]["sharepoint"] is False
 
 

@@ -15,7 +15,7 @@
         0,
         0
       ],
-      "webhookId": "c9da1993-6d3f-46d0-9c0e-1dc95dd34140"
+      "webhookId": "2a5c12d0-3eb7-49b9-8b33-ef925105f694"
     },
     {
       "parameters": {
@@ -94,7 +94,7 @@
         },
         "options": {}
       },
-      "id": "23bd5ee3-b285-4c7e-815d-b7d22190c69d",
+      "id": "e2350459-4fc3-49a7-922d-5eb6fa89f629",
       "name": "¿Lleva carpeta?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -354,7 +354,7 @@
         },
         "options": {}
       },
-      "id": "aee4b4a1-f156-44d4-b7a6-1ec4a0f826b4",
+      "id": "58ee1752-5c42-4e44-b3c2-d49eddcb3de3",
       "name": "¿Se envía?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -393,7 +393,7 @@
     },
     {
       "parameters": {
-        "content": "## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave, una llamada por operación):\n- entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.\n- Las fotos con `inline` (incidencias de un bulto) se adjuntan «en línea» con contentId para que salgan dentro del cuerpo del correo; además se suben a la carpeta como el resto.\n- inventario_cerrado / control_cerrado: igual que arriba (el control solo actualiza el libro y manda el resumen por correo).\n- aviso_llegada: NO se envía. Deja un BORRADOR en el buzón indicado por la app (traficolevante@stinsa.com) dirigido al contacto del cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Una persona lo revisa y lo manda. Requiere que la credencial «Outlook Agente Trafico» tenga acceso a ese buzón.\n- libro: solo rehace el libro de control en SharePoint (sin correo).\n\nLos correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.\nEn «Configuración»: la clave del webhook (la misma que STOCK_AVISOS_CLAVE en Vercel). Destinatarios: los decide la app (STOCK_CORREO_PARA).\nFlujo APARTE del de PR: no lo toques desde allí.",
+        "content": "## STOCK BURRIANA · app de oficina y almacén → SharePoint y correo\n**Desde la app** (POST con cabecera X-Clave, una llamada por operación):\n- entrada_cerrada / salida_cargada: crea la carpeta «ENTRADA E-AAAA-NNNN» / «SALIDA S-AAAA-NNNN» en Almacen Burriana, sube la Excel y las fotos, actualiza CONTROL ALMACEN BURRIANA.xlsx y manda UN correo con la Excel y las fotos.\n- Las fotos con `inline` (incidencias de un bulto) se adjuntan «en línea» con contentId para que salgan dentro del cuerpo del correo; además se suben a la carpeta como el resto.\n- inventario_cerrado / control_cerrado: igual que arriba (el control solo actualiza el libro y manda el resumen por correo).\n- aviso_llegada: correo a traficolevante@ y Carmelo con el aviso redactado para reenviarlo al cliente, con la documentación del transporte adjunta (no se sube a SharePoint). Se manda desde agente.trafico@ como los demás.\n- libro: solo rehace el libro de control en SharePoint (sin correo).\n\nLos correos se crean como borrador, se les añaden los adjuntos uno a uno y se envían (sin límite de tamaño) desde agente.trafico@.\nEn «Configuración»: la clave del webhook (la misma que STOCK_AVISOS_CLAVE en Vercel). Destinatarios: los decide la app (STOCK_CORREO_PARA).\nFlujo APARTE del de PR: no lo toques desde allí.",
         "height": 380,
         "width": 640
       },

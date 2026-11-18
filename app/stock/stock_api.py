@@ -219,7 +219,7 @@ class ClienteIn(BaseModel):
     activo: bool = True
     referencias: list[dict] | None = Field(None, max_length=600)   # catálogo: [{ref, descripcion, alias: [códigos equivalentes]}]; None = no tocar
     salida_por_palet: bool = False        # en las salidas hay que cargar los palets concretos de la petición (por código), no solo la referencia
-    aviso_llegada: dict | None = None     # {activo, correo, contacto}: borrador de aviso al cliente cuando se cierra una entrada
+    aviso_llegada: dict | None = None     # {activo, correo, contacto}: aviso para reenviar al cliente cuando se cierra una entrada
 
 
 # ---- utilidades -------------------------------------------------------------------------------------------------------
@@ -638,9 +638,6 @@ def _enviar_entrada(store, e: dict) -> tuple[bool, list[dict]]:
     return ok, archivos[:1]
 
 
-BUZON_BORRADOR = "traficolevante@stinsa.com"   # buzón donde se deja el borrador de aviso al cliente (STOCK_BORRADOR_BUZON)
-
-
 def _cuerpo_aviso_llegada(e: dict, cli: dict) -> str:
     estilo = "font:11pt Calibri,Arial"
     a, av = e["albaran"], cli.get("aviso_llegada") or {}
@@ -665,31 +662,39 @@ def _cuerpo_aviso_llegada(e: dict, cli: dict) -> str:
             f"<p style='{estilo}'>Un saludo,<br>Almacén STINSA · Burriana</p>")
 
 
+PARA_AVISO_INTERNO = "traficolevante@stinsa.com,carmelomartinez@stinsa.com"   # a quién va el aviso para reenviar al cliente (STOCK_AVISO_PARA)
+
+
 def _aviso_llegada(store, e: dict) -> dict:
-    """Borrador de aviso al contacto del cliente (en traficolevante@stinsa.com, con la documentación del transporte adjunta).
-    Solo si el cliente lo tiene activado y su contacto tiene correo. Nunca se envía solo: lo revisa y lo manda una persona."""
+    """Aviso de llegada para el cliente. No se le escribe directamente: se manda a traficolevante@ y a Carmelo con el mensaje
+    ya redactado y la documentación del transporte adjunta, y quien lo revisa lo reenvía al contacto del cliente.
+    Solo si el cliente lo tiene activado."""
     cli = _cliente_de(store, e) or {}
     av = cli.get("aviso_llegada") or {}
     if e.get("tipo") == "inventario" or not av.get("activo"):
         return {"activo": False}
-    if not av.get("correo"):
-        return {"activo": True, "creado": False, "motivo": f"{cli.get('nombre')} no tiene correo de contacto para el aviso: ponlo en «Clientes del almacén»."}
     docs = [f for f in _fotos_de(store, e["id"]) if f["nombre"].lower().startswith("albaran")]
     num = _limpio(e["albaran"].get("numero") or e["id"])
     archivos = []
     for i, d in enumerate(docs, start=1):
         ext = d["nombre"].rsplit(".", 1)[-1] if "." in d["nombre"] else "jpg"
         archivos.append({"nombre": f"Documentación {num}" + (f" ({i})" if len(docs) > 1 else "") + f".{ext}", "carpeta": "", "correo": True, "sharepoint": False, "b64": d["b64"], "tipo": d["tipo"]})
-    buzon = os.environ.get("STOCK_BORRADOR_BUZON", BUZON_BORRADOR)
-    ok = enviar_n8n({"evento": "aviso_llegada", "buzon": buzon, "enviar": False, "para": av["correo"], "carpeta": "", "correo": True,
-                     "asunto": f"Mercancía recibida en el almacén de Burriana · albarán {e['albaran'].get('numero') or e['id']}",
-                     "html": _cuerpo_aviso_llegada(e, cli), "archivos": archivos, "fotos": []})
-    return {"activo": True, "creado": ok, "para": av["correo"], "buzon": buzon, "adjuntos": len(archivos)}
+    estilo = "font:11pt Calibri,Arial"
+    contacto = " ".join(x for x in (av.get("contacto"), f"&lt;{html.escape(av['correo'])}&gt;" if av.get("correo") else "") if x) or "<i>sin contacto en la ficha del cliente: ponlo en «Clientes del almacén»</i>"
+    cabecera = (f"<div style='{estilo};background:#E6F4F2;border:1px solid #009F92;padding:8px 12px;margin-bottom:12px'>"
+                f"<b>📧 PARA REENVIAR A {html.escape(cli.get('nombre') or 'EL CLIENTE')}</b><br>Destinatario: {contacto}<br>"
+                "Reenvía este correo (los adjuntos van incluidos) y borra este recuadro. El mensaje de abajo está listo para el cliente.</div>")
+    para = os.environ.get("STOCK_AVISO_PARA", PARA_AVISO_INTERNO)
+    ok = enviar_n8n({"evento": "aviso_llegada", "para": para, "carpeta": "", "correo": True,
+                     "asunto": f"Para reenviar a {cli.get('nombre') or 'cliente'} · mercancía recibida en Burriana · albarán {e['albaran'].get('numero') or e['id']}",
+                     "html": cabecera + _cuerpo_aviso_llegada(e, cli), "archivos": archivos, "fotos": []})
+    return {"activo": True, "creado": ok, "para": para, "adjuntos": len(archivos), "contacto": av.get("correo") or "",
+            "motivo": "" if ok else "No se ha podido enviar el aviso."}
 
 
 @router.post("/entradas/{ident}/aviso")
 def entrada_aviso(ident: str):
-    """Vuelve a dejar el borrador de aviso de llegada (si se borró o falló)."""
+    """Vuelve a mandar el aviso de llegada (si falló o se perdió)."""
     store = get_store()
     e = _documento(store, "entrada", ident)
     if e["estado"] != R.ENTRADA_CERRADA:
@@ -749,7 +754,7 @@ def entrada_cerrar(ident: str, body: Cerrar):
     e.update(estado=R.ENTRADA_CERRADA, cerrada=ahora(), discrepancias_cierre=disc, nota_cierre=body.nota.strip())
     store.escribir("entrada", e["id"], e)   # primero el estado: el envío nunca lo deshace
     enviado, archivos = _enviar_entrada(store, e)
-    aviso = _aviso_llegada(store, e)   # borrador para el cliente (segunda llamada a n8n; solo clientes con el aviso activado)
+    aviso = _aviso_llegada(store, e)   # aviso para reenviar al cliente (segunda llamada a n8n; solo clientes con el aviso activado)
     log.info("entrada %s cerrada: %s palets, %s discrepancias, enviado=%s, aviso=%s", e["id"], len(R.activos(e)), len(disc), enviado, aviso.get("creado"))
     return {"entrada": _detalle_entrada(e), "enviado": enviado, "para": destinatarios(), "archivos": archivos, "aviso_cliente": aviso}
 

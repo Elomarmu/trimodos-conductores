@@ -200,8 +200,7 @@ Si el cliente manda el albarán a **agente.burriana@stinsa.com**, la app prepara
 
 ### Aviso de llegada al cliente (Aliplast)
 
-Si el cliente tiene activado el aviso, al **terminar la descarga** la app deja un **borrador** de correo en el buzón **traficolevante@stinsa.com**, dirigido al contacto del cliente (nombre y correo se ponen a mano en Clientes del almacén), con la explicación de la llegada (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list) que se fotografió al abrir la entrada. **Nunca se envía solo**: una persona lo revisa y lo manda desde Outlook. Si no se ha podido crear, aparece un botón para repetirlo. Para entradas de Aliplast la app compara además la lista del packing list con los totales del albarán (palets y kilos) y avisa si no cuadran.
-
+Si el cliente tiene activado el aviso, al **terminar la descarga** la app manda un correo a **traficolevante@stinsa.com y a Carmelo** con el mensaje ya redactado para el cliente (albarán, palets, kilos, lotes, incidencias) y la **documentación del transporte** (CMR, albarán, packing list) que se fotografió al abrir la entrada. Arriba lleva un recuadro con el **contacto del cliente** (nombre y correo, que se ponen en Clientes del almacén). Quien lo revise lo **reenvía al cliente** (los adjuntos van incluidos) y borra el recuadro. El cliente nunca recibe nada directamente de la app. Si el envío falla, aparece un botón para repetirlo. Para entradas de Aliplast la app compara además la lista del packing list con los totales del albarán (palets y kilos) y avisa si no cuadran.
 ### Dónde queda en SharePoint (Almacen Burriana)
 
 - **CONTROL ALMACEN BURRIANA.xlsx**: hojas Resumen stock, Stock, Entradas, Salidas, Movimientos y Clientes. Lo rehace la app: **no escribas en ella**, se pierde. Solo se guarda en SharePoint (lleva el stock de todos los clientes, no se reenvía).

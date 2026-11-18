@@ -588,10 +588,10 @@
     <div class="field"><label for="sc-alias">Otros nombres con los que aparece en los albaranes (separados por comas)</label><input id="sc-alias" type="text" autocomplete="off"></div>
     <div class="field"><label for="sc-refs">Catálogo de referencias (una por línea: referencia;descripción;códigos equivalentes separados por /). Avisa si llega una que no está.</label><textarea id="sc-refs" rows="6" autocomplete="off"></textarea></div>
     <label class="hint"><input id="sc-porpalet" type="checkbox"> En las salidas hay que localizar el palet concreto (por su código), no solo la referencia</label>
-    <label class="hint"><input id="sc-aviso" type="checkbox"> Avisar al cliente de cada llegada (deja un borrador de correo con la documentación, sin enviarlo)</label>
+    <label class="hint"><input id="sc-aviso" type="checkbox"> Avisar de cada llegada de este cliente (se manda a traficolevante y a Carmelo, con la documentación, para reenviarlo al cliente)</label>
     <div id="sc-aviso-campos">
       <div class="field"><label for="sc-contacto">Contacto del cliente (nombre)</label><input id="sc-contacto" type="text" autocomplete="off"></div>
-      <div class="field"><label for="sc-correo">Correo del contacto</label><input id="sc-correo" type="email" autocomplete="off"></div>
+      <div class="field"><label for="sc-correo">Correo del contacto (aparece en el aviso para reenviarlo)</label><input id="sc-correo" type="email" autocomplete="off"></div>
     </div>
     <button type="submit" class="btn primary" id="sc-guardar">Guardar el cliente</button>
   </form>

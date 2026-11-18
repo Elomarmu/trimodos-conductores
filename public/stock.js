@@ -69,7 +69,6 @@ $("sc-form").addEventListener("submit", async (ev) => {
     return { ref: ref.trim(), descripcion: (desc || "").trim(), alias: (eq || "").split("/").map((x) => x.trim()).filter(Boolean) };
   });
   const aviso = { activo: $("sc-aviso").checked, contacto: $("sc-contacto").value.trim(), correo: $("sc-correo").value.trim() };
-  if (aviso.activo && !aviso.correo) return showError("Para avisar al cliente de las llegadas hace falta el correo de su contacto.");
   const r = await conCarga("Guardando…", () => post("/api/stock/clientes", { codigo: stk.cliEdit || "", nombre, referencias, salida_por_palet: $("sc-porpalet").checked, aviso_llegada: aviso,
     alias: $("sc-alias").value.split(",").map((s) => s.trim()).filter(Boolean) }));
   if (r) {
@@ -286,12 +285,12 @@ $("se-cerrar").addEventListener("click", () => cerrarEntrada(false));
 // Aviso de llegada al cliente: borrador en traficolevante@ (nunca se envía solo). Solo se dice algo si el cliente lo tiene activado.
 function avisoClienteHtml(a) {
   if (!a || !a.activo) return [];
-  if (a.creado) return [h("div", { class: "banner info" }, `📧 Borrador del aviso a ${a.para} dejado en ${a.buzon} (con ${a.adjuntos} documento${a.adjuntos === 1 ? "" : "s"} adjunto${a.adjuntos === 1 ? "" : "s"}). Revísalo y envíalo desde Outlook.`)];
-  return [h("div", { class: "banner warn" }, "⚠ No se ha dejado el borrador del aviso al cliente. " + (a.motivo || "Inténtalo otra vez.")),
+  if (a.creado) return [h("div", { class: "banner info" }, `📧 Aviso para el cliente enviado a ${a.para}${a.adjuntos ? " con la documentación adjunta" : ""}. Reenvíalo al contacto ${a.contacto || "del cliente"}.`)];
+  return [h("div", { class: "banner warn" }, "⚠ " + (a.motivo || "No se ha enviado el aviso para el cliente.")),
     h("button", { class: "btn secondary", onclick: async () => {
-      const r = await conCarga("Preparando el borrador…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/aviso`, {}));
+      const r = await conCarga("Enviando el aviso…", () => post(`/api/stock/entradas/${encodeURIComponent(stk.entrada.id)}/aviso`, {}));
       if (r) $("se-descargas").prepend(...avisoClienteHtml(r.aviso_cliente));
-    } }, "Volver a preparar el borrador")];
+    } }, "Volver a enviar el aviso")];
 }
 async function cerrarEntrada(confirmado) {
   clearError(); busy("Terminando la descarga y mandando la documentación…");
