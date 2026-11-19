@@ -94,18 +94,47 @@ def destinatarios_inventario() -> str:
     return os.environ.get("STOCK_INVENTARIO_PARA", "traficolevante@stinsa.com,carmelomartinez@stinsa.com")
 
 
+LIMITE_ENVIO = 6_000_000   # bytes (base64) por llamada a n8n; su webhook rechaza cuerpos de más de 16 MB (sin dejar ni rastro de ejecución)
+
+
+def _peso(items: list[dict]) -> int:
+    return sum(len(x.get("b64") or "") for x in items)
+
+
+def _llamar_n8n(url: str, datos: dict) -> bool:
+    try:
+        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=60, headers={"X-Clave": os.environ.get("STOCK_AVISOS_CLAVE", "")})
+        if r.status_code >= 300:
+            log.warning("n8n ha respondido %s para %s (%s bytes)", r.status_code, datos.get("evento"), len(r.content))
+        return r.status_code < 300
+    except httpx.HTTPError as ex:
+        log.warning("No se ha podido enviar a n8n: %s (%s)", datos.get("evento"), ex)
+        return False
+
+
 def enviar_n8n(datos: dict) -> bool:
-    """Flujo de n8n «STOCK BURRIANA» (STOCK_AVISOS_WEBHOOK): sube a SharePoint y manda el correo. Nunca para el trabajo."""
+    """Flujo de n8n «STOCK BURRIANA» (STOCK_AVISOS_WEBHOOK): sube a SharePoint y manda el correo. Nunca para el trabajo.
+    Si lleva tantas fotos que no cabe en una llamada (una entrada de 70 palets con una foto por etiqueta), las fotos de las
+    etiquetas (nombre «NN referencia») se mandan antes en tandas solo para SharePoint y el correo lleva el resto."""
     url = os.environ.get("STOCK_AVISOS_WEBHOOK", "")
     if not real() or not url:
         log.info("Stock sin envío a n8n (%s): %s", "demo" if not real() else "sin webhook", datos.get("evento"))
         return False
-    try:
-        r = httpx.post(url, json={"para": destinatarios(), **datos}, timeout=60, headers={"X-Clave": os.environ.get("STOCK_AVISOS_CLAVE", "")})
-        return r.status_code < 300
-    except httpx.HTTPError:
-        log.warning("No se ha podido enviar a n8n: %s", datos.get("evento"))
-        return False
+    fotos = datos.get("fotos") or []
+    if _peso(datos.get("archivos") or []) + _peso(fotos) <= LIMITE_ENVIO:
+        return _llamar_n8n(url, datos)
+    de_etiqueta = [f for f in fotos if re.match(r"\d{2,} ", f["nombre"]) and not f.get("inline")]
+    resto = [f for f in fotos if f not in de_etiqueta]
+    ok, tanda = True, []
+    for f in de_etiqueta + [None]:
+        if f is not None and (not tanda or _peso(tanda) + len(f["b64"]) <= LIMITE_ENVIO):
+            tanda.append(f)
+            continue
+        if tanda:
+            ok = _llamar_n8n(url, {"evento": "fotos", "carpeta": datos.get("carpeta", ""), "correo": False, "archivos": [], "fotos": tanda}) and ok
+        tanda = [f] if f is not None else []
+    log.info("n8n: %s fotos de etiquetas enviadas aparte (solo SharePoint)", len(de_etiqueta))
+    return _llamar_n8n(url, {**datos, "fotos": resto}) and ok
 
 
 # ---- modelos de entrada ----------------------------------------------------------------------------------------------

@@ -826,3 +826,16 @@ def test_albaran_firmado_obligatorio_para_cerrar_y_va_en_el_correo(cliente, monk
     assert cliente.post(f"/api/stock/entradas/{ident}/cerrar", json={"confirmado": True}).status_code == 200
     env = [x for x in enviados if x["evento"] == "entrada_cerrada"][-1]
     assert sum(1 for f in env["fotos"] if f["nombre"].startswith("albaran firmado")) == 2 and "albarán firmado" in env["html"]
+
+
+def test_envio_a_n8n_se_parte_si_hay_muchas_fotos(monkeypatch):
+    llamadas = []
+    monkeypatch.setenv("STOCK_AVISOS_WEBHOOK", "https://n8n.test/hook")
+    monkeypatch.setattr(A, "real", lambda: True)
+    monkeypatch.setattr(A, "_llamar_n8n", lambda url, datos: llamadas.append(datos) or True)
+    grande = "A" * 1_000_000
+    fotos = [{"nombre": f"{i:02d} KK-100.jpg", "b64": grande, "tipo": "image/jpeg"} for i in range(1, 21)] + [{"nombre": "albaran 1.jpg", "b64": grande, "tipo": "image/jpeg"}]
+    assert A.enviar_n8n({"evento": "entrada_cerrada", "carpeta": "ENTRADA E-1", "archivos": [], "fotos": fotos, "html": "x"}) is True
+    assert len(llamadas) > 2 and all(sum(len(f["b64"]) for f in c["fotos"]) <= A.LIMITE_ENVIO for c in llamadas)
+    assert llamadas[-1]["evento"] == "entrada_cerrada" and [f["nombre"] for f in llamadas[-1]["fotos"]] == ["albaran 1.jpg"]
+    assert all(c["correo"] is False for c in llamadas[:-1]) and sum(len(c["fotos"]) for c in llamadas[:-1]) == 20
