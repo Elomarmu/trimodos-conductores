@@ -525,6 +525,7 @@ def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[di
         datos["orden"] = [v for v in anterior.get("orden") or [] if v in vagones_nuevos]
         cajas_nuevas = {c["caja_movil"] for c in datos["cajas"]}
         datos["vacias"] = [c for c in anterior.get("vacias") or [] if c in cajas_nuevas]
+        datos["segregados"] = [v for v in anterior.get("segregados") or [] if v in vagones_nuevos]
     escribir_tren(odoo, datos)
     return datos
 
@@ -584,12 +585,49 @@ def tren_actual(odoo) -> dict | None:
 # El almacén carga de atrás hacia delante: cada vagón que empieza a cargarse se pone ARRIBA de la lista; la segunda caja
 # de un vagón ya empezado se suma a su vagón sin moverlo. Después se puede reordenar (subir/bajar) a mano.
 
-def vagones(tren: dict) -> list[str]:
-    vistos = []
+def vagones(tren: dict, con_segregados: bool = False) -> list[str]:
+    """Vagones de la composición en su orden. Los segregados (apartados, no salen en este tren) solo si se pide."""
+    vistos, fuera = [], set([] if con_segregados else tren.get("segregados") or [])
     for c in tren["cajas"]:
-        if c["vagon"] not in vistos:
+        if c["vagon"] not in vistos and c["vagon"] not in fuera:
             vistos.append(c["vagon"])
     return vistos
+
+
+def cajas_composicion(tren: dict) -> list[dict]:
+    """Todas las cajas tal como vino la composición (con los vagones segregados marcados), para la hoja COMPOSICION."""
+    seg, res = set(tren.get("segregados") or []), []
+    for vagon in vagones(tren, con_segregados=True):
+        for j, c in enumerate(c for c in tren["cajas"] if c["vagon"] == vagon):
+            res.append(dict(c, segunda=j > 0, segregado=vagon in seg))
+    return res
+
+
+def segregar(odoo, tren: dict, lista: list[dict], vagon: str) -> list[dict]:
+    """Oficina: aparta un vagón del tren (p. ej. un descarrilamiento): no sale en este tren. Sus cargas vuelven a stock y
+    sus cajas dejan de estar como vacías y pierden sus observaciones. Devuelve las cargas que han vuelto a stock."""
+    if vagon not in vagones(tren, con_segregados=True):
+        raise ErrorPR(f"El vagón {vagon} no está en el tren {tren['tren']}.")
+    if vagon in (tren.get("segregados") or []):
+        raise ErrorPR(f"El vagón {vagon} ya está segregado.")
+    cajas = {c["caja_movil"] for c in tren["cajas"] if c["vagon"] == vagon}
+    a_stock = [v for v in lista if v.get("tren") == str(tren["tren"]) and v.get("caja_movil") in cajas]
+    for v in a_stock:
+        quitar(odoo, v["bulto_id"])
+    tren["segregados"] = list(tren.get("segregados") or []) + [vagon]
+    tren["orden"] = [v for v in tren.get("orden") or [] if v != vagon]
+    tren["vacias"] = [c for c in tren.get("vacias") or [] if c not in cajas]
+    tren["notas"] = {k: t for k, t in (tren.get("notas") or {}).items() if k not in cajas}
+    escribir_tren(odoo, tren)
+    return a_stock
+
+
+def reincorporar(odoo, tren: dict, vagon: str) -> None:
+    """Oficina: deshace «segregar»: el vagón vuelve al tren (sin cargas; se cargan otra vez desde el almacén)."""
+    if vagon not in (tren.get("segregados") or []):
+        raise ErrorPR(f"El vagón {vagon} no está segregado.")
+    tren["segregados"] = [v for v in tren["segregados"] if v != vagon]
+    escribir_tren(odoo, tren)
 
 
 def orden_final(tren: dict) -> list[str]:
@@ -672,7 +710,17 @@ def estado_tren(odoo, tren: dict, lista: list[dict]) -> dict:
     stock = [_carga(v) for v in lista if v["estado"] == "En stock"]
     return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "convoy_salida": tren.get("convoy_salida") or "",
             "terminado": bool(tren.get("terminado")), "terminado_en": tren.get("terminado_en") or "",
-            "cajas": cajas, "grupos": grupos, "stock": stock}
+            "cajas": cajas, "grupos": grupos, "stock": stock, "composicion": composicion_vista(tren, por_caja)}
+
+
+def composicion_vista(tren: dict, por_caja: dict) -> list[dict]:
+    """Para la pantalla «Composición del tren»: cada vagón con sus cajas, si está segregado y cuántas cargas lleva."""
+    seg = set(tren.get("segregados") or [])
+    res = []
+    for vagon in vagones(tren, con_segregados=True):
+        cajas = [c["caja_movil"] for c in tren["cajas"] if c["vagon"] == vagon]
+        res.append({"vagon": vagon, "cajas": cajas, "segregado": vagon in seg, "cargas": sum(1 for c in cajas if c in por_caja)})
+    return res
 
 
 def abierto(tren: dict) -> None:
@@ -732,7 +780,7 @@ def editar(odoo, tren: dict, lista: list[dict], caja_movil: str, nueva_caja: str
             raise ErrorPR(f"El vagón {cifras} no cuadra con su dígito de control (la última cifra). Revísalo.")
         viejo = caja["vagon"]
         if cifras != viejo:
-            if cifras in vagones(tren):
+            if cifras in vagones(tren, con_segregados=True):
                 raise ErrorPR(f"El vagón {cifras} ya está en este tren.")
             for c in tren["cajas"]:
                 if c["vagon"] == viejo:

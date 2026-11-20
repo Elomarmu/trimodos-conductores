@@ -19,6 +19,7 @@ $("of-tren").addEventListener("click", () => {
 // Tren cargado ahora: el nº de convoy de entrada (el del listado) no es el de salida; la oficina lo pone o lo corrige aquí.
 async function pintarTrenActual() {
   $("tren-actual").hidden = true; $("tren-actual-ok").hidden = true; $("tren-bloqueado").hidden = true; $("tren-subir").hidden = false;
+  $("tren-comp-ok").hidden = true;
   try {
     const e = await api("/api/pr/tren/actual");
     $("tren-actual-txt").textContent = `Tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` · convoy de entrada ${e.convoy}` : "") +
@@ -31,7 +32,54 @@ async function pintarTrenActual() {
     $("tren-bloqueado").hidden = e.terminado;
     $("tren-subir").hidden = !e.terminado;
     $("tren-bloqueado-txt").textContent = `Para cargar la composición de otro tren, antes hay que terminar el tren ${e.tren}.`;
-  } catch { /* todavía no hay ningún tren */ }
+    pintarComposicion(e);
+  } catch { $("tren-comp").hidden = true; /* todavía no hay ningún tren */ }
+}
+
+// Composición del tren cargado: cada vagón con sus cajas; «Segregar» lo aparta de este tren (y «Volver a meter» lo deshace).
+function pintarComposicion(e) {
+  const comp = e.composicion || [];
+  $("tren-comp").hidden = !comp.length;
+  const abierto = !e.terminado;
+  const seg = comp.filter((g) => g.segregado).length;
+  $("tren-comp-lista").replaceChildren(
+    h("p", { class: "hint" }, `${comp.length - seg} vagones en el tren` + (seg ? ` · ${seg} segregado${seg === 1 ? "" : "s"}` : "") + "."),
+    ...comp.map((g, i) => h("div", { class: "vagon" + (g.segregado ? " segregado" : "") },
+      h("div", { class: "vagon-cab" },
+        h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`, g.segregado ? h("b", { class: "seg-tag" }, " SEGREGADO") : null),
+        abierto ? h("button", { type: "button", class: "btn ghost mini", onclick: () => (g.segregado ? reincorporarVagon(g) : segregarVagon(g)) },
+          g.segregado ? "Volver a meter" : "Segregar") : null),
+      h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ") +
+        (g.cargas ? ` · ${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}` : ""))))));
+}
+function segregarVagon(g) {
+  clearError();
+  state.onConfirm = async () => {
+    $("confirm").hidden = true;
+    busy("Segregando el vagón…");
+    try {
+      const r = await post("/api/pr/tren/segregar", { vagon: g.vagon });
+      if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+      pintarComposicion(r);
+      $("tren-comp-ok").textContent = `Vagón ${g.vagon} segregado.` + (r.a_stock && r.a_stock.length ? ` Vuelven a stock: ${r.a_stock.join(", ")}.` : "");
+      $("tren-comp-ok").hidden = false;
+    } catch (err) { showError(err.message); } finally { busy(null); state.onConfirm = null; }
+  };
+  $("confirm-txt").textContent = `El vagón ${g.vagon} (${g.cajas.join(", ")}) sale de este tren: no irá en la Excel ni en el almacén.` +
+    (g.cargas === 1 ? " Su carga vuelve a stock." : g.cargas ? ` Sus ${g.cargas} cargas vuelven a stock.` : "") + " Se puede deshacer.";
+  $("confirm").hidden = false;
+  $("btn-no").focus();
+}
+async function reincorporarVagon(g) {
+  clearError();
+  busy("Volviendo a meter el vagón…");
+  try {
+    const r = await post("/api/pr/tren/reincorporar", { vagon: g.vagon });
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    pintarComposicion(r);
+    $("tren-comp-ok").textContent = `Vagón ${g.vagon} otra vez en el tren (sin cargas: se asignan desde el almacén).`;
+    $("tren-comp-ok").hidden = false;
+  } catch (err) { showError(err.message); } finally { busy(null); }
 }
 $("tren-ir-terminar").addEventListener("click", () => abrirAlmacen(true));
 $("tren-ir-modificar").addEventListener("click", () => abrirAlmacen(true));

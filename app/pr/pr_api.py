@@ -463,6 +463,10 @@ class Mover(BaseModel):
     hacia: str = Field(pattern=r"^(subir|bajar)$")
 
 
+class Vagon(BaseModel):
+    vagon: str = Field(min_length=1, max_length=20)
+
+
 class Editar(BaseModel):
     caja_movil: str = Field(min_length=1, max_length=20)
     nueva_caja: str = Field("", max_length=20)
@@ -576,7 +580,8 @@ def tren_composicion(body: TrenIn):
 
 def subir_excel_tren(t: dict, por_caja: dict) -> bool:
     """Sube (o sustituye) el libro CARTON PAJA TREN <n> en su carpeta de SharePoint, sin correo."""
-    libro = X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], O.cajas_en_orden(t), por_caja, t.get("convoy") or "")
+    libro = X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], O.cajas_en_orden(t), por_caja, t.get("convoy") or "",
+                               O.cajas_composicion(t))
     return enviar_n8n({"evento": "composicion", "correo": False, "asunto": "", "html": "", "archivos": [
         {"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]), "b64": base64.b64encode(libro).decode()}]})
 
@@ -731,6 +736,38 @@ def tren_rehacer():
     return O.estado_tren(odoo, t, lista)
 
 
+@oficina.post("/tren/segregar")
+def tren_segregar(body: Vagon):
+    """Oficina: aparta un vagón del tren (no sale en este tren). Sus cargas vuelven a stock y sus documentos salen de la
+    carpeta del tren."""
+    odoo = odoo_pr()
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    a_stock = _pr(O.segregar, odoo, t, lista, body.vagon)
+    for v in a_stock:
+        for _, clave, _, _ in R.DOCUMENTOS.values():
+            if v.get(clave):
+                borrar_foto(v[clave])
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista, registro=bool(a_stock))
+    log.info("tren %s: vagón %s segregado (%s cargas a stock)", t["tren"], body.vagon, len(a_stock))
+    return {**O.estado_tren(odoo, t, lista), "a_stock": [v.get("codigo_paper") or v.get("albaran") or v.get("bulto") for v in a_stock]}
+
+
+@oficina.post("/tren/reincorporar")
+def tren_reincorporar(body: Vagon):
+    """Oficina: deshace «segregar»."""
+    odoo = odoo_pr()
+    t = _tren(odoo, abierto=True)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.reincorporar, odoo, t, body.vagon)
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista, registro=False)
+    return O.estado_tren(odoo, t, lista)
+
+
 @oficina.post("/tren/reabrir")
 def tren_reabrir():
     """Oficina: «Modificar el tren» terminado (hasta que se cargue la composición del siguiente)."""
@@ -753,7 +790,7 @@ def tren_enviar():
     cajas = O.cajas_en_orden(t)
     archivos = [{"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]),
                  "b64": base64.b64encode(X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], cajas, por_caja,
-                                                            t.get("convoy") or "")).decode()},
+                                                            t.get("convoy") or "", O.cajas_composicion(t))).decode()},
                 {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     stock = [v for v in lista if v["estado"] == "En stock"]
     fecha_es = html.escape("-".join(reversed(str(t["fecha"]).split("-"))))

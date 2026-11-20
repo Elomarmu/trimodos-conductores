@@ -465,3 +465,35 @@ def test_avisos_de_sharepoint(monkeypatch):
     assert [(a["archivo"], a["bloqueada"]) for a in av] == [("REGISTRO VIAJES PR.xlsx", True)]
     A.sharepoint_resultado(A.ResultadosSP(resultados=[A.ResultadoSP(archivo="REGISTRO VIAJES PR.xlsx", ok=True)]))
     assert A.avisos_sharepoint()["avisos"] == []                    # cuando sale bien, el aviso se quita
+
+
+def test_segregar_un_vagon(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    enviados, borrados = [], []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(A, "sincronizar_foto", lambda *a, **k: None)
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "borrar_foto", lambda r: borrados.append(r))
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069", observaciones="nota"))   # V1
+    A.tren_asignar(A.Asignar(caja_movil="CTEA25000377", vacia=True))                           # V1
+    A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="MXMU1450334"))                           # V3
+    r = A.tren_segregar(A.Vagon(vagon=V1))
+    assert len(r["a_stock"]) == 1 and "Caja móvil" not in odoo.bultos[11]["unload_note"]       # su carga vuelve a stock
+    t = O.tren_actual(odoo)
+    assert t["segregados"] == [V1] and t["orden"] == [V3] and t["vacias"] == [] and t["notas"] == {}
+    assert [c["vagon"] for c in O.cajas_en_orden(t)] == [V3, V2]                                # fuera de la Excel del tren
+    assert {c["caja_movil"] for c in r["cajas"]} == {"MXMU1450334", "ICR102043"}               # y del almacén
+    vista = {g["vagon"]: g["segregado"] for g in r["composicion"]}
+    assert vista == {V1: True, V2: False, V3: False}
+    comp = O.cajas_composicion(t)
+    assert [c["segregado"] for c in comp] == [True, True, False, False]
+    ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "", "2026-11-09", O.cajas_en_orden(t), {}, "", comp)))
+    assert [ws["TREN 86"].cell(f, 10).value for f in (6, 7)] == ["MXMU1450334", "ICR102043"]
+    assert ws["COMPOSICION"].cell(5, 5).value == "SEGREGADO" and ws["COMPOSICION"].cell(7, 5).value is None
+    with pytest.raises(A.AppError, match="ya está segregado"):
+        A.tren_segregar(A.Vagon(vagon=V1))
+    A.tren_reincorporar(A.Vagon(vagon=V1))                                                     # deshacer
+    assert O.tren_actual(odoo)["segregados"] == [] and V1 in [c["vagon"] for c in O.cajas_en_orden(O.tren_actual(odoo))]

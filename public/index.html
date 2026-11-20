@@ -219,6 +219,13 @@
       <button type="button" id="tren-ir-modificar" class="btn secondary">Modificar el tren</button>
     </div>
   </form>
+  <section id="tren-comp" hidden>
+    <h2>Composición</h2>
+    <p class="hint">Si un vagón no va a salir en este tren (por ejemplo, por un descarrilamiento), pulsa «Segregar»: sale de la Excel
+      del tren y del almacén, y sus cargas vuelven a stock. Se puede deshacer con «Volver a meter».</p>
+    <p id="tren-comp-ok" class="banner info" hidden></p>
+    <div id="tren-comp-lista" class="lista"></div>
+  </section>
   <div id="tren-paso1">
     <h2>Tren nuevo</h2>
     <p class="hint">Sube el listado de vagones y cajas móviles del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>

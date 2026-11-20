@@ -91,6 +91,11 @@ Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almac
 - Se cambia en la Excel del tren, en las cargas ya asignadas y en el correo del tren. Si te equivocas, escríbelo otra vez y guarda.
 - Si el tren está **terminado**, sale «TERMINADO» y el botón **«Modificar el tren»** para volver a abrirlo.
 
+Debajo sale la **composición completa** del tren cargado: cada vagón con sus cajas y cuántas cargas lleva.
+
+- Si un vagón **no va a salir** en este tren (por ejemplo, por un descarrilamiento del tren de entrada), pulsa **«Segregar»** en ese vagón y confirma. El vagón sale de la Excel del tren y del almacén (no aparece al asignar cargas); si tenía cargas, **vuelven a stock** y sus documentos salen de la carpeta del tren. En la hoja «COMPOSICION» de la Excel queda marcado como «SEGREGADO».
+- Si al final sí sale, pulsa **«Volver a meter»** (solo aparece aquí, en Composición del tren). Vuelve sin cargas: se asignan otra vez desde el almacén.
+
 Para un **tren nuevo**:
 
 - **Solo se puede cargar si el tren actual está terminado.** Si no lo está, la app lo avisa y ofrece **«Ir a terminar el tren»**.
