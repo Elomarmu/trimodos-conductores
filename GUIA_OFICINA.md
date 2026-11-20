@@ -93,8 +93,12 @@ Arriba, en **«Tren cargado ahora»**, se ve el tren que está cargando el almac
 
 Debajo sale la **composición completa** del tren cargado: cada vagón con sus cajas y cuántas cargas lleva.
 
-- Si un vagón **no va a salir** en este tren (por ejemplo, por un descarrilamiento del tren de entrada), pulsa **«Segregar»** en ese vagón y confirma. El vagón sale de la Excel del tren y del almacén (no aparece al asignar cargas); si tenía cargas, **vuelven a stock** y sus documentos salen de la carpeta del tren. En la hoja «COMPOSICION» de la Excel queda marcado como «SEGREGADO».
-- Si al final sí sale, pulsa **«Volver a meter»** (solo aparece aquí, en Composición del tren). Vuelve sin cargas: se asignan otra vez desde el almacén.
+- Si un vagón **no va a salir** en este tren (por ejemplo, por un descarrilamiento del tren de entrada), pulsa **«Segregar»** en ese vagón y confirma. El vagón sale de la Excel del tren y del almacén (no aparece al asignar cargas). En la hoja «COMPOSICION» de la Excel queda marcado como «SEGREGADO».
+- **Sus cargas no se quitan solas:** se quedan en sus cajas. El vagón pasa al apartado **«Vagones segregados (en espera)»**, más abajo en esta misma pantalla, y se queda ahí hasta que alguien haga algo con él:
+    - **«Quitar»** (en cada carga): saca esa carga de la caja y la devuelve a stock.
+    - **«Agregar al tren N»**: mete el vagón en el tren abierto, con sus cargas. Si es el mismo tren del que salió, vuelve a su sitio; si es otro tren, sus cajas se añaden al final de la composición y los documentos de sus cargas pasan a la carpeta de ese tren. Solo se puede si hay un tren sin terminar.
+    - **«Eliminar»**: pide confirmación y borra el vagón de la lista. Si aún lleva cargas, vuelven a stock.
+- Los vagones segregados **solo aparecen en Composición del tren**, nunca en la pantalla del almacén.
 
 Para un **tren nuevo**:
 

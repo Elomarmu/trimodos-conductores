@@ -628,7 +628,8 @@ def poner_al_dia(odoo, t: dict, lista: list[dict], registro: bool = True) -> Non
 def tren_actual():
     """Oficina y almacén: tren cargado, cajas con su carga y cargas en stock."""
     odoo = odoo_pr()
-    return O.estado_tren(odoo, _tren(odoo), O.viajes(odoo))
+    lista = O.viajes(odoo)
+    return _con_segregados(odoo, _tren(odoo), lista)
 
 
 @oficina.post("/tren/asignar")
@@ -736,36 +737,94 @@ def tren_rehacer():
     return O.estado_tren(odoo, t, lista)
 
 
+class Bulto(BaseModel):
+    bulto_id: int
+
+
+def _borrar_docs(cargas: list[dict]) -> None:
+    for v in cargas:
+        for _, clave, _, _ in R.DOCUMENTOS.values():
+            if v.get(clave):
+                borrar_foto(v[clave])
+
+
+def _con_segregados(odoo, t: dict | None, lista: list[dict]) -> dict:
+    return {**(O.estado_tren(odoo, t, lista) if t else {}), "segregados": O.segregados_vista(odoo, lista)}
+
+
+@oficina.get("/tren/segregados")
+def tren_segregados():
+    """Oficina: vagones segregados en espera de agregarlos a un tren (o eliminarlos)."""
+    odoo = odoo_pr()
+    return {"segregados": O.segregados_vista(odoo, O.viajes(odoo))}
+
+
 @oficina.post("/tren/segregar")
 def tren_segregar(body: Vagon):
-    """Oficina: aparta un vagón del tren (no sale en este tren). Sus cargas vuelven a stock y sus documentos salen de la
-    carpeta del tren."""
+    """Oficina: aparta un vagón del tren (p. ej. descarrilado). Sus cargas se quedan en sus cajas y el vagón queda en
+    espera en «Vagones segregados» para agregarlo a un tren o eliminarlo."""
     odoo = odoo_pr()
     t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
-    a_stock = _pr(O.segregar, odoo, t, lista, body.vagon)
-    for v in a_stock:
-        for _, clave, _, _ in R.DOCUMENTOS.values():
-            if v.get(clave):
-                borrar_foto(v[clave])
+    _pr(O.segregar, odoo, t, lista, body.vagon)
     lista = O.viajes(odoo)
-    poner_al_dia(odoo, t, lista, registro=bool(a_stock))
-    log.info("tren %s: vagón %s segregado (%s cargas a stock)", t["tren"], body.vagon, len(a_stock))
-    return {**O.estado_tren(odoo, t, lista), "a_stock": [v.get("codigo_paper") or v.get("albaran") or v.get("bulto") for v in a_stock]}
+    poner_al_dia(odoo, t, lista)
+    log.info("tren %s: vagón %s segregado", t["tren"], body.vagon)
+    return _con_segregados(odoo, t, lista)
 
 
-@oficina.post("/tren/reincorporar")
-def tren_reincorporar(body: Vagon):
-    """Oficina: deshace «segregar»."""
+@oficina.post("/tren/segregados/agregar")
+def tren_segregado_agregar(body: Vagon):
+    """Oficina: mete un vagón segregado en el tren abierto. Sus cargas pasan a este tren y sus documentos a su carpeta."""
     odoo = odoo_pr()
-    t = _tren(odoo, abierto=True)
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
     if get_settings().dry_run:
         return {"simulado": True}
-    _pr(O.reincorporar, odoo, t, body.vagon)
+    movidas = _pr(O.agregar_segregado, odoo, t, lista, body.vagon)
     lista = O.viajes(odoo)
-    poner_al_dia(odoo, t, lista, registro=False)
-    return O.estado_tren(odoo, t, lista)
+    por_id = {v["bulto_id"]: v for v in lista}
+    for v in movidas:
+        if v["bulto_id"] in por_id:
+            sincronizar_foto(odoo, por_id[v["bulto_id"]], lista=lista)
+    lista = O.viajes(odoo) if movidas else lista
+    poner_al_dia(odoo, t, lista)
+    log.info("tren %s: vagón segregado %s agregado (%s cargas)", t["tren"], body.vagon, len(movidas))
+    return _con_segregados(odoo, t, lista)
+
+
+@oficina.post("/tren/segregados/eliminar")
+def tren_segregado_eliminar(body: Vagon):
+    """Oficina: borra un vagón segregado que no se va a usar. Las cargas que aún lleve vuelven a stock."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    a_stock = _pr(O.eliminar_segregado, odoo, lista, body.vagon)
+    _borrar_docs(a_stock)
+    lista = O.viajes(odoo)
+    if a_stock:
+        subir_registro(odoo, lista)
+    log.info("vagón segregado %s eliminado (%s cargas a stock)", body.vagon, len(a_stock))
+    t = O.tren_actual(odoo)
+    return {**_con_segregados(odoo, t, lista), "a_stock": [v.get("codigo_paper") or v.get("albaran") or v.get("bulto") for v in a_stock]}
+
+
+@oficina.post("/tren/segregados/quitar")
+def tren_segregado_quitar(body: Bulto):
+    """Oficina: saca una carga de la caja de un vagón segregado: vuelve a stock."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    v = next((x for x in lista if x["bulto_id"] == body.bulto_id), None)
+    if not v or v["estado"] != "Vagón segregado":
+        raise AppError("Esa carga no está en un vagón segregado.", 409, "no_segregada")
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.quitar, odoo, body.bulto_id)
+    _borrar_docs([v])
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return _con_segregados(odoo, O.tren_actual(odoo), lista)
 
 
 @oficina.post("/tren/reabrir")

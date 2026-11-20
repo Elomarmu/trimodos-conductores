@@ -223,9 +223,15 @@
   <section id="tren-comp" hidden>
     <h2>Composición</h2>
     <p class="hint">Si un vagón no va a salir en este tren (por ejemplo, por un descarrilamiento), pulsa «Segregar»: sale de la Excel
-      del tren y del almacén, y sus cargas vuelven a stock. Se puede deshacer con «Volver a meter».</p>
+      del tren y del almacén. Sus cargas se quedan en sus cajas y el vagón pasa a «Vagones segregados».</p>
     <p id="tren-comp-ok" class="banner info" hidden></p>
     <div id="tren-comp-lista" class="lista"></div>
+  </section>
+  <section id="tren-seg" hidden>
+    <h2>Vagones segregados (en espera)</h2>
+    <p class="hint">Quedan aquí hasta que alguien los agregue a un tren o los elimine. «Quitar» saca una carga de su caja y la
+      devuelve a stock. «Eliminar» borra el vagón; si aún lleva cargas, vuelven a stock.</p>
+    <div id="tren-seg-lista" class="lista"></div>
   </section>
   <div id="tren-paso1">
     <h2>Tren nuevo</h2>

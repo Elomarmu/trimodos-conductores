@@ -196,6 +196,7 @@ CAMPOS_OBS = (  # orden de las líneas en las observaciones de descarga del bult
     ("tren", "Tren"), ("convoy", "Nº convoy"), ("fecha_tren", "Fecha tren"), ("vagon", "Vagón"), ("caja_movil", "Caja móvil"),
     ("comprobaciones", "Comprobaciones"), ("foto", "Foto en SharePoint"), ("foto_di", "DI en SharePoint"),
     ("fuera_stock", "Fuera de stock"),   # la oficina la saca de stock: se cargó en un tren anterior (fuera de la app)
+    ("segregado", "Vagón segregado"),    # va en una caja de un vagón apartado del tren (p. ej. descarrilamiento), en espera
 )
 # Documentos de cada carga que hay que mandar al cliente: foto del albarán y DI (documento de identificación de residuos).
 # clave → (inicio del nombre del adjunto en la tarea de Odoo, clave de las observaciones con su ruta en SharePoint,
