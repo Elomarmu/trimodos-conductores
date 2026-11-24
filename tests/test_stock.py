@@ -839,3 +839,28 @@ def test_envio_a_n8n_se_parte_si_hay_muchas_fotos(monkeypatch):
     assert len(llamadas) > 2 and all(sum(len(f["b64"]) for f in c["fotos"]) <= A.LIMITE_ENVIO for c in llamadas)
     assert llamadas[-1]["evento"] == "entrada_cerrada" and [f["nombre"] for f in llamadas[-1]["fotos"]] == ["albaran 1.jpg"]
     assert all(c["correo"] is False for c in llamadas[:-1]) and sum(len(c["fotos"]) for c in llamadas[:-1]) == 20
+
+
+def test_correo_manda_el_albaran_sobre_el_excel_y_anade_referencias_nuevas(cliente, monkeypatch, enviados):
+    monkeypatch.setenv("STOCK_CORREO_CLAVE", "clave-de-prueba-1")
+    codigos = [f"26000411{n:02d}" for n in range(30)]
+    pdf_leido = {"numero_albaran": "SRCS26-04896", "fecha": "2026-11-24", "remitente": "Grupo Raminatrans", "destinatario": "STINSA",
+                 "cliente_final": "BECRISA 2011 S.L.U.", "codigo_cliente_final": "03783", "total_palets": 30,
+                 "lineas": [{"referencia": "6030100800223", "descripcion": "CISTERNA ENTRADA INF WC TRIPOLI / CORINTO", "palets": 30, "bultos": None, "kg": 18000, "lote": ""}],
+                 "palets_detalle": [{"codigo": c, "referencia": "6030100800223", "kg": 600, "entrada": "ECS26-2838"} for c in codigos], "dudas": []}
+    leer_con(monkeypatch, albaran=pdf_leido)
+    cliente.post("/api/stock/clientes", json={"codigo": "RAMINATRANS", "nombre": "Grupo Raminatrans", "alias": ["Raminatrans"], "referencias": [{"ref": "15000000", "descripcion": "Otro producto"}]})
+    # Excel de ejemplo con otro producto y solo 12 filas
+    xlsx = base64.b64encode(_excel_albaran([f"30008{n:02d}" for n in range(12)])).decode()
+    cuerpo = {"mensaje_id": "m-1", "de": "x@y.z", "asunto": "Traslados", "cuerpo": "adjunto",
+              "adjuntos": [{"nombre": "a.pdf", "archivo_b64": base64.b64encode(b"%PDF-1.4").decode()}, {"nombre": "a.xlsx", "archivo_b64": xlsx}]}
+    r = cliente.post("/api/stock/correo", json=cuerpo, headers={"X-Clave": "clave-de-prueba-1"}).json()
+    assert r["resultado"] == "creada" and r["palets"] == 30, r
+    e = cliente.get(f"/api/stock/entradas/{r['id']}").json()
+    assert e["esperados"] == 30 or len(e.get("lineas", [])) == 1
+    assert any("no coincide" in a for a in r["avisos"] + [x["texto"] if isinstance(x, dict) else x for x in e["avisos"]])
+    assert any("Referencia nueva añadida" in a for a in r["avisos"])
+    # anulada la entrada, el mismo correo se puede volver a procesar
+    cliente.post(f"/api/stock/entradas/{r['id']}/anular", json={})
+    r2 = cliente.post("/api/stock/correo", json=cuerpo, headers={"X-Clave": "clave-de-prueba-1"}).json()
+    assert r2["resultado"] == "creada" and not r2.get("repetido") and r2["id"] != r["id"]

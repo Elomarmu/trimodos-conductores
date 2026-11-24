@@ -433,18 +433,37 @@ def _preparar_entrada(todos: list[tuple[bytes, str]]) -> dict:
     excels = [a for a in todos if L.es_excel(*a)]
     archivos = [a for a in todos if a not in excels]
     leido = _leer(L.leer_albaran, archivos) if archivos else {"lineas": [], "dudas": []}
-    if excels:   # el Excel del cliente (una fila por palet) manda sobre lo que lea la IA del PDF
+    if excels:
         ex = _leer(L.leer_excel_albaran, excels[0][0])
         leido_pdf = leido
-        lotes = {R.sscc(x.get("codigo")): x.get("entrada") for x in leido_pdf.get("palets_detalle") or [] if x.get("entrada")}
-        detalle = [{**x, "entrada": x.get("entrada") or lotes.get(R.sscc(x["codigo"]), "")} for x in ex["palets_detalle"]]   # el lote («Entrada») sale del PDF
-        leido = {**leido, "lineas": ex["lineas"], "palets_detalle": detalle, "total_palets": ex["total_palets"],
-                 "total_kg": ex["total_kg"], "dudas": list(leido_pdf.get("dudas") or [])}
         en_pdf = {R.sscc(x.get("codigo")) for x in leido_pdf.get("palets_detalle") or []}
-        if en_pdf and en_pdf != {R.sscc(x["codigo"]) for x in ex["palets_detalle"]}:
-            leido["dudas"].append("El PDF y el Excel no listan exactamente los mismos palets: manda el Excel (es el que se usa).")
-        if leido_pdf.get("total_palets") and leido_pdf["total_palets"] != ex["total_palets"]:
-            leido["dudas"].append(f"El PDF dice {leido_pdf['total_palets']} palets y el Excel trae {ex['total_palets']}.")
+        if en_pdf:   # el albarán (PDF) manda: sus palets son los que han de llegar; el Excel solo pone lo que el PDF no dice (referencia, peso)
+            en_ex = {R.sscc(x["codigo"]): x for x in ex["palets_detalle"]}
+            detalle = []
+            for x in leido_pdf["palets_detalle"]:
+                fila = en_ex.get(R.sscc(x.get("codigo"))) or {}
+                detalle.append({**fila, **{k: v for k, v in x.items() if v not in (None, "")}})
+            lineas = leido_pdf.get("lineas") or []
+            if not lineas:   # PDF sin líneas leídas: se sacan de los palets del albarán (descripción del Excel)
+                desc = {l["referencia"]: l.get("descripcion") for l in ex["lineas"]}
+                for x in detalle:
+                    ref = x.get("referencia") or ""
+                    l = next((l for l in lineas if l["referencia"] == ref), None)
+                    if not l:
+                        l = {"referencia": ref, "descripcion": desc.get(ref) or "", "palets": 0, "bultos": None, "kg": 0, "lote": ""}
+                        lineas.append(l)
+                    l["palets"] += 1; l["kg"] += x.get("kg") or 0
+            leido = {**leido_pdf, "lineas": lineas, "palets_detalle": detalle, "total_palets": leido_pdf.get("total_palets") or len(detalle),
+                     "dudas": list(leido_pdf.get("dudas") or [])}
+            if en_pdf != set(en_ex):
+                leido["dudas"].append(f"El Excel no coincide con el albarán (de sus {len(en_ex)} palets, {len(set(en_ex) - en_pdf)} no están en el albarán y faltan {len(en_pdf - set(en_ex))} del albarán): se ha hecho caso al albarán.")
+        else:   # el PDF no detalla los palets (foto sin lista): el Excel del cliente (una fila por palet) manda
+            lotes = {R.sscc(x.get("codigo")): x.get("entrada") for x in leido_pdf.get("palets_detalle") or [] if x.get("entrada")}
+            detalle = [{**x, "entrada": x.get("entrada") or lotes.get(R.sscc(x["codigo"]), "")} for x in ex["palets_detalle"]]
+            leido = {**leido, "lineas": ex["lineas"], "palets_detalle": detalle, "total_palets": ex["total_palets"],
+                     "total_kg": ex["total_kg"], "dudas": list(leido_pdf.get("dudas") or [])}
+            if leido_pdf.get("total_palets") and leido_pdf["total_palets"] != ex["total_palets"]:
+                leido["dudas"].append(f"El PDF dice {leido_pdf['total_palets']} palets y el Excel trae {ex['total_palets']}.")
         if not archivos:
             leido["dudas"].append("Solo has subido el Excel: faltan el número y la fecha del albarán (están en el PDF); escríbelos.")
     albaran = R.limpiar_albaran(leido)
@@ -1403,6 +1422,25 @@ def _resultado(estado: str, **resto) -> dict:
     return {"resultado": estado, "para": destinatarios(), **resto}
 
 
+def _anadir_referencias_nuevas(store, codigo: str, lineas: list[dict]) -> list[str]:
+    """Referencias del albarán que el catálogo del cliente no tiene: se añaden (con su descripción). Solo si el cliente ya usa catálogo."""
+    lista = clientes(store)
+    c = R.cliente_por_codigo(lista, codigo)
+    if not c or not c.get("referencias"):
+        return []
+    conocidas = set(R.claves_catalogo(c))
+    nuevas = []
+    for l in lineas:
+        ref = str(l.get("ref") or "").strip()
+        if ref and R.referencia(ref) not in conocidas:
+            c["referencias"].append({"ref": ref, "descripcion": str(l.get("descripcion") or "").strip(), "alias": []})
+            conocidas.add(R.referencia(ref))
+            nuevas.append(f"{ref} ({l.get('descripcion') or 'sin descripción'})")
+    if nuevas:
+        store.escribir("config", "clientes", {"clientes": lista, "sin_iniciales": True})
+    return nuevas
+
+
 @correo.post("/correo", dependencies=[Depends(require_correo)])
 def correo_recibido(body: CorreoIn):
     """Un correo del cliente con su albarán (PDF, Excel o fotos): se prepara la ENTRADA (o la SALIDA, si el correo habla de
@@ -1410,7 +1448,7 @@ def correo_recibido(body: CorreoIn):
     store = get_store()
     if body.mensaje_id:   # el mismo correo otra vez (n8n reintenta): devuelve lo ya creado
         for tipo in ("entrada", "salida"):
-            previo = next((d for d in store.listar(tipo) if d.get("correo_id") == body.mensaje_id), None)
+            previo = next((d for d in store.listar(tipo) if d.get("correo_id") == body.mensaje_id and d.get("estado") != R.ENTRADA_ANULADA), None)
             if previo:
                 return _resultado("creada", tipo=tipo, id=previo["id"], cliente=previo["cliente"]["nombre"], avisos=[], repetido=True)
     adjuntos = []
@@ -1441,10 +1479,13 @@ def correo_recibido(body: CorreoIn):
             if not prep["cliente_sugerido"]:
                 return _resultado("no_procesada", tipo="entrada", motivo="No reconozco al cliente del albarán (o encaja con varios): cárgalo a mano en la app.",
                                   avisos=[a["texto"] for a in prep["avisos"]])
+            nuevas = _anadir_referencias_nuevas(store, prep["cliente_sugerido"], prep["albaran"]["lineas"])   # producto nuevo: entra en el catálogo
             op = entradas_crear(EntradaIn(cliente=prep["cliente_sugerido"], albaran=AlbaranIn(**prep["albaran"]), esperados=prep["esperados"],
                                           fecha_entrada=prep["fecha_entrada"], fotos=adjuntos[:MAX_FOTOS_ALBARAN]))
             tipo, tabla = "entrada", "entrada"
-            avisos = [a["texto"] for a in prep["avisos"]]
+            nuevo = set(n.split(" (")[0] for n in nuevas)
+            avisos = [a["texto"] for a in prep["avisos"] if not any(f"La referencia {r} no está en el catálogo" in a["texto"] for r in nuevo)]
+            avisos += [f"Referencia nueva añadida al catálogo: {n}." for n in nuevas]
     except AppError as e:   # albarán repetido, petición con palets que no hay, lectura fallida…: lo ve la oficina por correo
         return _resultado("no_procesada", tipo="salida" if es_salida else "entrada", motivo=e.message)
     doc = store.leer(tabla, op["id"])
