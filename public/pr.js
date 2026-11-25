@@ -657,12 +657,13 @@ function pintarAlmacen(e) {
           disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
         h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
           disabled: i === grupos.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼"))),
-    ...g.cajas.map((c) => h("div", { class: "fila" },
+    ...g.cajas.map((c, j) => h("div", { class: "fila" },
       h("span", {}, h("b", {}, c.caja_movil), h("br"),
         c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
           : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía"),
         c.observaciones ? h("br") : null, c.observaciones ? h("span", { class: "nota" }, "⚠ " + c.observaciones) : null),
       fin ? null : h("span", { class: "vagon-mover" },
+        g.cajas.length > 1 ? h("button", { type: "button", class: "btn ghost mini", title: "Mover arriba o abajo dentro del vagón", onclick: (ev) => { clearError(); const men = h("div", { class: "menu-intercambio" }, h("button", { type: "button", onclick: () => { men.remove(); intercambiarCajas(c.caja_movil, "subir"); } }, "▲ Subir"), h("button", { type: "button", onclick: () => { men.remove(); intercambiarCajas(c.caja_movil, "bajar"); } }, "▼ Bajar")); ev.target.after(men); } }, "⇅") : null,
         h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
         c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null))))));
 }
@@ -671,6 +672,13 @@ async function moverVagon(vagon, hacia) {
   clearError();
   busy("Cambiando el orden…");
   try { const r = await post("/api/pr/tren/mover", { vagon, hacia }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+  catch (e) { showError(e.message); } finally { busy(null); }
+}
+
+async function intercambiarCajas(caja_movil, hacia) {
+  clearError();
+  busy("Intercambiando cajas…");
+  try { const r = await post("/api/pr/tren/intercambiar", { caja_movil, hacia }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
   catch (e) { showError(e.message); } finally { busy(null); }
 }
 

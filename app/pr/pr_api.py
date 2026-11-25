@@ -15,7 +15,7 @@ Oficina:
   POST /api/pr/bobinas/enviar       Excel de bobinas por clase → descarga y correo a Sevilla (n8n)
 Oficina y almacén:
   GET  /api/pr/tren/actual · POST /api/pr/tren/asignar · POST /api/pr/tren/quitar
-  POST /api/pr/tren/mover {"vagon", "hacia": subir|bajar} · POST /api/pr/tren/editar {"caja_movil", "nueva_caja", "nuevo_vagon"}
+  POST /api/pr/tren/mover {"vagon", "hacia": subir|bajar} · POST /api/pr/tren/editar {"caja_movil", "nueva_caja", "nuevo_vagon"} · POST /api/pr/tren/intercambiar {"caja_movil", "hacia": subir|bajar}
 n8n:
   GET  /api/pr/resumen              resumen de la mañana con la Excel de registro
 Las fotos y las Excel van a SharePoint y los correos salen por n8n (PR_AVISOS_WEBHOOK).
@@ -512,6 +512,11 @@ class Editar(BaseModel):
     observaciones: str | None = Field(None, max_length=300)   # None = no se tocan
 
 
+class IntercambiarCajas(BaseModel):
+    caja_movil: str = Field(min_length=1, max_length=20)
+    hacia: str = Field(pattern=r"^(subir|bajar)$")
+
+
 URL_EXCEL_TREN = "__URL_EXCEL_TREN__"   # n8n lo cambia por el enlace de la Excel del tren en SharePoint
 LETRA = "font:11pt Calibri,Arial"
 
@@ -755,6 +760,19 @@ def tren_editar(body: Editar):
                 sincronizar_foto(odoo, v, lista=lista)
         lista = O.viajes(odoo)
     poner_al_dia(odoo, t, lista, registro=bool(afectados))
+    return O.estado_tren(odoo, t, lista)
+
+
+@oficina.post("/tren/intercambiar")
+def tren_intercambiar(body: IntercambiarCajas):
+    """Almacén: intercambia dos cajas consecutivas dentro del mismo vagón."""
+    odoo = odoo_pr()
+    t = _tren(odoo, abierto=True)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.intercambiar_cajas, odoo, t, body.caja_movil, body.hacia)
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista, registro=False)
     return O.estado_tren(odoo, t, lista)
 
 

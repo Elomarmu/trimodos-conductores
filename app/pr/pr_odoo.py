@@ -836,6 +836,43 @@ def mover_vagon(odoo, tren: dict, vagon: str, hacia: str) -> None:
         escribir_tren(odoo, tren)
 
 
+def intercambiar_cajas(odoo, tren: dict, caja_movil: str, hacia: str) -> None:
+    """Intercambia dos cajas consecutivas dentro del mismo vagón (dentro del almacén)."""
+    cajas = tren.get("cajas") or []
+    # Encontrar el índice de la caja
+    idx = next((i for i, c in enumerate(cajas) if c.get("caja_movil") == caja_movil), None)
+    if idx is None:
+        raise ErrorPR(f"La caja {caja_movil} no existe en el tren.")
+
+    # Encontrar el vagon de la caja actual
+    vagon_actual = cajas[idx].get("vagon")
+
+    # Encontrar las siguientes/anteriores cajas del mismo vagón
+    if hacia == "subir":
+        # Buscar la caja anterior del mismo vagón
+        idx_intercambio = None
+        for i in range(idx - 1, -1, -1):
+            if cajas[i].get("vagon") == vagon_actual:
+                idx_intercambio = i
+                break
+        if idx_intercambio is None:
+            raise ErrorPR(f"No hay caja anterior en el vagón {vagon_actual}.")
+    else:  # bajar
+        # Buscar la caja siguiente del mismo vagón
+        idx_intercambio = None
+        for i in range(idx + 1, len(cajas)):
+            if cajas[i].get("vagon") == vagon_actual:
+                idx_intercambio = i
+                break
+        if idx_intercambio is None:
+            raise ErrorPR(f"No hay caja siguiente en el vagón {vagon_actual}.")
+
+    # Intercambiar las cajas
+    cajas[idx], cajas[idx_intercambio] = cajas[idx_intercambio], cajas[idx]
+    tren["cajas"] = cajas
+    escribir_tren(odoo, tren)
+
+
 def editar(odoo, tren: dict, lista: list[dict], caja_movil: str, nueva_caja: str = "", nuevo_vagon: str = "") -> list[int]:
     """Corrige el nombre de una caja móvil o el número de su vagón (se aplica a todas las cajas de ese vagón).
     También lo cambia en las cargas ya asignadas. Devuelve los bultos afectados (para renombrar su foto)."""
