@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
+import contextvars
 import datetime as dt
 import html
 import logging
@@ -98,8 +100,44 @@ TEXTOS = {"pedido_nuevo": "Se ha creado el pedido <b>{pedido}</b> «{referencia}
                          "(albarán {albaran}, {fecha}). El viaje no se ha guardado: hay que darlo de alta con su producto y precio."}
 
 
+# Lote de subidas a SharePoint: dentro de una petición, las Excel y los documentos que se suben sin correo se juntan
+# en UNA sola llamada a n8n al terminar (antes cada uno era una ejecución de n8n). Ver main.py (middleware).
+_LOTE: contextvars.ContextVar[list | None] = contextvars.ContextVar("pr_lote_n8n", default=None)
+_EVENTOS_LOTE = {"registro", "composicion", "foto_subir"}
+
+
+@contextlib.contextmanager
+def lote_n8n():
+    pendiente: list[dict] = []
+    marca = _LOTE.set(pendiente)
+    try:
+        yield pendiente
+    finally:
+        _LOTE.reset(marca)
+        vaciar_lote(pendiente)
+
+
+def vaciar_lote(pendiente: list[dict]) -> bool:
+    """Manda en una sola llamada todo lo acumulado (sin repetir: si una Excel se ha subido dos veces, vale la última)."""
+    if not pendiente:
+        return True
+    unicos: dict[tuple, dict] = {}
+    for a in pendiente:
+        unicos[(a.get("carpeta") or "", a["nombre"])] = a
+    archivos = list(unicos.values())
+    pendiente.clear()
+    return enviar_n8n({"evento": "lote", "correo": False, "asunto": "", "html": "", "archivos": archivos})
+
+
 def enviar_n8n(datos: dict) -> bool:
     """n8n (PR_AVISOS_WEBHOOK) manda el correo y, si trae archivos, los sube a SharePoint. Nunca para el trabajo."""
+    pendiente = _LOTE.get()
+    if pendiente is not None and datos.get("correo") is False and datos.get("evento") in _EVENTOS_LOTE:
+        if datos["evento"] == "foto_subir":
+            pendiente.append({"nombre": datos["nombre"], "carpeta": datos["carpeta"], "tipo": datos.get("tipo"), "b64": datos["b64"]})
+        else:
+            pendiente.extend(datos.get("archivos") or [])
+        return True
     url = os.environ.get("PR_AVISOS_WEBHOOK", "")
     if not url:
         log.info("PR sin webhook de n8n configurado: %s", datos.get("evento"))

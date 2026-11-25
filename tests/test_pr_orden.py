@@ -552,3 +552,17 @@ def test_agregar_segregado_a_otro_tren(monkeypatch):
     assert obs["tren"] == "87" and obs["convoy"] == "90200" and obs["vagon"] == V1 and "segregado" not in obs
     assert sincronizados == [11] and r["segregados"] == []                                     # documentos a la carpeta del 87
     assert [g["vagon"] for g in r["grupos"]] == [V1]
+
+
+def test_lote_junta_las_subidas_en_una_llamada(monkeypatch):
+    enviados = []
+    monkeypatch.setenv("PR_AVISOS_WEBHOOK", "http://n8n")
+    monkeypatch.setattr(A.httpx, "post", lambda url, json, **k: enviados.append(json) or type("R", (), {"status_code": 200})())
+    with A.lote_n8n():
+        A.enviar_n8n({"evento": "composicion", "correo": False, "archivos": [{"nombre": "T.xlsx", "carpeta": "C", "b64": "1"}]})
+        A.enviar_n8n({"evento": "foto_subir", "correo": False, "carpeta": "C", "nombre": "f.jpg", "tipo": "image/jpeg", "b64": "2"})
+        A.enviar_n8n({"evento": "composicion", "correo": False, "archivos": [{"nombre": "T.xlsx", "carpeta": "C", "b64": "3"}]})
+        A.enviar_n8n({"evento": "foto_borrar", "correo": False, "carpeta": "C", "nombre": "viejo.jpg"})   # va aparte, al momento
+        assert [e["evento"] for e in enviados] == ["foto_borrar"]
+    assert [e["evento"] for e in enviados] == ["foto_borrar", "lote"]
+    assert [(a["nombre"], a["b64"]) for a in enviados[1]["archivos"]] == [("T.xlsx", "3"), ("f.jpg", "2")]

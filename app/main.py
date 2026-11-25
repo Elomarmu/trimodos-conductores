@@ -162,6 +162,21 @@ def goods(q: str = Query("", max_length=60)):
 
 
 @app.middleware("http")
+async def lote_pr(request: Request, call_next):
+    """PR: todo lo que una petición sube a SharePoint sin correo sale en UNA llamada a n8n, al terminar la petición."""
+    if not request.url.path.startswith("/api/pr/"):
+        return await call_next(request)
+    from starlette.concurrency import run_in_threadpool
+    pendiente: list[dict] = []
+    marca = pr_api._LOTE.set(pendiente)
+    try:
+        return await call_next(request)
+    finally:
+        pr_api._LOTE.reset(marca)
+        await run_in_threadpool(pr_api.vaciar_lote, pendiente)
+
+
+@app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
