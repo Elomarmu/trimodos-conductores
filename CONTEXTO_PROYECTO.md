@@ -24,7 +24,7 @@ Fases 1-5 completadas: lectura QR/pedido, pantallas, escritura real + nota inter
 | Usuario técnico v18 | `agente.trafico@transargi.com` (clave API para datos; contraseña web solo para imprimir) |
 | **Hoy Vercel apunta a** | **la v18 de pruebas**, con `DRY_RUN=false` (los guardados escriben de verdad ahí) |
 
-Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_ids` (`tms.package`). Campos editables (solo esos 4): `goods_id`, `number_of_packages`, `euro_pallet_qty`, `shipping_weight`. Informe: `tms_reporting.tms_transportation_order` (id 412). El QR del PDF lleva `/web/content/<adjunto>?access_token=…`; el token se valida contra el adjunto.
+Modelo Odoo: `sale.order` → `tasks_ids` → `project.task` → `tms_package_ids` (`tms.package`). Campos editables (solo esos 4): `goods_id`, `number_of_packages`, `euro_pallet_qty`, `shipping_weight`. Informe: `tms_reporting.tms_transportation_order` (id 412). El QR del PDF lleva `/web/content/<adjunto>?access_token=…`; el token se valida contra el adjunto. Odoo genera la URL con `web.base.url` (en producción `www.stinsa.com`, congelado) y no con `ODOO_URL` (`www.grupotrimodos.com`); ambas apuntan al mismo Odoo. Por eso la app acepta, además del host de `ODOO_URL` y de `QR_ALLOWED_HOSTS`, los de `ODOO_QR_HOSTS` (por coma; por defecto `www.stinsa.com, stinsa.com, www.grupotrimodos.com, grupotrimodos.com`; ignora mayúsculas, puerto y http/https).
 
 ## 4. Reglas de negocio acordadas
 - **Editable solo si la etapa de la tarea es «Nuevo» o «En desarrollo»** (`EDITABLE_STAGES`). Sustituye a las reglas de cerrada/facturada/bultos.
