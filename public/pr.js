@@ -56,8 +56,14 @@ function pintarComposicion(e) {
           h("button", { type: "button", class: "btn ghost mini",
             disabled: i === comp.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼")) : null,
         abierto && !g.segregado ? h("button", { type: "button", class: "btn ghost mini", onclick: () => segregarVagon(g) }, "Segregar") : null),
-      h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ") +
-        (g.cargas ? ` · ${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}` : ""))))));
+      ...(g.cajas.length > 1 ? g.cajas.flatMap((caja, j) => [
+        h("div", { class: "fila" }, h("span", { class: "code" }, caja)),
+        j < g.cajas.length - 1 && abierto && !g.segregado ? h("div", { class: "fila intercambio" },
+          h("button", { type: "button", class: "btn ghost mini intercambio-btn",
+            title: "Intercambiar estas dos cajas", onclick: () => intercambiarCajasComp(g.vagon, caja) }, "⇅")) : null
+      ]).filter(x => x) : [h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ")))]),
+      g.cargas ? h("div", { class: "fila", style: "font-size: 0.85em; color: #666" },
+        `${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}`) : null))));
   pintarSegregados(e.segregados || [], e.tren && abierto ? e.tren : null);
 }
 function avisoComp(txt) { $("tren-comp-ok").textContent = txt; $("tren-comp-ok").hidden = false; }
@@ -694,6 +700,12 @@ async function intercambiarCajas(caja_movil, hacia) {
   clearError();
   busy("Intercambiando cajas…");
   try { const r = await post("/api/pr/tren/intercambiar", { caja_movil, hacia }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+  catch (e) { showError(e.message); } finally { busy(null); }
+}
+async function intercambiarCajasComp(vagon, caja_movil) {
+  clearError();
+  busy("Intercambiando cajas…");
+  try { const r = await post("/api/pr/tren/intercambiar", { caja_movil, hacia: "bajar" }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarComposicion(r); }
   catch (e) { showError(e.message); } finally { busy(null); }
 }
 
