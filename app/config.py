@@ -7,6 +7,22 @@ from dotenv import load_dotenv
 load_dotenv(os.environ.get("ENV_FILE") or None)
 
 
+DEFAULT_QR_HOSTS = "www.stinsa.com,stinsa.com,www.grupotrimodos.com,grupotrimodos.com"
+
+
+def host_name(value: str) -> str:
+    """Normaliza un host: sin http/https, sin puerto ni ruta, en minúsculas."""
+    v = (value or "").strip().lower()
+    if "//" in v:
+        v = v.split("//", 1)[1]
+    return v.split("/")[0].split(":")[0]
+
+
+def _hosts(value: str | None, default: str) -> list[str]:
+    raw = value if value and value.strip() else default
+    return [h for h in (host_name(x) for x in raw.split(",")) if h]
+
+
 def _bool(value: str | None, default: bool) -> bool:
     if value is None or value == "":
         return default
@@ -25,6 +41,7 @@ class Settings:
     company_ids: list[int]
     secret_key: str
     qr_allowed_hosts: list[str]
+    odoo_qr_hosts: list[str]
     access_code: str
     oficina_code: str            # código propio de la app de oficina y almacén (si está vacío, sirve el general)
     editable_stages: list[str]   # etapas de la tarea en las que se puede modificar
@@ -50,6 +67,7 @@ def get_settings() -> Settings:
         company_ids=[int(x) for x in os.environ.get("ODOO_COMPANY_IDS", "1,7").split(",") if x.strip()],
         secret_key=secret,
         qr_allowed_hosts=[h.strip().lower() for h in os.environ.get("QR_ALLOWED_HOSTS", "").split(",") if h.strip()],
+        odoo_qr_hosts=_hosts(os.environ.get("ODOO_QR_HOSTS"), DEFAULT_QR_HOSTS),
         access_code=os.environ.get("APP_ACCESS_CODE", "").strip(),
         oficina_code=os.environ.get("APP_OFICINA_CODE", "").strip(),
         weight_warning_kg=float((os.environ.get("PESO_AVISO_KG", "") or "27000").replace(",", ".")),
