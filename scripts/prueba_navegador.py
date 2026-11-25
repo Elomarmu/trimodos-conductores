@@ -169,6 +169,24 @@ def main():
                       "y ofrece abrir el PDF, descargarlo y volver al menú")
             ctx4.close()
 
+            print("Mercancía con las pantallas de PR y stock presentes (clase «pkg» compartida)")
+            ctx5 = navegador.new_context(viewport={"width": 390, "height": 844})
+            pg5 = ctx5.new_page()
+            errores_js = []
+            pg5.on("pageerror", lambda e: errores_js.append(str(e)))
+            pg5.add_init_script(f"localStorage.setItem('codigo-acceso', '{CODIGO}')")
+            pg5.add_init_script("Object.defineProperty(navigator, 'mediaDevices', {value: undefined})")
+            pg5.goto(BASE); pg5.wait_for_selector("#modo:not([hidden])")
+            comprobar(pg5.locator(".pkg").count() > pg5.locator("#s-edit .pkg").count() or pg5.locator("#pr-form.pkg").count() == 1,
+                      "la página tiene fichas «pkg» de PR y stock además de las de la edición")
+            pg5.click("#btn-scan"); pg5.click("[data-company=transargi]"); pg5.fill("#order", "S2621473"); pg5.click("#btn-order")
+            pg5.wait_for_selector("#s-edit:not([hidden])")
+            pg5.fill("#g-287102", "beb"); pg5.wait_for_selector("#packages .sugg .btn")
+            pg5.click("#packages .sugg .btn >> nth=0")
+            pg5.click("#btn-review"); pg5.wait_for_selector("#s-review:not([hidden])")
+            comprobar(not errores_js, "escribir en Mercancía y elegir sugerencia llega a «Revisar cambios» sin errores de JavaScript " + str(errores_js))
+            ctx5.close()
+
             print("Flujo completo")
             pg.click("#btn-scan")
             pg.wait_for_selector("#s-edit:not([hidden])", timeout=20000)
