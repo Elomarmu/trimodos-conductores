@@ -649,23 +649,33 @@ function pintarAlmacen(e) {
   $("alm-hechas-titulo").hidden = !llenas.length;
   $("alm-orden-hint").hidden = !llenas.length;
   const grupos = e.grupos || [];
-  $("alm-hechas").replaceChildren(...grupos.map((g, i) => h("div", { class: "vagon" },
-    h("div", { class: "vagon-cab" },
-      h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`),
-      fin ? null : h("span", { class: "vagon-mover" },
-        h("button", { type: "button", class: "btn ghost mini", title: "Subir (hacia la locomotora)", "aria-label": `Subir el vagón ${g.vagon}`,
-          disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
-        h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
-          disabled: i === grupos.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼"))),
-    ...g.cajas.map((c, j) => h("div", { class: "fila" },
-      h("span", {}, h("b", {}, c.caja_movil), h("br"),
-        c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
-          : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía"),
-        c.observaciones ? h("br") : null, c.observaciones ? h("span", { class: "nota" }, "⚠ " + c.observaciones) : null),
-      fin ? null : h("span", { class: "vagon-mover" },
-        g.cajas.length > 1 ? h("button", { type: "button", class: "btn ghost mini", title: "Mover arriba o abajo dentro del vagón", onclick: (ev) => { clearError(); const men = h("div", { class: "menu-intercambio" }, h("button", { type: "button", onclick: () => { men.remove(); intercambiarCajas(c.caja_movil, "subir"); } }, "▲ Subir"), h("button", { type: "button", onclick: () => { men.remove(); intercambiarCajas(c.caja_movil, "bajar"); } }, "▼ Bajar")); ev.target.after(men); } }, "⇅") : null,
-        h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
-        c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null))))));
+  $("alm-hechas").replaceChildren(...grupos.map((g, i) => {
+    const filas = [];
+    g.cajas.forEach((c, j) => {
+      filas.push(h("div", { class: "fila" },
+        h("span", {}, h("b", {}, c.caja_movil), h("br"),
+          c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
+            : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía"),
+          c.observaciones ? h("br") : null, c.observaciones ? h("span", { class: "nota" }, "⚠ " + c.observaciones) : null),
+        fin ? null : h("span", { class: "vagon-mover" },
+          h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
+          c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null)));
+      if (j < g.cajas.length - 1 && !fin) {
+        filas.push(h("div", { class: "fila intercambio" },
+          h("span", {}),
+          h("button", { type: "button", class: "btn ghost mini intercambio-btn", title: "Intercambiar estas dos cajas", onclick: () => intercambiarCajas(c.caja_movil, "bajar") }, "⇅")));
+      }
+    });
+    return h("div", { class: "vagon" },
+      h("div", { class: "vagon-cab" },
+        h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`),
+        fin ? null : h("span", { class: "vagon-mover" },
+          h("button", { type: "button", class: "btn ghost mini", title: "Subir (hacia la locomotora)", "aria-label": `Subir el vagón ${g.vagon}`,
+            disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
+          h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
+            disabled: i === grupos.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼"))),
+      ...filas);
+  }));
 }
 
 async function moverVagon(vagon, hacia) {
