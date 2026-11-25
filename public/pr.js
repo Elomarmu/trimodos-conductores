@@ -50,6 +50,11 @@ function pintarComposicion(e) {
     ...comp.map((g, i) => h("div", { class: "vagon" + (g.segregado ? " segregado" : "") },
       h("div", { class: "vagon-cab" },
         h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`, g.segregado ? h("b", { class: "seg-tag" }, " SEGREGADO") : null),
+        abierto && !g.segregado ? h("span", { class: "vagon-mover" },
+          h("button", { type: "button", class: "btn ghost mini",
+            disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
+          h("button", { type: "button", class: "btn ghost mini",
+            disabled: i === comp.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼")) : null,
         abierto && !g.segregado ? h("button", { type: "button", class: "btn ghost mini", onclick: () => segregarVagon(g) }, "Segregar") : null),
       h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ") +
         (g.cargas ? ` · ${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}` : ""))))));
