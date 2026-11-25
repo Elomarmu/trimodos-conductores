@@ -341,7 +341,8 @@ def pedidos_pr(odoo, desde: str) -> list[dict]:
 
 def viajes(odoo, desde: str | None = None) -> list[dict]:
     """Todos los viajes de PR (líneas con bulto de los pedidos «PR <MES>») desde esa fecha, del más antiguo al más nuevo.
-    estado: «En stock» si aún no tiene caja móvil; «Tren N» si ya va en un tren."""
+    estado: «En stock» si aún no tiene caja móvil; «Tren N» si ya va en un tren; «Tren anterior» si la oficina la sacó
+    de stock porque se cargó en un tren anterior, fuera de la app."""
     desde = desde or desde_defecto()
     pedidos = {p["id"]: p["name"] for p in pedidos_pr(odoo, desde)}
     if not pedidos:
@@ -370,11 +371,63 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
                     "bultos": p.get("number_of_packages") or None, "codigo_paper": p.get("carrier_tracking_ref") or "",
                     "contenedor": (l.get("equipment_id") or [None, ""])[1],
                     **{k: o.get(k, "") for k in ("albaran", "codigo_natur", "ler", "calidad", "tren", "convoy", "fecha_tren", "foto",
-                                                 "foto_di", "vagon", "caja_movil", "comprobaciones")},
+                                                 "foto_di", "vagon", "caja_movil", "comprobaciones", "fuera_stock",
+                                                 "segregado")},
                     **{"doc_" + d: ok for d, ok in docs.get(tarea, {d: False for d in R.DOCUMENTOS}).items()},
                     "tipo": R.tipo_calidad(o.get("calidad")),
-                    "estado": f"Tren {o['tren']}" if o.get("caja_movil") and o.get("tren") else "En stock"})
+                    "estado": (("Vagón segregado" if o.get("segregado") else f"Tren {o['tren']}") if o.get("caja_movil") and o.get("tren")
+                               else "Tren anterior" if o.get("fuera_stock") else "En stock")})
     return res
+
+
+def sacar_de_stock(odoo, lista: list[dict], bulto_ids: list[int], cuando: str) -> list[str]:
+    """Oficina: estas cargas ya se fueron en un tren anterior (fuera de la app). Dejan de estar en stock; en Odoo no se borra
+    nada, solo se apunta en las observaciones del bulto. Devuelve los bultos cambiados."""
+    por_id = {v["bulto_id"]: v for v in lista}
+    hechos = []
+    for b in bulto_ids:
+        v = por_id.get(b)
+        if not v:
+            raise ErrorPR("No encuentro una de las cargas. Actualiza la lista y vuelve a probar.")
+        if v["estado"] != "En stock":
+            continue
+        _cambiar_obs(odoo, b, {"fuera_stock": f"cargada en un tren anterior (marcada el {cuando})"})
+        hechos.append(v.get("bulto"))
+    return hechos
+
+
+def devolver_a_stock(odoo, lista: list[dict], bulto_ids: list[int]) -> list[str]:
+    """Deshace «sacar de stock»: la carga vuelve a estar en stock y se puede asignar a una caja."""
+    por_id = {v["bulto_id"]: v for v in lista}
+    hechos = []
+    for b in bulto_ids:
+        v = por_id.get(b)
+        if not v or v["estado"] != "Tren anterior":
+            continue
+        p = odoo("tms.package", "search_read", [[["id", "=", b]]], fields=["unload_note"])
+        odoo("tms.package", "write", [[b], {"unload_note": R.observaciones({}, p[0].get("unload_note"), quitar=("fuera_stock",))}])
+        hechos.append(v.get("bulto"))
+    return hechos
+
+
+# ---- avisos de SharePoint: Excel que no se han podido sustituir (p. ej. porque alguien la tenía abierta) ----------------
+NOMBRE_AVISOS = "PR_AVISOS_SHAREPOINT.json"
+
+
+def leer_avisos(odoo) -> dict:
+    adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "res.company"], ["name", "=", NOMBRE_AVISOS]]],
+               fields=["datas"], limit=1)
+    return json.loads(base64.b64decode(adj[0]["datas"]).decode()) if adj and adj[0].get("datas") else {}
+
+
+def guardar_avisos(odoo, avisos: dict) -> None:
+    contenido = base64.b64encode(json.dumps(avisos, ensure_ascii=False).encode()).decode()
+    previo = odoo("ir.attachment", "search_read", [[["res_model", "=", "res.company"], ["name", "=", NOMBRE_AVISOS]]], fields=["id"], limit=1)
+    if previo:
+        odoo("ir.attachment", "write", [[previo[0]["id"]], {"datas": contenido}])
+    else:
+        odoo("ir.attachment", "create", [{"name": NOMBRE_AVISOS, "res_model": "res.company", "res_id": R.EMPRESA_ID, "datas": contenido,
+                                          "mimetype": "application/json", "type": "binary"}])
 
 
 def siguiente_tren(lista: list[dict]) -> int:
@@ -436,7 +489,7 @@ def apuntar_foto(odoo, bulto_id: int, ruta: str | None, doc: str = "albaran") ->
 
 # ---- tren: composición (la carga la oficina) y asignación de cargas a cajas (oficina o almacén) -------------------
 
-CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones", "foto", "foto_di")
+CLAVES_TREN = ("tren", "convoy", "fecha_tren", "vagon", "caja_movil", "comprobaciones", "foto", "foto_di", "segregado")
 TODO_OK = R.texto_comprobaciones({k: True for k, _ in R.COMPROBACIONES})   # de momento no se revisan: siempre OK
 
 
@@ -473,6 +526,7 @@ def guardar_composicion(odoo, tren: int, convoy: str, fecha: str, cajas: list[di
         datos["orden"] = [v for v in anterior.get("orden") or [] if v in vagones_nuevos]
         cajas_nuevas = {c["caja_movil"] for c in datos["cajas"]}
         datos["vacias"] = [c for c in anterior.get("vacias") or [] if c in cajas_nuevas]
+        datos["segregados"] = [v for v in anterior.get("segregados") or [] if v in vagones_nuevos]
     escribir_tren(odoo, datos)
     return datos
 
@@ -532,12 +586,132 @@ def tren_actual(odoo) -> dict | None:
 # El almacén carga de atrás hacia delante: cada vagón que empieza a cargarse se pone ARRIBA de la lista; la segunda caja
 # de un vagón ya empezado se suma a su vagón sin moverlo. Después se puede reordenar (subir/bajar) a mano.
 
-def vagones(tren: dict) -> list[str]:
-    vistos = []
+def vagones(tren: dict, con_segregados: bool = False) -> list[str]:
+    """Vagones de la composición en su orden. Los segregados (apartados, no salen en este tren) solo si se pide."""
+    vistos, fuera = [], set([] if con_segregados else tren.get("segregados") or [])
     for c in tren["cajas"]:
-        if c["vagon"] not in vistos:
+        if c["vagon"] not in vistos and c["vagon"] not in fuera:
             vistos.append(c["vagon"])
     return vistos
+
+
+def cajas_composicion(tren: dict) -> list[dict]:
+    """Todas las cajas tal como vino la composición (con los vagones segregados marcados), para la hoja COMPOSICION."""
+    seg, res = set(tren.get("segregados") or []), []
+    for vagon in vagones(tren, con_segregados=True):
+        for j, c in enumerate(c for c in tren["cajas"] if c["vagon"] == vagon):
+            res.append(dict(c, segunda=j > 0, segregado=vagon in seg))
+    return res
+
+
+# ---- vagones segregados: apartados de un tren (p. ej. por un descarrilamiento), en espera de agregarlos a otro tren ----
+NOMBRE_SEGREGADOS = "PR_VAGONES_SEGREGADOS.json"
+
+
+def leer_segregados(odoo) -> list[dict]:
+    adj = odoo("ir.attachment", "search_read", [[["res_model", "=", "res.company"], ["name", "=", NOMBRE_SEGREGADOS]]],
+               fields=["datas"], limit=1)
+    return json.loads(base64.b64decode(adj[0]["datas"]).decode()) if adj and adj[0].get("datas") else []
+
+
+def guardar_segregados(odoo, lista: list[dict]) -> None:
+    contenido = base64.b64encode(json.dumps(lista, ensure_ascii=False).encode()).decode()
+    previo = odoo("ir.attachment", "search_read", [[["res_model", "=", "res.company"], ["name", "=", NOMBRE_SEGREGADOS]]],
+                  fields=["id"], limit=1)
+    if previo:
+        odoo("ir.attachment", "write", [[previo[0]["id"]], {"datas": contenido}])
+    else:
+        odoo("ir.attachment", "create", [{"name": NOMBRE_SEGREGADOS, "res_model": "res.company", "res_id": R.EMPRESA_ID,
+                                          "datas": contenido, "mimetype": "application/json", "type": "binary"}])
+
+
+def _cargas_de(lista: list[dict], tren: str, cajas: set[str]) -> list[dict]:
+    return [v for v in lista if v.get("tren") == str(tren) and v.get("caja_movil") in cajas]
+
+
+def segregar(odoo, tren: dict, lista: list[dict], vagon: str) -> dict:
+    """Oficina: aparta un vagón del tren. Sus cargas SE QUEDAN en sus cajas (el operario decide si las quita) y el vagón queda
+    en la lista de segregados, en espera de agregarlo a este u otro tren, o de eliminarlo."""
+    if vagon not in vagones(tren, con_segregados=True):
+        raise ErrorPR(f"El vagón {vagon} no está en el tren {tren['tren']}.")
+    if vagon in (tren.get("segregados") or []):
+        raise ErrorPR(f"El vagón {vagon} ya está segregado.")
+    if any(p["vagon"] == vagon for p in leer_segregados(odoo)):
+        raise ErrorPR(f"Ya hay un vagón {vagon} en la lista de segregados. Agrégalo o elimínalo antes.")
+    cajas = [c for c in tren["cajas"] if c["vagon"] == vagon]
+    nombres = {c["caja_movil"] for c in cajas}
+    for v in _cargas_de(lista, tren["tren"], nombres):
+        _cambiar_obs(odoo, v["bulto_id"], {"segregado": f"vagón {vagon} apartado del tren {tren['tren']}"})
+    item = {"vagon": vagon, "tren_origen": int(tren["tren"]), "fecha": tren.get("fecha"),
+            "cajas": [{k: c.get(k) for k in ("caja_movil", "tara_kg")} for c in cajas],
+            "vacias": [c for c in tren.get("vacias") or [] if c in nombres],
+            "notas": {k: t for k, t in (tren.get("notas") or {}).items() if k in nombres}}
+    pool = leer_segregados(odoo) + [item]
+    tren["segregados"] = list(tren.get("segregados") or []) + [vagon]
+    tren["orden"] = [v for v in tren.get("orden") or [] if v != vagon]
+    tren["vacias"] = [c for c in tren.get("vacias") or [] if c not in nombres]
+    tren["notas"] = {k: t for k, t in (tren.get("notas") or {}).items() if k not in nombres}
+    escribir_tren(odoo, tren)
+    guardar_segregados(odoo, pool)
+    return item
+
+
+def agregar_segregado(odoo, tren: dict, lista: list[dict], vagon: str) -> list[dict]:
+    """Oficina: mete un vagón segregado en el tren abierto (el mismo del que salió u otro). Sus cajas entran al final de la
+    composición y sus cargas pasan a este tren. Devuelve las cargas que han cambiado (para mover sus documentos)."""
+    pool = leer_segregados(odoo)
+    item = next((p for p in pool if p["vagon"] == vagon), None)
+    if not item:
+        raise ErrorPR(f"El vagón {vagon} no está en la lista de segregados.")
+    nombres = {c["caja_movil"] for c in item["cajas"]}
+    if vagon in (tren.get("segregados") or []):              # vuelve al mismo tren del que salió
+        tren["segregados"] = [v for v in tren["segregados"] if v != vagon]
+    elif vagon not in vagones(tren, con_segregados=True):    # entra en otro tren: sus cajas al final de la composición
+        repetidas = nombres & {c["caja_movil"] for c in tren["cajas"]}
+        if repetidas:
+            raise ErrorPR(f"La caja {sorted(repetidas)[0]} ya está en el tren {tren['tren']} en otro vagón. Revísalo antes de agregarlo.")
+        ultimo = max([c.get("orden") or 0 for c in tren["cajas"]] or [0])
+        tren["cajas"] = list(tren["cajas"]) + [{"orden": ultimo + 1, "vagon": vagon, "segunda": j > 0, "caja_movil": c["caja_movil"],
+                                                "tara_kg": c.get("tara_kg")} for j, c in enumerate(item["cajas"])]
+    cargas = _cargas_de(lista, item["tren_origen"], nombres)
+    for v in cargas:
+        p = odoo("tms.package", "search_read", [[["id", "=", v["bulto_id"]]]], fields=["unload_note"])
+        nota = R.observaciones({"tren": str(tren["tren"]), "convoy": convoy_tren(tren), "fecha_tren": tren.get("fecha"), "vagon": vagon},
+                               p[0].get("unload_note") if p else "", quitar=("segregado",))
+        odoo("tms.package", "write", [[v["bulto_id"]], {"unload_note": nota}])
+    tren["vacias"] = list(dict.fromkeys(list(tren.get("vacias") or []) + item.get("vacias", [])))
+    tren["notas"] = {**(tren.get("notas") or {}), **item.get("notas", {})}
+    if cargas or item.get("vacias"):
+        _poner_arriba(tren, vagon)
+    escribir_tren(odoo, tren)
+    guardar_segregados(odoo, [p for p in pool if p["vagon"] != vagon])
+    return cargas
+
+
+def eliminar_segregado(odoo, lista: list[dict], vagon: str) -> list[dict]:
+    """Oficina: borra un vagón de la lista de segregados (no se va a usar). Si aún lleva cargas, vuelven a stock.
+    Devuelve esas cargas (para quitar sus documentos de la carpeta del tren)."""
+    pool = leer_segregados(odoo)
+    item = next((p for p in pool if p["vagon"] == vagon), None)
+    if not item:
+        raise ErrorPR(f"El vagón {vagon} no está en la lista de segregados.")
+    cargas = _cargas_de(lista, item["tren_origen"], {c["caja_movil"] for c in item["cajas"]})
+    for v in cargas:
+        quitar(odoo, v["bulto_id"])
+    guardar_segregados(odoo, [p for p in pool if p["vagon"] != vagon])
+    return cargas
+
+
+def segregados_vista(odoo, lista: list[dict]) -> list[dict]:
+    """Vagones segregados en espera, con cada caja y la carga que lleva (si lleva)."""
+    res = []
+    for p in leer_segregados(odoo):
+        por_caja = {v["caja_movil"]: v for v in _cargas_de(lista, p["tren_origen"], {c["caja_movil"] for c in p["cajas"]})}
+        res.append({**{k: p.get(k) for k in ("vagon", "tren_origen", "fecha")},
+                    "cajas": [{"caja_movil": c["caja_movil"], "vacia": c["caja_movil"] in (p.get("vacias") or []),
+                               "observaciones": (p.get("notas") or {}).get(c["caja_movil"], ""),
+                               "carga": _carga(por_caja.get(c["caja_movil"]))} for c in p["cajas"]]})
+    return res
 
 
 def orden_final(tren: dict) -> list[str]:
@@ -620,7 +794,17 @@ def estado_tren(odoo, tren: dict, lista: list[dict]) -> dict:
     stock = [_carga(v) for v in lista if v["estado"] == "En stock"]
     return {**{k: tren[k] for k in ("tren", "convoy", "fecha")}, "convoy_salida": tren.get("convoy_salida") or "",
             "terminado": bool(tren.get("terminado")), "terminado_en": tren.get("terminado_en") or "",
-            "cajas": cajas, "grupos": grupos, "stock": stock}
+            "cajas": cajas, "grupos": grupos, "stock": stock, "composicion": composicion_vista(tren, por_caja)}
+
+
+def composicion_vista(tren: dict, por_caja: dict) -> list[dict]:
+    """Para la pantalla «Composición del tren»: cada vagón con sus cajas, si está segregado y cuántas cargas lleva."""
+    seg = set(tren.get("segregados") or [])
+    res = []
+    for vagon in vagones(tren, con_segregados=True):
+        cajas = [c["caja_movil"] for c in tren["cajas"] if c["vagon"] == vagon]
+        res.append({"vagon": vagon, "cajas": cajas, "segregado": vagon in seg, "cargas": sum(1 for c in cajas if c in por_caja)})
+    return res
 
 
 def abierto(tren: dict) -> None:
@@ -680,7 +864,7 @@ def editar(odoo, tren: dict, lista: list[dict], caja_movil: str, nueva_caja: str
             raise ErrorPR(f"El vagón {cifras} no cuadra con su dígito de control (la última cifra). Revísalo.")
         viejo = caja["vagon"]
         if cifras != viejo:
-            if cifras in vagones(tren):
+            if cifras in vagones(tren, con_segregados=True):
                 raise ErrorPR(f"El vagón {cifras} ya está en este tren.")
             for c in tren["cajas"]:
                 if c["vagon"] == viejo:

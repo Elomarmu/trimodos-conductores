@@ -2,13 +2,13 @@
 // Viajes de PR (SAICA): foto del albarán → revisar → guardar en Odoo y descargar la orden de transporte.
 // Usa las utilidades de app.js ($, h, post, api, busy, showError, go, state, loadPdf, abrirPdf…).
 
-const pr = { viaje: null, vehiculos: null, puntos: [], oficina: false };   // oficina: entra desde «Oficina · PR»
+const pr = { viaje: null, vehiculos: null, puntos: [], oficina: false };   // oficina: entra desde «Oficina Sevilla»
 const MAX_LADO = 1600;   // la foto se reduce en el móvil: se lee bien, sube en un momento y caben todas en el correo del tren
 
 $("btn-pr").addEventListener("click", () => { pr.oficina = false; go("pr-foto"); });
 $("of-registrar").addEventListener("click", () => { pr.oficina = true; go("pr-foto"); });
 document.addEventListener("click", (e) => { if (e.target.closest(".pr-volver")) go(pr.oficina ? "pr-oficina" : "menu"); });
-$("btn-pr-oficina").addEventListener("click", () => go("pr-oficina"));
+$("btn-pr-oficina").addEventListener("click", () => { go("pr-oficina"); revisarSharePoint("sp-aviso-oficina"); });
 $("btn-pr-almacen").addEventListener("click", () => abrirAlmacen(false));
 $("of-tren").addEventListener("click", () => {
   $("tren-paso1").hidden = false; $("tren-paso2").hidden = true; $("tren-hecho").hidden = true;
@@ -19,6 +19,7 @@ $("of-tren").addEventListener("click", () => {
 // Tren cargado ahora: el nº de convoy de entrada (el del listado) no es el de salida; la oficina lo pone o lo corrige aquí.
 async function pintarTrenActual() {
   $("tren-actual").hidden = true; $("tren-actual-ok").hidden = true; $("tren-bloqueado").hidden = true; $("tren-subir").hidden = false;
+  $("tren-comp-ok").hidden = true;
   try {
     const e = await api("/api/pr/tren/actual");
     $("tren-actual-txt").textContent = `Tren ${e.tren} de fecha ${fechaEs(e.fecha)}` + (e.convoy ? ` · convoy de entrada ${e.convoy}` : "") +
@@ -31,7 +32,103 @@ async function pintarTrenActual() {
     $("tren-bloqueado").hidden = e.terminado;
     $("tren-subir").hidden = !e.terminado;
     $("tren-bloqueado-txt").textContent = `Para cargar la composición de otro tren, antes hay que terminar el tren ${e.tren}.`;
-  } catch { /* todavía no hay ningún tren */ }
+    pintarComposicion(e);
+  } catch {
+    $("tren-comp").hidden = true; /* todavía no hay ningún tren */
+    try { pintarSegregados((await api("/api/pr/tren/segregados")).segregados || [], null); } catch { $("tren-seg").hidden = true; }
+  }
+}
+
+// Composición del tren cargado: cada vagón con sus cajas; «Segregar» lo aparta del tren y lo deja en «Vagones segregados».
+function pintarComposicion(e) {
+  const comp = e.composicion || [];
+  $("tren-comp").hidden = !comp.length;
+  const abierto = !e.terminado;
+  const seg = comp.filter((g) => g.segregado).length;
+  $("tren-comp-lista").replaceChildren(
+    h("p", { class: "hint" }, `${comp.length - seg} vagones en el tren` + (seg ? ` · ${seg} segregado${seg === 1 ? "" : "s"}` : "") + "."),
+    ...comp.map((g, i) => h("div", { class: "vagon" + (g.segregado ? " segregado" : "") },
+      h("div", { class: "vagon-cab" },
+        h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`, g.segregado ? h("b", { class: "seg-tag" }, " SEGREGADO") : null),
+        abierto && !g.segregado ? h("button", { type: "button", class: "btn ghost mini", onclick: () => segregarVagon(g) }, "Segregar") : null),
+      h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ") +
+        (g.cargas ? ` · ${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}` : ""))))));
+  pintarSegregados(e.segregados || [], e.tren && abierto ? e.tren : null);
+}
+function avisoComp(txt) { $("tren-comp-ok").textContent = txt; $("tren-comp-ok").hidden = false; }
+const nCargas = (n) => `${n} carga${n === 1 ? "" : "s"}`;
+function confirmarSeg(txt, accion) {
+  clearError();
+  state.onConfirm = async () => {
+    $("confirm").hidden = true;
+    try { await accion(); } catch (err) { showError(err.message); } finally { busy(null); state.onConfirm = null; }
+  };
+  $("confirm-txt").textContent = txt;
+  $("confirm").hidden = false;
+  $("btn-no").focus();
+}
+function segregarVagon(g) {
+  confirmarSeg(`El vagón ${g.vagon} (${g.cajas.join(", ")}) sale de este tren: no irá en la Excel ni en el almacén.` +
+    (g.cargas ? ` Sus cargas (${nCargas(g.cargas)}) se quedan en sus cajas; podrás quitarlas una a una.` : "") +
+    " Queda en «Vagones segregados» para agregarlo a un tren o eliminarlo.", async () => {
+    busy("Segregando el vagón…");
+    const r = await post("/api/pr/tren/segregar", { vagon: g.vagon });
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    pintarComposicion(r);
+    avisoComp(`Vagón ${g.vagon} segregado. Está abajo, en «Vagones segregados».`);
+  });
+}
+
+// Vagones segregados en espera (solo en esta pantalla, nunca en la del almacén): Agregar al tren abierto, Eliminar, o quitar cargas.
+function pintarSegregados(lista, trenAbierto) {
+  $("tren-seg").hidden = !lista.length;
+  $("tren-seg-lista").replaceChildren(...lista.map((s) => {
+    const cargas = s.cajas.filter((c) => c.carga).length;
+    return h("div", { class: "vagon segregado" },
+      h("div", { class: "vagon-cab" },
+        h("span", {}, `Vagón ${s.vagon}`, h("small", {}, ` · del tren ${s.tren_origen}` + (s.fecha ? ` (${fechaEs(s.fecha)})` : "") + ` · ${nCargas(cargas)}`))),
+      ...s.cajas.map((c) => h("div", { class: "fila" },
+        h("span", {}, h("span", { class: "code" }, c.caja_movil), " · ",
+          c.carga ? `${c.carga.codigo_paper || c.carga.albaran || c.carga.bulto}` + (c.carga.lugar ? ` · ${c.carga.lugar}` : "")
+            : c.vacia ? "vacía" : "sin carga",
+          c.observaciones ? h("small", { class: "nota" }, ` · ${c.observaciones}`) : null),
+        c.carga ? h("button", { type: "button", class: "btn ghost mini", onclick: () => quitarDeSegregado(s, c) }, "Quitar") : null)),
+      h("div", { class: "acciones" },
+        h("button", { type: "button", class: "btn secondary mini", disabled: !trenAbierto, title: trenAbierto ? "" : "No hay un tren abierto",
+          onclick: () => agregarSegregado(s, trenAbierto) }, trenAbierto ? `Agregar al tren ${trenAbierto}` : "Agregar (no hay tren abierto)"),
+        h("button", { type: "button", class: "btn ghost mini peligro", onclick: () => eliminarSegregado(s, cargas) }, "Eliminar")));
+  }));
+}
+function quitarDeSegregado(s, c) {
+  const nombre = c.carga.codigo_paper || c.carga.albaran || c.carga.bulto;
+  confirmarSeg(`La carga ${nombre} sale de la caja ${c.caja_movil} del vagón ${s.vagon} y vuelve a stock.`, async () => {
+    busy("Quitando la carga…");
+    const r = await post("/api/pr/tren/segregados/quitar", { bulto_id: c.carga.bulto_id });
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    r.composicion ? pintarComposicion(r) : pintarSegregados(r.segregados || [], null);
+    avisoComp(`Carga ${nombre} quitada: vuelve a stock.`);
+  });
+}
+function agregarSegregado(s, tren) {
+  const cargas = s.cajas.filter((c) => c.carga).length;
+  confirmarSeg(`El vagón ${s.vagon} entra en el tren ${tren}` + (cargas ? ` con sus cargas (${nCargas(cargas)}).` : ".") +
+    (s.tren_origen !== tren ? " Sus cajas se añaden al final de la composición." : ""), async () => {
+    busy("Agregando el vagón…");
+    const r = await post("/api/pr/tren/segregados/agregar", { vagon: s.vagon });
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    pintarComposicion(r);
+    avisoComp(`Vagón ${s.vagon} agregado al tren ${tren}.`);
+  });
+}
+function eliminarSegregado(s, cargas) {
+  confirmarSeg(`¿Eliminar el vagón segregado ${s.vagon}? No se podrá agregar a ningún tren.` +
+    (cargas ? ` Sus cargas (${nCargas(cargas)}) vuelven a stock.` : ""), async () => {
+    busy("Eliminando el vagón…");
+    const r = await post("/api/pr/tren/segregados/eliminar", { vagon: s.vagon });
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    r.composicion ? pintarComposicion(r) : pintarSegregados(r.segregados || [], null);
+    avisoComp(`Vagón ${s.vagon} eliminado.` + (r.a_stock && r.a_stock.length ? ` Vuelven a stock: ${r.a_stock.join(", ")}.` : ""));
+  });
 }
 $("tren-ir-terminar").addEventListener("click", () => abrirAlmacen(true));
 $("tren-ir-modificar").addEventListener("click", () => abrirAlmacen(true));
@@ -513,6 +610,7 @@ async function abrirAlmacen(desdeOficina) {
   $("alm-enviar").hidden = true;   // lo decide pintarAlmacen (solo oficina y con el tren sin terminar)
   $("alm-descargas").replaceChildren();
   go("pr-almacen");
+  revisarSharePoint("sp-aviso-almacen");
   await cargarAlmacen();
 }
 $("alm-volver").addEventListener("click", () => go(alm.oficina ? "pr-oficina" : "menu"));
@@ -781,3 +879,106 @@ function accesoDirecto() {
 window.addEventListener("load", accesoDirecto);
 window.addEventListener("codigo-ok", () => { if (currentScreen === "pr-almacen") cargarAlmacen(); });
 window.addEventListener("hashchange", accesoDirecto);
+
+
+// ---------- oficina: sacar de stock las cargas que ya se fueron en un tren anterior (y deshacerlo) ----------
+const prStk = { stock: [], fuera: [], marcadas: new Set() };
+$("of-stock").addEventListener("click", () => { go("pr-stock"); cargarStockPR(); });
+$("stk-recargar").addEventListener("click", cargarStockPR);
+async function cargarStockPR() {
+  clearError();
+  busy("Cargando el stock…");
+  try { pintarStockPR(await api("/api/pr/stock")); } catch (e) { showError(e.message); } finally { busy(null); }
+}
+const textoStockPR = (v) => [fechaEs(v.fecha), v.albaran ? `albarán ${v.albaran}` : null, v.codigo_paper, v.lugar, v.colaborador || v.tractora]
+  .filter(Boolean).join(" · ");
+function pintarStockPR(r) {
+  prStk.stock = r.stock || []; prStk.fuera = r.fuera || [];
+  prStk.marcadas = new Set([...prStk.marcadas].filter((id) => prStk.stock.some((v) => v.bulto_id === id)));
+  const n = prStk.stock.length, f = prStk.fuera.length;
+  $("stk-cuenta").textContent = `${n} ${n === 1 ? "carga" : "cargas"} en stock · ${f} ${f === 1 ? "sacada" : "sacadas"} de stock.`;
+  $("stk-lista").replaceChildren(...prStk.stock.map((v) => {
+    const caja = h("input", { type: "checkbox", id: `stk-${v.bulto_id}`, class: "stk-check" });
+    caja.checked = prStk.marcadas.has(v.bulto_id);
+    caja.addEventListener("change", () => { caja.checked ? prStk.marcadas.add(v.bulto_id) : prStk.marcadas.delete(v.bulto_id); contarStockPR(); });
+    return h("label", { class: "fila stk-fila", for: caja.id }, caja,
+      h("span", {}, h("b", {}, v.bulto || ""), h("br"), h("span", { class: "code" }, textoStockPR(v))));
+  }));
+  $("stk-fuera-titulo").hidden = $("stk-fuera-hint").hidden = !prStk.fuera.length;
+  $("stk-fuera").replaceChildren(...prStk.fuera.map((v) => h("div", { class: "fila" },
+    h("span", {}, h("b", {}, v.bulto || ""), h("br"), h("span", { class: "code" }, textoStockPR(v)), h("br"),
+      h("span", { class: "hint" }, v.fuera_stock || "")),
+    h("button", { type: "button", class: "btn ghost mini", onclick: () => devolverStockPR(v) }, "Devolver a stock"))));
+  contarStockPR();
+}
+function contarStockPR() {
+  const n = prStk.marcadas.size;
+  $("stk-sacar").textContent = n ? `Sacar de stock las marcadas (${n})` : "Sacar de stock las marcadas";
+  $("stk-sacar").disabled = !n;
+}
+function marcarStockPR(filtro) {
+  prStk.stock.forEach((v) => { if (filtro(v)) prStk.marcadas.add(v.bulto_id); });
+  pintarStockPR({ stock: prStk.stock, fuera: prStk.fuera });
+}
+$("stk-todas").addEventListener("click", () => marcarStockPR(() => true));
+$("stk-ninguna").addEventListener("click", () => { prStk.marcadas.clear(); pintarStockPR({ stock: prStk.stock, fuera: prStk.fuera }); });
+$("stk-marcar-hasta").addEventListener("click", () => {
+  const hasta = $("stk-hasta").value;
+  if (!hasta) return showError("Elige el día.");
+  marcarStockPR((v) => (v.fecha || "") <= hasta);
+});
+$("stk-sacar").addEventListener("click", () => {
+  const n = prStk.marcadas.size;
+  if (!n) return;
+  clearError();
+  state.onConfirm = async () => {
+    $("confirm").hidden = true;
+    busy("Sacando de stock…");
+    try {
+      const r = await post("/api/pr/stock/sacar", { bulto_ids: [...prStk.marcadas] });
+      if (r.simulado) showError("Modo de prueba: no se ha guardado nada.");
+      else { prStk.marcadas.clear(); pintarStockPR(r); }
+    } catch (e) { showError(e.message); } finally { busy(null); state.onConfirm = null; }
+  };
+  $("confirm-txt").textContent = `${n === 1 ? "1 carga deja" : n + " cargas dejan"} de estar en stock (se fueron en un tren anterior). ` +
+    "En Odoo no se borra nada y se puede deshacer.";
+  $("confirm").hidden = false;
+  $("btn-no").focus();
+});
+async function devolverStockPR(v) {
+  clearError();
+  busy("Devolviendo a stock…");
+  try {
+    const r = await post("/api/pr/stock/devolver", { bulto_ids: [v.bulto_id] });
+    if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarStockPR(r);
+  } catch (e) { showError(e.message); } finally { busy(null); }
+}
+
+
+// ---------- aviso: una Excel no se ha podido actualizar en SharePoint (normalmente porque alguien la tenía abierta) ----------
+async function revisarSharePoint(id) {
+  const caja = $(id);
+  if (!caja) return;
+  let r;
+  try { r = await api("/api/pr/avisos"); } catch { return; }   // el aviso nunca debe molestar al trabajo
+  const avisos = r.avisos || [];
+  caja.hidden = !avisos.length;
+  if (!avisos.length) return caja.replaceChildren();
+  const abierta = avisos.some((a) => a.bloqueada);
+  caja.replaceChildren(h("div", { class: "banner warn" },
+    h("b", {}, "⚠ No se ha podido actualizar en SharePoint:"),
+    h("ul", {}, ...avisos.map((a) => h("li", {}, `${a.archivo.replace(/\.xlsx$/, "")} (${a.cuando})` + (a.bloqueada ? " — estaba abierta" : "")))),
+    h("p", {}, abierta ? "Ciérrala en todos los ordenadores (sobre todo en el Excel de escritorio) y pulsa «Reintentar»."
+      : "Pulsa «Reintentar». Si vuelve a fallar, avisa al responsable de la app."),
+    h("button", { type: "button", class: "btn secondary small", onclick: () => reintentarSharePoint(id) }, "Reintentar")));
+}
+async function reintentarSharePoint(id) {
+  clearError();
+  busy("Volviendo a subir las Excel…");
+  try {
+    const r = await post("/api/pr/sharepoint/reintentar", {});
+    if (r.simulado) return showError("Modo de prueba: no se ha guardado nada.");
+    $(id).replaceChildren(h("div", { class: "banner info" }, "Enviado de nuevo. Compruebo en unos segundos si ya se ha podido actualizar…"));
+    setTimeout(() => revisarSharePoint(id), 20000);
+  } catch (e) { showError(e.message); } finally { busy(null); }
+}

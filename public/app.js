@@ -659,8 +659,10 @@ function closeConfirm() {
 }
 
 function markChanged() {
-  for (const card of document.querySelectorAll("#packages .pkg")) {
+  // Solo las tarjetas de bulto de la pantalla de edición: PR y stock también usan la clase «pkg» en sus formularios.
+  for (const card of document.querySelectorAll("#s-edit .pkg[data-pkg]")) {
     const p = state.data.bultos.find((x) => String(x.id) === card.dataset.pkg);
+    if (!p) continue;
     const c = current(p);
     const changed = {
       mercancia: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),
@@ -942,7 +944,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 }
 $("btn-scan").addEventListener("click", () => go("scan"));
 document.querySelectorAll(".solo-oficina").forEach((b) => { b.hidden = APP !== "oficina"; });
-document.querySelectorAll(".solo-conductor").forEach((b) => { b.hidden = APP === "oficina"; });   // en oficina va dentro de «Oficina · PR»
+document.querySelectorAll(".solo-conductor").forEach((b) => { b.hidden = APP === "oficina"; });   // en oficina va dentro de «Oficina Sevilla»
 (async () => {
   try {
     state.health = await api("/api/health");

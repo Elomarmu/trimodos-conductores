@@ -44,8 +44,9 @@
   <button id="btn-scan" class="btn primary">DECA - Trimodos</button>
   <p class="lead">Corrige mercancía, bultos, kilos, tractora y remolque de la orden de transporte.</p>
   <button id="btn-pr" class="btn secondary solo-conductor">Carga de PR · foto del albarán</button>
-  <button id="btn-pr-oficina" class="btn secondary solo-oficina" hidden>Oficina · PR</button>
-  <button id="btn-pr-almacen" class="btn secondary solo-oficina" hidden>Almacén · PR</button>
+  <button id="btn-pr-oficina" class="btn secondary solo-oficina" hidden>Oficina Sevilla</button>
+  <button id="btn-pr-almacen" class="btn secondary solo-oficina" hidden>Almacén Sevilla</button>
+  <button id="btn-stock" class="btn secondary solo-oficina" hidden>Oficina Burriana</button>
   <a id="btn-guia" class="btn ghost" href="/oficina/guia.html">Cómo se usa (guía)</a>
   <p id="modo" class="hint" hidden></p>
 </main>
@@ -164,10 +165,12 @@
 
 <!-- Oficina: menú -->
 <main id="s-pr-oficina" class="screen" hidden>
-  <h1>Oficina · viajes de PR</h1>
+  <h1>Oficina Sevilla · viajes de PR</h1>
+  <div id="sp-aviso-oficina" class="sp-aviso" hidden></div>
   <button id="of-registrar" class="btn primary">Registrar un viaje (foto del albarán)</button>
   <button id="of-completar" class="btn secondary">Modificar una carga (foto del albarán o buscarla)</button>
   <button id="of-pendientes" class="btn secondary">Cargas con documentos o datos pendientes</button>
+  <button id="of-stock" class="btn secondary">Sacar de stock (cargadas en un tren anterior)</button>
   <button id="of-tren" class="btn secondary">Composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
   <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
@@ -182,6 +185,31 @@
   <div id="pend-lista" class="lista"></div>
   <div class="actions">
     <button id="pend-recargar" class="btn ghost">Actualizar</button>
+    <button class="btn ghost" data-go="pr-oficina">Volver</button>
+  </div>
+</main>
+
+<!-- Oficina: sacar de stock las cargas que ya se fueron en un tren anterior (y deshacerlo) -->
+<main id="s-pr-stock" class="screen" hidden>
+  <h1>Sacar de stock</h1>
+  <p class="hint">Marca las cargas que ya se fueron en un tren anterior (cargadas fuera de la app). Dejan de salir en el almacén y en
+    «STOCK EN NAVE» y pasan al histórico como «Tren anterior». En Odoo no se borra nada y se puede deshacer.</p>
+  <p id="stk-cuenta" class="banner info"></p>
+  <div class="row2">
+    <div class="field"><label for="stk-hasta">Marcar todas con fecha de carga hasta el día</label><input id="stk-hasta" type="date"></div>
+    <button id="stk-marcar-hasta" type="button" class="btn ghost small">Marcar</button>
+  </div>
+  <div class="actions">
+    <button id="stk-todas" type="button" class="btn ghost small">Marcar todas</button>
+    <button id="stk-ninguna" type="button" class="btn ghost small">Desmarcar todas</button>
+  </div>
+  <div id="stk-lista" class="lista"></div>
+  <button id="stk-sacar" class="btn primary">Sacar de stock las marcadas</button>
+  <h2 id="stk-fuera-titulo">Ya sacadas de stock (tren anterior)</h2>
+  <p id="stk-fuera-hint" class="hint">Si alguna se sacó por error, pulsa «Devolver a stock».</p>
+  <div id="stk-fuera" class="lista"></div>
+  <div class="actions">
+    <button id="stk-recargar" class="btn ghost">Actualizar</button>
     <button class="btn ghost" data-go="pr-oficina">Volver</button>
   </div>
 </main>
@@ -203,6 +231,19 @@
       <button type="button" id="tren-ir-modificar" class="btn secondary">Modificar el tren</button>
     </div>
   </form>
+  <section id="tren-comp" hidden>
+    <h2>Composición</h2>
+    <p class="hint">Si un vagón no va a salir en este tren (por ejemplo, por un descarrilamiento), pulsa «Segregar»: sale de la Excel
+      del tren y del almacén. Sus cargas se quedan en sus cajas y el vagón pasa a «Vagones segregados».</p>
+    <p id="tren-comp-ok" class="banner info" hidden></p>
+    <div id="tren-comp-lista" class="lista"></div>
+  </section>
+  <section id="tren-seg" hidden>
+    <h2>Vagones segregados (en espera)</h2>
+    <p class="hint">Quedan aquí hasta que alguien los agregue a un tren o los elimine. «Quitar» saca una carga de su caja y la
+      devuelve a stock. «Eliminar» borra el vagón; si aún lleva cargas, vuelven a stock.</p>
+    <div id="tren-seg-lista" class="lista"></div>
+  </section>
   <div id="tren-paso1">
     <h2>Tren nuevo</h2>
     <p class="hint">Sube el listado de vagones y cajas móviles del tren (el PDF de Captrain, o fotos de la primera y la última hoja).</p>
@@ -262,6 +303,7 @@
 <!-- Asignar cargas a cajas (almacén y oficina) -->
 <main id="s-pr-almacen" class="screen" hidden>
   <h1>Cargar cajas móviles</h1>
+  <div id="sp-aviso-almacen" class="sp-aviso" hidden></div>
   <p id="alm-tren" class="banner info"></p>
   <form id="alm-form" class="pkg" novalidate>
     <div class="field"><label for="alm-caja">Caja móvil</label><select id="alm-caja"></select></div>
@@ -325,6 +367,291 @@
   <button class="btn ghost" data-go="pr-oficina">Volver</button>
 </main>
 
+<!-- Stock Burriana: menú -->
+<main id="s-stock" class="screen" hidden>
+  <h1>Oficina Burriana · stock del almacén</h1>
+  <button id="st-entradas" class="btn primary">Entrada de mercancía</button>
+  <button id="st-salidas" class="btn primary">Salidas</button>
+  <button id="st-stock" class="btn secondary">Inventario</button>
+  <button id="st-clientes" class="btn secondary">Clientes del almacén</button>
+  <button class="btn ghost" data-go="menu">Volver al menú</button>
+</main>
+
+<!-- Stock Burriana: entradas (la oficina carga el albarán; el almacén las descarga) -->
+<main id="s-stock-entradas" class="screen" hidden>
+  <h1>Entrada de mercancía</h1>
+  <label class="btn primary solo-oficina" for="se-camara">Nueva entrada · foto del albarán</label>
+  <input id="se-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <label class="btn secondary solo-oficina" for="se-archivo">Elegir PDF, Excel o fotos del albarán (hasta 4)</label>
+  <input id="se-archivo" class="oculto" type="file" accept="image/*,application/pdf,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple>
+  <h2>Entradas por descargar</h2>
+  <div id="se-lista" class="lista"></div>
+  <div class="actions">
+    <button id="se-todas" class="btn ghost">Ver también las cerradas</button>
+    <button class="btn ghost" data-go="stock">Volver</button>
+  </div>
+</main>
+
+<!-- Stock Burriana: revisar el albarán leído -->
+<main id="s-stock-entrada-nueva" class="screen" hidden>
+  <h1>Revisa el albarán</h1>
+  <div id="sen-avisos" class="avisos"></div>
+  <form id="sen-form" class="pkg" novalidate>
+    <div class="field"><label for="sen-cliente">Cliente (recomendado por el albarán)</label><select id="sen-cliente"></select></div>
+    <div class="field"><label for="sen-final">Cliente final (el cliente de tu cliente; solo informativo)</label><input id="sen-final" type="text" autocomplete="off"></div>
+    <div class="row2">
+      <div class="field"><label for="sen-numero">Nº albarán</label><input id="sen-numero" type="text" autocomplete="off"></div>
+      <div class="field"><label for="sen-fecha">Fecha del albarán</label><input id="sen-fecha" type="date"></div>
+    </div>
+    <div class="field"><label for="sen-fentrada">Día de entrada en el almacén (cámbialo si el camión se descarga otro día)</label><input id="sen-fentrada" type="date"></div>
+    <div class="row2">
+      <div class="field"><label for="sen-matricula">Matrícula</label><input id="sen-matricula" type="text" autocapitalize="characters" autocomplete="off"></div>
+      <div class="field"><label for="sen-transportista">Transportista</label><input id="sen-transportista" type="text" autocomplete="off"></div>
+    </div>
+    <h2>Mercancía del albarán</h2>
+    <div id="sen-lineas" class="lista"></div>
+    <button type="button" id="sen-mas" class="btn ghost small">Añadir línea</button>
+    <p id="sen-total" class="hint"></p>
+    <button type="submit" class="btn primary huge">Guardar la entrada</button>
+  </form>
+  <button class="btn ghost" data-go="stock-entradas">Volver</button>
+</main>
+
+<!-- Stock Burriana: descarga (almacén fotografía la etiqueta de cada palet) -->
+<main id="s-stock-entrada" class="screen" hidden>
+  <h1 id="se-titulo">Entrada</h1>
+  <p id="se-cabecera" class="banner info"></p>
+  <div id="se-revisar" hidden>
+    <div class="banner warn">Esta entrada la ha preparado la app desde un correo del cliente. Comprueba los datos (cliente, fecha de entrada, palets) y confírmala.</div>
+    <div id="se-revisar-avisos" class="avisos"></div>
+    <button id="se-revisar-btn" class="btn primary solo-oficina">Está bien: confirmar la entrada</button>
+  </div>
+  <label class="btn primary huge" for="se-etq-camara">Foto de la etiqueta del palet</label>
+  <input id="se-etq-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <button id="se-barras" type="button" class="btn secondary huge">Escanear códigos de barras</button>
+  <div class="field" id="se-ubic-campo"><label for="se-ubic">Ubicación en el almacén (zona donde dejas estos palets; cámbiala cuando cambies de zona)</label><select id="se-ubic"></select></div>
+  <div id="se-aviso-palet" class="avisos"></div>
+  <h2 id="se-lineas-titulo">Lo que dice el albarán</h2>
+  <div id="se-lineas" class="lista"></div>
+  <h2 id="se-palets-titulo">Palets verificados</h2>
+  <div id="se-palets" class="lista"></div>
+  <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
+    <form id="se-manual" novalidate>
+      <div id="se-m-corrigiendo" class="banner warn" hidden><span id="se-m-corrigiendo-txt"></span> <button type="button" id="se-m-cancelar" class="btn ghost small">Cancelar</button></div>
+      <div class="field" id="se-lista-campo" hidden><label for="se-m-lista">Palets del albarán que faltan por apuntar</label><select id="se-m-lista"></select></div>
+      <div class="field"><label for="se-m-ref">Referencia</label><input id="se-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
+      <div class="row2">
+        <div class="field"><label for="se-m-lote">Lote</label><input id="se-m-lote" type="text" autocomplete="off"></div>
+        <div class="field"><label for="se-m-kg">Kg</label><input id="se-m-kg" type="text" inputmode="numeric" autocomplete="off"></div>
+      </div>
+      <label class="hint" id="se-m-sincod-campo" hidden><input id="se-m-sincod" type="checkbox"> Este palet no tiene código (mercancía no normativa; hace falta elegir su ubicación)</label>
+      <div class="field"><label for="se-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="se-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+      <button type="submit" id="se-m-guardar" class="btn secondary small">Añadir el palet</button>
+    </form>
+  </details>
+  <div id="se-cierre">
+    <div class="field"><label for="se-fentrada">Día de entrada en el almacén</label><input id="se-fentrada" type="date"></div>
+    <div class="field"><label for="se-obs">Incidencias de la descarga (se avisa a la oficina en el correo)</label><textarea id="se-obs" maxlength="1000" placeholder="Palet roto, film abierto, falta un palet…"></textarea></div>
+    <div class="field"><label for="se-nota">Nota para la oficina y el cliente (opcional)</label><textarea id="se-nota" maxlength="300"></textarea></div>
+    <div id="se-firmado-campo">
+      <p class="hint"><b>Albarán firmado</b> por nosotros como recepción de la mercancía (obligatorio para terminar la descarga; va en el correo de cierre)</p>
+      <label class="btn secondary" for="se-firmado-camara">📷 Hacer foto del albarán firmado</label>
+      <input id="se-firmado-camara" type="file" accept="image/*" capture="environment" hidden>
+      <label class="btn secondary" for="se-firmado-galeria">🖼️ Elegir fotos de la galería (hasta 4)</label>
+      <input id="se-firmado-galeria" type="file" accept="image/*" multiple hidden>
+      <p id="se-firmado-estado" class="hint"></p>
+    </div>
+    <button id="se-cerrar" class="btn primary huge">Terminar la descarga</button>
+  </div>
+  <div id="se-descargas" class="actions"></div>
+  <div class="actions">
+    <button id="se-recargar" class="btn ghost">Actualizar</button>
+    <button id="se-anular" class="btn ghost danger">Anular esta entrada</button>
+    <button class="btn ghost" data-go="stock-entradas">Volver</button>
+  </div>
+</main>
+
+<!-- Stock Burriana: salidas (la oficina carga la petición; el almacén prepara la carga) -->
+<main id="s-stock-salidas" class="screen" hidden>
+  <h1>Salidas</h1>
+  <button id="ss-nueva" class="btn primary solo-oficina">Nueva salida (cargar la petición)</button>
+  <h2>Salidas por cargar</h2>
+  <div id="ss-lista" class="lista"></div>
+  <div class="actions">
+    <button id="ss-todas" class="btn ghost">Ver también las cargadas</button>
+    <button class="btn ghost" data-go="stock">Volver</button>
+  </div>
+</main>
+
+<main id="s-stock-salida-nueva" class="screen" hidden>
+  <h1>Petición de salida</h1>
+  <label class="btn secondary" for="ss-leer">Leer la petición: foto, PDF o Excel con los palets (opcional)</label>
+  <input id="ss-leer" class="oculto" type="file" accept="image/*,application/pdf,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+  <div id="ssn-avisos" class="avisos"></div>
+  <form id="ssn-form" class="pkg" novalidate>
+    <div class="field"><label for="ssn-cliente">Cliente</label><select id="ssn-cliente"></select></div>
+    <div class="row2">
+      <div class="field"><label for="ssn-referencia">Pedido del cliente</label><input id="ssn-referencia" type="text" autocomplete="off"></div>
+      <div class="field"><label for="ssn-destino">Destino</label><input id="ssn-destino" type="text" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="ssn-transportista">Transportista / matrícula</label><input id="ssn-transportista" type="text" autocomplete="off"></div>
+    <h2>Tipos de palet que piden</h2>
+    <div id="ssn-lineas" class="lista"></div>
+    <button type="button" id="ssn-mas" class="btn ghost small">Añadir línea</button>
+    <button type="submit" class="btn primary huge">Cargar la petición</button>
+  </form>
+  <button class="btn ghost" data-go="stock-salidas">Volver</button>
+</main>
+
+<main id="s-stock-salida" class="screen" hidden>
+  <h1 id="ss-titulo">Salida</h1>
+  <p id="ss-cabecera" class="banner info"></p>
+  <div id="ss-revisar" hidden>
+    <div class="banner warn">Esta salida la ha preparado la app desde un correo del cliente. Comprueba lo pedido y confírmala.</div>
+    <div id="ss-revisar-avisos" class="avisos"></div>
+    <button id="ss-revisar-btn" class="btn primary solo-oficina">Está bien: confirmar la salida</button>
+  </div>
+  <label class="btn primary huge" for="ss-etq-camara">Foto del palet que cargas</label>
+  <input id="ss-etq-camara" class="oculto" type="file" accept="image/*" capture="environment">
+  <button id="ss-barras" type="button" class="btn secondary huge">Escanear códigos de barras</button>
+  <div id="ss-aviso-palet" class="avisos"></div>
+  <h2>Lo que piden</h2>
+  <div id="ss-lineas" class="lista"></div>
+  <h2 id="ss-palets-titulo">Palets cargados</h2>
+  <div id="ss-palets" class="lista"></div>
+  <details class="manual"><summary>Elegir un palet de la lista o apuntarlo a mano</summary>
+    <form id="ss-manual" novalidate>
+      <div class="field" id="ss-lista-campo" hidden><label for="ss-m-lista">Palets del almacén que se pueden cargar (los más antiguos primero)</label><select id="ss-m-lista"></select></div>
+      <div class="field" id="ss-sincod-campo" hidden><label for="ss-m-sincod">Palets sin código del almacén</label><select id="ss-m-sincod"></select></div>
+      <div class="field"><label for="ss-m-sscc">Código del palet (el número bajo el código de barras)</label><input id="ss-m-sscc" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+      <div class="row2">
+        <div class="field"><label for="ss-m-ref">Referencia</label><input id="ss-m-ref" type="text" autocapitalize="characters" autocomplete="off"></div>
+        <div class="field"><label for="ss-m-lote">Lote</label><input id="ss-m-lote" type="text" autocomplete="off"></div>
+      </div>
+      <button type="submit" class="btn secondary small">Añadir el palet</button>
+    </form>
+  </details>
+  <div id="ss-cierre">
+    <div class="field"><label for="ss-obs">Incidencias de la carga (se avisa a la oficina en el correo)</label><textarea id="ss-obs" maxlength="1000" placeholder="Palet roto, no se encuentra un palet…"></textarea></div>
+    <div class="field"><label for="ss-nota">Nota para la oficina y el cliente (opcional)</label><textarea id="ss-nota" maxlength="300"></textarea></div>
+    <button id="ss-cerrar" class="btn primary huge">Terminar la carga y expedir la Excel</button>
+  </div>
+  <div id="ss-descargas" class="actions"></div>
+  <div class="actions">
+    <button id="ss-recargar" class="btn ghost">Actualizar</button>
+    <button class="btn ghost" data-go="stock-salidas">Volver</button>
+  </div>
+</main>
+
+<main id="s-stock-actual" class="screen" hidden>
+  <h1>Inventario</h1>
+  <button id="sa-nueva-inv" class="btn primary">Entrada manual de inventario</button>
+  <button id="sa-control" class="btn primary">Control de inventario</button>
+  <p id="sa-total" class="banner info"></p>
+  <div id="sa-antiguos" class="avisos"></div>
+  <div id="sa-lista" class="lista"></div>
+  <div class="actions">
+    <button id="sa-libro" class="btn secondary solo-oficina">Rehacer la Excel de control en SharePoint</button>
+    <button class="btn ghost" data-go="stock">Volver</button>
+  </div>
+  <div id="sa-descargas" class="actions"></div>
+</main>
+
+<!-- Ubicar palets que ya están en el almacén (poner la ubicación a los que no la tienen o cambiarla con confirmación) -->
+<main id="s-stock-ubicar" class="screen" hidden>
+  <h1>Ubicar palets</h1>
+  <p id="su-cabecera" class="banner info"></p>
+  <div class="field"><label for="su-ubic">Ubicación a asignar a los palets marcados</label><select id="su-ubic"></select></div>
+  <div class="actions">
+    <button id="su-sin" type="button" class="btn secondary">Marcar los que no tienen ubicación</button>
+    <button id="su-todos" type="button" class="btn ghost">Marcar todos / ninguno</button>
+  </div>
+  <div id="su-lista" class="lista"></div>
+  <button id="su-guardar" type="button" class="btn primary huge">Asignar ubicación a los marcados</button>
+  <div class="actions"><button id="su-volver" type="button" class="btn ghost">Volver al inventario</button></div>
+</main>
+
+<!-- Incidencia de un bulto (entrada o salida): qué ha pasado + fotos; sale en el correo de oficina -->
+<main id="s-stock-incidencia" class="screen" hidden>
+  <h1>Incidencia del bulto</h1>
+  <p id="sin2-cabecera" class="banner info"></p>
+  <div class="field"><label for="sin2-texto">¿Qué ha pasado? (palet roto, film abierto, golpe, mojado…)</label><textarea id="sin2-texto" maxlength="500"></textarea></div>
+  <label class="btn secondary" for="sin2-foto">📷 Hacer una foto del bulto</label>
+  <input id="sin2-foto" type="file" accept="image/*" capture="environment" hidden>
+  <label class="btn secondary" for="sin2-galeria">🖼️ Elegir fotos de la galería o de archivos (hasta 4)</label>
+  <input id="sin2-galeria" type="file" accept="image/*" multiple hidden>
+  <p id="sin2-fotos" class="hint"></p>
+  <button id="sin2-guardar" class="btn primary huge">Guardar la incidencia</button>
+  <button class="btn ghost" id="sin2-volver">Volver sin guardar</button>
+</main>
+
+<!-- Inventario: entrada manual (mercancía que ya estaba en la nave o aparece sin albarán) -->
+<main id="s-stock-inv-nueva" class="screen" hidden>
+  <h1>Entrada manual de inventario</h1>
+  <p class="hint">Para dar de alta mercancía que ya está en el almacén (por ejemplo, al empezar con un cliente) o que aparece sin albarán. Después apuntas sus palets con la foto de la etiqueta, y al terminar queda en el inventario.</p>
+  <form id="sin-form" class="pkg" novalidate>
+    <div class="field"><label for="sin-cliente">Cliente</label><select id="sin-cliente"></select></div>
+    <div class="field"><label for="sin-fecha">Fecha desde la que está en el almacén (si no la sabes, hoy)</label><input id="sin-fecha" type="date"></div>
+    <div class="field"><label for="sin-nota">Nota (opcional)</label><input id="sin-nota" type="text" maxlength="300" autocomplete="off" placeholder="Existencias iniciales, regularización…"></div>
+    <button type="submit" class="btn primary huge">Empezar a apuntar palets</button>
+  </form>
+  <button class="btn ghost" data-go="stock-actual">Volver</button>
+</main>
+
+<!-- Inventario: controles (contar lo que hay y compararlo con el sistema) -->
+<main id="s-stock-controles" class="screen" hidden>
+  <h1>Control de inventario</h1>
+  <p class="hint">Escaneas los palets que hay físicamente y la app te dice cuáles faltan y cuáles sobran respecto al sistema.</p>
+  <form id="sco-form" class="pkg" novalidate>
+    <div class="field"><label for="sco-cliente">Cliente a controlar</label><select id="sco-cliente"></select></div>
+    <button type="submit" class="btn primary huge">Empezar o seguir el control</button>
+  </form>
+  <h2>Controles anteriores</h2>
+  <div id="sco-lista" class="lista"></div>
+  <button class="btn ghost" data-go="stock-actual">Volver</button>
+</main>
+
+<main id="s-stock-control" class="screen" hidden>
+  <h1 id="sc2-titulo">Control</h1>
+  <p id="sc2-cabecera" class="banner info"></p>
+  <button id="sc2-barras" type="button" class="btn primary huge">Escanear códigos de barras</button>
+  <form id="sc2-form" class="pkg" novalidate>
+    <div class="field" id="sc2-sincod-campo" hidden><label for="sc2-sincod">Palets sin código del inventario (elige el que has encontrado)</label><select id="sc2-sincod"></select></div>
+    <div class="field"><label for="sc2-codigo">O escribe el código del palet</label><input id="sc2-codigo" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false"></div>
+    <button type="submit" class="btn secondary small">Contar el palet</button>
+  </form>
+  <div id="sc2-aviso" class="avisos"></div>
+  <h2>Resultado hasta ahora</h2>
+  <div id="sc2-resultado" class="lista"></div>
+  <div id="sc2-cierre">
+    <label class="hint"><input id="sc2-baja" type="checkbox"> Dar de baja del sistema los palets que faltan (solo si ya los has buscado)</label>
+    <div class="field"><label for="sc2-nota">Nota (opcional)</label><textarea id="sc2-nota" maxlength="300"></textarea></div>
+    <button id="sc2-cerrar" class="btn primary huge">Terminar el control</button>
+  </div>
+  <div id="sc2-descargas" class="actions"></div>
+  <button class="btn ghost" data-go="stock-controles">Volver</button>
+</main>
+
+<main id="s-stock-clientes" class="screen" hidden>
+  <h1>Clientes del almacén</h1>
+  <p class="hint">Toca un cliente para cambiar su nombre, sus alias o su catálogo de referencias.</p>
+  <div id="sc-lista" class="lista"></div>
+  <form id="sc-form" class="pkg" novalidate>
+    <h2>Nuevo cliente</h2>
+    <div class="field"><label for="sc-nombre">Nombre</label><input id="sc-nombre" type="text" autocomplete="off"></div>
+    <div class="field"><label for="sc-alias">Otros nombres con los que aparece en los albaranes (separados por comas)</label><input id="sc-alias" type="text" autocomplete="off"></div>
+    <div class="field"><label for="sc-refs">Catálogo de referencias (una por línea: referencia;descripción;códigos equivalentes separados por /). Avisa si llega una que no está.</label><textarea id="sc-refs" rows="6" autocomplete="off"></textarea></div>
+    <label class="hint"><input id="sc-porpalet" type="checkbox"> En las salidas hay que localizar el palet concreto (por su código), no solo la referencia</label>
+    <label class="hint"><input id="sc-aviso" type="checkbox"> Avisar de cada llegada de este cliente (se manda a traficolevante y a Carmelo, con la documentación, para reenviarlo al cliente)</label>
+    <div id="sc-aviso-campos">
+      <div class="field"><label for="sc-contacto">Contacto del cliente (nombre)</label><input id="sc-contacto" type="text" autocomplete="off"></div>
+      <div class="field"><label for="sc-correo">Correo del contacto (aparece en el aviso para reenviarlo)</label><input id="sc-correo" type="email" autocomplete="off"></div>
+    </div>
+    <button type="submit" class="btn primary" id="sc-guardar">Guardar el cliente</button>
+  </form>
+  <button class="btn ghost" data-go="stock">Volver</button>
+</main>
+
 <div id="confirm" class="overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-q" hidden>
   <div class="dialog">
     <h2 id="confirm-q">¿Seguro?</h2>
@@ -364,11 +691,24 @@
   </div>
 </div>
 
+<div id="barras" class="overlay escaner" role="dialog" aria-modal="true" aria-labelledby="bar-titulo" hidden>
+  <div class="escaner-caja">
+    <h2 id="bar-titulo">Escanear códigos de barras</h2>
+    <p class="hint">Apunta la cámara al código de barras de cada palet y acércala hasta que la etiqueta llene casi toda la pantalla. Se apunta solo y suena al leerlo; pasa al siguiente palet sin cerrar.</p>
+    <video id="bar-video" class="bar-video" playsinline muted autoplay></video>
+    <div id="bar-ultimo" class="avisos" aria-live="polite"></div>
+    <p id="bar-contador" class="hint"></p>
+    <button id="bar-cerrar" type="button" class="btn primary huge">Terminar</button>
+  </div>
+</div>
+
 <div id="busy" class="overlay" hidden>
   <div class="dialog" role="status" aria-live="polite"><div class="busy-loader" data-trimodos-loader></div><h2 id="busy-msg">Un momento…</h2></div>
 </div>
 <script src="/app.js"></script>
 <script src="/escaner.js"></script>
+<script src="/barras.js"></script>
 <script src="/pr.js"></script>
+<script src="/stock.js"></script>
 </body>
 </html>

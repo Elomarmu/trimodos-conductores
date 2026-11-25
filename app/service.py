@@ -43,7 +43,7 @@ def is_editable(task: dict, stages=DEFAULT_EDITABLE_STAGES) -> tuple[bool, str |
     return False, f"Esta orden está en la etapa «{stage or 'sin etapa'}». Solo se puede modificar en {permitidas}. Avisa a la oficina."
 
 def _allowed_hosts(settings: Settings) -> set[str]:
-    hosts = set(settings.qr_allowed_hosts)
+    hosts = set(settings.qr_allowed_hosts) | set(settings.odoo_qr_hosts)
     if settings.mode != "real":
         hosts.add("www.stinsa.com")  # el QR de prueba del modo simulado
     if settings.odoo_url:
@@ -526,6 +526,9 @@ def update(
         odoo.post_note(task_id, _note_html(lines, ses["verified"], warnings))
     except Exception:
         log.exception("No se pudo publicar la nota en la tarea %s", task_id)  # los datos ya están guardados: se sigue
+    else:
+        if settings.mode == "real":
+            _avisar_cambio()
 
     return {
         **base, "mercancias_nuevas_creadas": len(created_names),
@@ -604,6 +607,23 @@ def _describe(
             rows.append(f"{FIELD_LABELS[field]}: {before_s} → {after_s}")
         out.append((p["name"], rows))
     return out
+
+
+AVISO_CAMBIOS_WEBHOOK = "https://grupotrimodos.app.n8n.cloud/webhook/03ef7f28-2c81-467a-b442-e5c9f4c851fe"
+
+
+def _avisar_cambio() -> None:
+    """Avisa al flujo de n8n «Aviso de cambios de la app de conductores» para que mande el correo al momento
+    (antes lo buscaba cada 10 minutos). Si falla no pasa nada: el flujo revisa también cada hora."""
+    import os
+    import httpx
+    url = os.environ.get("DECA_AVISO_WEBHOOK", AVISO_CAMBIOS_WEBHOOK)
+    if not url:
+        return
+    try:
+        httpx.post(url, json={"origen": "app de conductores"}, timeout=8)
+    except Exception:
+        log.warning("No se ha podido avisar a n8n del cambio")
 
 
 def _note_html(lines: list[tuple[str, list[str]]], verified: bool, avisos: list[str] | None = None) -> str:

@@ -4,13 +4,18 @@
 - Líneas en orden de fecha: las de pago y las «INFO ·» (producto de seguimiento a 0 €).
 - Solo entran servicios desde FECHA_INICIO (por defecto 15/10/2026) y pedidos con algo que facturar.
 - No duplica: una línea ya existe si el pedido de la rotación tiene el mismo producto, contenedor y fecha.
-- Si el pedido de la rotación ya está facturado, las líneas nuevas van a un pedido de continuación («| 2»).
+- Los pedidos se quedan en PRESUPUESTO: los confirma el personal después de revisarlos.
+- Mientras el pedido es presupuesto, el proceso lo mantiene igual que la Excel (añade, corrige y anula líneas).
+- Un pedido CONFIRMADO ya está revisado: no se toca. Si después cambia en la Excel algo de ese pedido, se avisa en el
+  correo para corregirlo a mano. Lo que la Excel añade a esa rotación con fecha posterior a lo ya confirmado va a un
+  presupuesto de continuación («| 2»).
 - Solo se permite escribir en Odoo de pruebas (stinsa18) salvo ARGON_PERMITIR_PRODUCCION=1.
 - Lista blanca de modelos y métodos: no puede borrar nada.
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import time
@@ -87,7 +92,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
              desde: dt.date = dt.date(2026, 10, 15), esperadas: dict | None = None) -> dict:
     t0 = time.time()
     res = {"pedidos_creados": [], "pedidos_ampliados": [], "lineas_nuevas": 0, "lineas_ya_estaban": 0,
-           "lineas_corregidas": [], "lineas_anuladas": [], "cambios_facturados": [],
+           "lineas_corregidas": [], "lineas_anuladas": [], "cambios_facturados": [], "avisos_confirmados": [],
            "errores": [], "restantes": 0, "modo": "real" if real else "prueba"}
     if not rotaciones:
         return res
@@ -99,6 +104,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                                                   ["partner_id", "=", cfg["cliente_id"]]]],
                    fields=["name", "origin", "state", "invoice_status", "order_line"], order="id desc")
     lineas_prev = defaultdict(set)
+    ultima_fecha = defaultdict(str)  # pedido → fecha de su última línea
     ids_lineas = [i for p in previos for i in p["order_line"]]
     if ids_lineas:
         for l in odoo("sale.order.line", "search_read", [[["id", "in", ids_lineas]]],
@@ -106,6 +112,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
             if l["product_id"]:
                 lineas_prev[l["order_id"][0]].add(clave_linea(l["product_id"][0], l["pickup_date"] or "",
                                                               l["equipment_id"] and l["equipment_id"][0]))
+                ultima_fecha[l["order_id"][0]] = max(ultima_fecha[l["order_id"][0]], str(l["pickup_date"] or "")[:10])
     pendientes = list(rotaciones.items())
     for n, (rot, servs) in enumerate(pendientes):
         if time.time() - t0 > limite_s:
@@ -133,11 +140,31 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                 nuevas.append(l)
             if not nuevas:
                 continue
-            abierto = next((p for p in de_rot if p["invoice_status"] != "invoiced"), None)
+            # pedidos de la rotación ya confirmados (revisados por el personal): no se tocan. Lo que la Excel añade con
+            # fecha dentro de lo ya confirmado se avisa; lo posterior va a un presupuesto de continuación
+            confirmados = [p for p in de_rot if p["state"] not in ("draft", "sent")]
+            if confirmados:
+                tope = max(ultima_fecha[p["id"]] for p in confirmados)
+                dentro = [l for l in nuevas if str(l.get("pickup_date") or "")[:10] <= tope]
+                if dentro:
+                    pc = max(confirmados, key=lambda p: ultima_fecha[p["id"]])
+                    previas = cfg.get("_huellas_previas")
+                    for l in dentro:
+                        kt = clave_txt(clave_linea(l["product_id"], l.get("pickup_date") or "", eid))
+                        if previas is not None and kt in previas:
+                            continue  # ya se avisó la primera noche que apareció
+                        res["avisos_confirmados"].append({
+                            "pedido": pc["name"], "url": enlace(odoo, pc["id"]), "contenedor": cont,
+                            "fecha": str(l.get("pickup_date") or "")[:10], "linea": l.get("name", ""),
+                            "cambio": "servicio nuevo en la Excel: el pedido ya está confirmado, añadirlo a mano"})
+                    nuevas = [l for l in nuevas if l not in dentro]
+                    if not nuevas:
+                        continue
+            abierto = next((p for p in de_rot if p["state"] in ("draft", "sent")), None)
             if abierto:
                 if real:
                     odoo("sale.order", "write", [[abierto["id"]], {"order_line": [(0, 0, l) for l in nuevas]}])
-                    if abierto["state"] in ("draft", "sent") and cfg.get("confirmar", True):
+                    if cfg.get("confirmar", False):
                         odoo("sale.order", "action_confirm", [[abierto["id"]]])
                 res["pedidos_ampliados"].append({"pedido": abierto["name"], "contenedor": cont, "lineas": len(nuevas),
                                                  "url": enlace(odoo, abierto["id"])})
@@ -153,7 +180,7 @@ def escribir(odoo, rotaciones: dict, cfg: dict, real: bool, limite_s: float = 20
                 nombre, oid = "(prueba)", None
                 if real:
                     oid = odoo("sale.order", "create", [pedido])
-                    if cfg.get("confirmar", True):  # confirmar=false: se deja en presupuesto (sin compras ni facturas)
+                    if cfg.get("confirmar", False):  # por defecto en presupuesto: lo confirma el personal al revisarlo
                         odoo("sale.order", "action_confirm", [[oid]])
                     nombre = odoo("sale.order", "search_read", [[["id", "=", oid]]], fields=["name"])[0]["name"]
                 res["pedidos_creados"].append({"pedido": nombre, "contenedor": cont, "lineas": len(nuevas),
@@ -204,11 +231,12 @@ def _txt(campo, v):
 
 def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: bool, res: dict,
               protegidos: set, desde: dt.date, t0: float | None = None, limite_s: float = 1e9):
-    """Lo ya pasado a Odoo y aún no facturado se mantiene igual que la Excel:
+    """Los PRESUPUESTOS ya pasados a Odoo se mantienen iguales que la Excel:
     - si una celda pasada cambia (precio, proveedor, destino, conductor…), se corrige la línea;
     - si un servicio ya no está en la Excel, su línea se anula (cantidad 0 y «ANULADA» delante: Odoo no deja borrar
       líneas de un pedido confirmado);
-    - si lo que cambia ya está facturado, no se toca y se avisa en el correo para revisarlo a mano.
+    - los pedidos CONFIRMADOS (revisados por el personal) no se tocan: si cambia en la Excel algo suyo desde la noche
+      anterior (cfg["_huellas_previas"], hoja CONTROL), se avisa en el correo para corregirlo a mano.
     Solo toca líneas creadas por el automatismo (no las que se añaden a mano en Odoo) y nunca las de un día en el que a
     ese contenedor le faltan datos (se avisa aparte, en «falta de datos»)."""
     ids = [i for p in previos for i in p["order_line"]]
@@ -232,6 +260,7 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
             v = AO.linea_de(s, cfg)
             esperadas[clave_linea(s.producto_id, AO.utc_mediodia(s.fecha), eid)].append((s, v))
     prot = {(eq.get(c.replace(" ", "").replace("-", "")), f) for c, f in protegidos}
+    previas = cfg.get("_huellas_previas")  # None: aún no hay foto de la noche anterior (no se avisa de nada)
     cambios = defaultdict(list)  # pedido → [(1, línea, valores)]
     for l in sorted(lineas, key=lambda x: x["id"]):
         if not l["product_id"] or (uid and l.get("create_uid") and l["create_uid"][0] != uid):
@@ -246,6 +275,8 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
                 "contenedor": next((n for n, i in eq.items() if i == eid), ""), "fecha": fecha,
                 "linea": str(l.get("name") or "").replace(ANULADA, "")}
         facturada = float(l.get("qty_invoiced") or 0) > 0
+        confirmado = ped.get("state") not in (None, "draft", "sent")
+        kt = clave_txt(k)
         if esperadas.get(k):
             s, v = esperadas[k].pop(0)
             nuevo = {c: v.get(c, False) for c in CAMPOS}
@@ -254,7 +285,11 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
                 continue
             txt = "; ".join(f"{CAMPOS[c]}: {_txt(c, l.get(c))} → {_txt(c, x)}" for c, x in dif.items() if c != "name") \
                 or "descripción"
-            if facturada:
+            if confirmado:
+                # solo si la celda ha cambiado desde anoche: lo que el personal haya ajustado en Odoo no se repite cada día
+                if previas is not None and previas.get(kt) != huella(nuevo):
+                    res["avisos_confirmados"].append(info | {"cambio": "cambiado en la Excel: " + txt})
+            elif facturada:
                 res["cambios_facturados"].append(info | {"cambio": txt})
             else:
                 cambios[l["order_id"][0]].append((1, l["id"], dif))
@@ -264,7 +299,11 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
                 continue  # ya anulada otra noche
             if (eid, fecha) in prot:
                 continue  # ese día le faltan datos al contenedor: no se anula hasta que se completen
-            if facturada:
+            if confirmado:
+                if previas is not None and kt in previas:  # estaba anoche en la Excel y hoy ya no
+                    res["avisos_confirmados"].append(info | {"cambio": "ya no está en la Excel (o ha cambiado de producto): "
+                                                                       "anularlo a mano si sobra"})
+            elif facturada:
                 res["cambios_facturados"].append(info | {"cambio": "ya no está en la Excel (o ha cambiado de producto)"})
             else:
                 cambios[l["order_id"][0]].append((1, l["id"], {"product_uom_qty": 0, "name": ANULADA + str(l.get("name") or "")}))
@@ -302,6 +341,48 @@ def conciliar(odoo, rotaciones: dict, previos: list, eq: dict, cfg: dict, real: 
     nombres = {pedidos[o]["name"] for o in hechos if o in pedidos}
     res["lineas_corregidas"] = [x for x in res["lineas_corregidas"] if x["pedido"] in nombres]
     res["lineas_anuladas"] = [x for x in res["lineas_anuladas"] if x["pedido"] in nombres]
+
+
+def clave_txt(k) -> str:
+    return "|".join(str(x) for x in k)
+
+
+def huella(valores: dict) -> str:
+    """Resumen corto de los datos de una línea (para saber si la celda ha cambiado desde la noche anterior)."""
+    norm = {c: _norm(c, valores.get(c, False)) for c in sorted(CAMPOS)}
+    return hashlib.md5(json.dumps(norm, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+HOJA_CONTROL = "CONTROL ARGON"  # hoja oculta: foto de la Excel de la noche anterior (clave de la línea → huella)
+FILAS_CONTROL = 4000
+
+
+def leer_control(ruta) -> dict | None:
+    import openpyxl
+    wb = openpyxl.load_workbook(ruta, read_only=True)
+    if HOJA_CONTROL not in wb.sheetnames:
+        return None
+    res = {}
+    for fila in wb[HOJA_CONTROL].iter_rows(min_row=2, max_col=2, values_only=True):
+        if fila and fila[0]:
+            res[str(fila[0])] = str(fila[1] or "")
+    return res if res else None
+
+
+def escrituras_control(ruta, huellas: dict) -> list[dict]:
+    """La foto de esta noche para la próxima. Si aún no existe la hoja, se crea (oculta la noche siguiente)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(ruta, read_only=True)
+    if HOJA_CONTROL not in wb.sheetnames:
+        return [{"metodo": "POST", "hoja": HOJA_CONTROL, "ruta": "worksheets/add", "cuerpo": {"name": HOJA_CONTROL}}]
+    escr = []
+    if wb[HOJA_CONTROL].sheet_state == "visible":
+        escr.append({"hoja": HOJA_CONTROL, "ruta": f"worksheets('{HOJA_CONTROL}')", "cuerpo": {"visibility": "Hidden"}})
+    filas = [["Clave (producto|fecha|contenedor)", "Huella · no tocar: la usa el proceso de las 5:00"]]
+    filas += [[k, v] for k, v in sorted(huellas.items())][:FILAS_CONTROL - 1]
+    filas += [["", ""]] * (FILAS_CONTROL - len(filas))
+    escr.append({"hoja": HOJA_CONTROL, "celda": f"A1:B{FILAS_CONTROL}", "valores": filas})
+    return escr
 
 
 def distribuciones_de_productos(odoo, servicios, cfg: dict) -> dict:
@@ -352,7 +433,26 @@ def procesar(ruta_excel: str, cfg: dict, real: bool, odoo=None, desde: dt.date |
             protegidos.add((de_r[0].contenedor, d0.isoformat()))
             d0 += dt.timedelta(days=1)
     # para revisar lo ya pasado a Odoo cuenta todo lo que sale de la Excel, también las rotaciones solo informativas
-    res = escribir(odoo, rot, cfg, real, limite_s, protegidos, desde, preparar(servicios, desde, solo_con_pago=False))
+    esperadas = preparar(servicios, desde, solo_con_pago=False)
+    try:
+        cfg = dict(cfg, _huellas_previas=leer_control(ruta_excel))
+    except Exception:
+        cfg = dict(cfg, _huellas_previas=None)
+    res = escribir(odoo, rot, cfg, real, limite_s, protegidos, desde, esperadas)
+    # foto de esta noche (clave → huella) para comparar mañana los pedidos confirmados
+    if not res["restantes"]:
+        try:
+            eqs = {e["name"]: e["id"] for e in odoo("tms.equipment", "search_read", [[["name", "in", sorted(
+                {r.split("|")[0].replace(" ", "").replace("-", "") for r in esperadas})]]], fields=["name"])}
+            huellas = {}
+            for r, servs in esperadas.items():
+                eid = eqs.get(r.split("|")[0].replace(" ", "").replace("-", ""))
+                for s in servs:
+                    v = AO.linea_de(s, cfg)
+                    huellas[clave_txt(clave_linea(s.producto_id, AO.utc_mediodia(s.fecha), eid))] = huella(v)
+            res["escrituras_control"] = escrituras_control(ruta_excel, huellas)
+        except Exception as e:
+            res["errores"].append(f"No se ha podido guardar la foto de la Excel (hoja {HOJA_CONTROL}): {e}")
     res["excel"] = F.calcular.excel  # celdas que n8n completa en la Excel y referencias no encontradas
     # bloqueos de más de 7 días que cierran el pedido: recientes o que siguen (para explicarlo en el correo)
     hace7 = (hoy - dt.timedelta(days=7)).isoformat()

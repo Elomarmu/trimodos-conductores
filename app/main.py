@@ -217,6 +217,21 @@ def vehicles(
 
 
 @app.middleware("http")
+async def lote_pr(request: Request, call_next):
+    """PR: todo lo que una petición sube a SharePoint sin correo sale en UNA llamada a n8n, al terminar la petición."""
+    if not request.url.path.startswith("/api/pr/"):
+        return await call_next(request)
+    from starlette.concurrency import run_in_threadpool
+    pendiente: list[dict] = []
+    marca = pr_api._LOTE.set(pendiente)
+    try:
+        return await call_next(request)
+    finally:
+        pr_api._LOTE.reset(marca)
+        await run_in_threadpool(pr_api.vaciar_lote, pendiente)
+
+
+@app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -241,6 +256,12 @@ from .pr import pr_api  # noqa: E402
 app.include_router(pr_api.router, dependencies=access)             # conductor (y oficina): registrar un viaje
 app.include_router(pr_api.oficina, dependencies=access_oficina)    # oficina y almacén: solo con su código
 app.include_router(pr_api.n8n)                                     # resumen de la mañana: clave del flujo de n8n (X-Clave)
+
+# Control de stock del almacén de Burriana (entradas con albarán y etiquetas, salidas, Excel de control). Solo oficina y almacén.
+from .stock import stock_api  # noqa: E402
+
+app.include_router(stock_api.router, dependencies=access_oficina)
+app.include_router(stock_api.correo)                                  # correos del buzón del almacén: clave de n8n (X-Clave)
 
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("text/javascript", ".js")

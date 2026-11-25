@@ -31,7 +31,8 @@ class OdooOrden(OdooTren):
                   dict(STOCK, bulto_id=14, bulto="PK0014", albaran="ALB14")):
             o = R.leer_observaciones(self.bultos[v["bulto_id"]]["unload_note"])
             res.append(dict(v, **{k: o.get(k, "") for k in O.CLAVES_TREN},
-                            estado=f"Tren {o['tren']}" if o.get("caja_movil") else "En stock"))
+                            estado=(("Vagón segregado" if o.get("segregado") else f"Tren {o['tren']}") if o.get("caja_movil")
+                                    else "En stock")))
         return res
 
 
@@ -421,3 +422,147 @@ def test_registrar_buscar_pendientes_viajes_y_tren_usan_la_misma_referencia(monk
     O.buscar_pedido_mes(Espia(), "2026-11-09")                              # donde registrar busca el pedido del mes
     assert refs[-1] == "PR NOVIEMBRE APP"
     assert O.ref_de_app("PR NOVIEMBRE APP") and not O.ref_de_app("PR NOVIEMBRE")
+
+
+def test_sacar_de_stock_y_devolver(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    enviados = []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: [
+        dict(v, estado="Tren anterior" if R.leer_observaciones(o.bultos[v["bulto_id"]]["unload_note"]).get("fuera_stock")
+             and v["estado"] == "En stock" else v["estado"]) for v in o.viajes()])
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: enviados.append(d) or True)
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    _cargar(odoo, 11, "CRPU0910069")
+    r = A.stock_sacar(A.Bultos(bulto_ids=[11, 12, 13]))          # la 11 ya va en el tren 86: no se toca
+    assert len(r["hechos"]) == 2
+    assert [v["bulto_id"] for v in r["stock"]] == [14] and [v["bulto_id"] for v in r["fuera"]] == [12, 13]
+    assert "cargada en un tren anterior" in R.leer_observaciones(odoo.bultos[12]["unload_note"])["fuera_stock"]
+    assert enviados[-1]["evento"] == "registro"                     # la Excel de registro se pone al día
+    with pytest.raises(A.AppError):                                  # fuera de stock: ya no se puede asignar
+        A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="CTEA25000377"))
+    r = A.stock_devolver(A.Bultos(bulto_ids=[12]))                   # deshacer
+    assert len(r["hechos"]) == 1 and "Fuera de stock" not in odoo.bultos[12]["unload_note"]
+    assert [v["bulto_id"] for v in r["stock"]] == [12, 14]
+
+
+def test_avisos_de_sharepoint(monkeypatch):
+    odoo = OdooOrden()
+    adjuntos = {}
+    def falso(modelo, metodo, args, **kw):
+        if modelo == "ir.attachment" and args and args[0] and isinstance(args[0], list) and args[0][:1] == [["res_model", "=", "res.company"]]:
+            return [{"id": 1, "datas": adjuntos["datas"]}] if "datas" in adjuntos else []
+        if modelo == "ir.attachment" and metodo in ("create", "write"):
+            datos = args[0] if metodo == "create" else args[1]
+            adjuntos["datas"] = datos["datas"]
+            return 1
+        return odoo(modelo, metodo, args, **kw)
+    monkeypatch.setattr(A, "odoo_pr", lambda: falso)
+    A.sharepoint_resultado(A.ResultadosSP(resultados=[
+        A.ResultadoSP(archivo="REGISTRO VIAJES PR.xlsx", ok=False, bloqueada=True, motivo="423 resourceLocked"),
+        A.ResultadoSP(archivo="CARTON PAJA TREN 86.xlsx", ok=True)]))
+    av = A.avisos_sharepoint()["avisos"]
+    assert [(a["archivo"], a["bloqueada"]) for a in av] == [("REGISTRO VIAJES PR.xlsx", True)]
+    A.sharepoint_resultado(A.ResultadosSP(resultados=[A.ResultadoSP(archivo="REGISTRO VIAJES PR.xlsx", ok=True)]))
+    assert A.avisos_sharepoint()["avisos"] == []                    # cuando sale bien, el aviso se quita
+
+
+def _api(monkeypatch, odoo):
+    borrados, sincronizados = [], []
+    monkeypatch.setattr(A, "odoo_pr", lambda: odoo)
+    monkeypatch.setattr(O, "viajes", lambda o, desde=None: o.viajes())
+    monkeypatch.setattr(A, "sincronizar_foto", lambda o, v, *a, **k: sincronizados.append(v["bulto_id"]))
+    monkeypatch.setattr(A, "enviar_n8n", lambda d: True)
+    monkeypatch.setattr(A, "borrar_foto", lambda r: borrados.append(r))
+    monkeypatch.setattr(A, "get_settings", lambda: type("S", (), {"dry_run": False, "odoo_url": ""})())
+    return borrados, sincronizados
+
+
+def test_segregar_un_vagon_deja_sus_cargas_y_queda_en_espera(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    borrados, _ = _api(monkeypatch, odoo)
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069", observaciones="nota"))   # V1
+    A.tren_asignar(A.Asignar(caja_movil="CTEA25000377", vacia=True))                           # V1
+    A.tren_asignar(A.Asignar(bulto_id=12, caja_movil="MXMU1450334"))                           # V3
+    r = A.tren_segregar(A.Vagon(vagon=V1))
+    obs = R.leer_observaciones(odoo.bultos[11]["unload_note"])
+    assert obs["caja_movil"] == "CRPU0910069" and obs["tren"] == "86" and "apartado" in obs["segregado"]   # la carga se queda
+    assert borrados == []
+    t = O.tren_actual(odoo)
+    assert t["segregados"] == [V1] and t["orden"] == [V3] and t["vacias"] == [] and t["notas"] == {}
+    assert [c["vagon"] for c in O.cajas_en_orden(t)] == [V3, V2]                                # fuera de la Excel del tren
+    assert {c["caja_movil"] for c in r["cajas"]} == {"MXMU1450334", "ICR102043"}               # y del almacén
+    assert {g["vagon"]: g["segregado"] for g in r["composicion"]} == {V1: True, V2: False, V3: False}
+    [seg] = r["segregados"]                                                                    # en espera
+    assert seg["vagon"] == V1 and seg["tren_origen"] == 86
+    assert [(c["caja_movil"], c["vacia"], bool(c["carga"])) for c in seg["cajas"]] == [("CRPU0910069", False, True),
+                                                                                          ("CTEA25000377", True, False)]
+    assert seg["cajas"][0]["observaciones"] == "nota"
+    assert all(v["estado"] != "En stock" for v in odoo.viajes() if v["bulto_id"] == 11)
+    comp = O.cajas_composicion(t)
+    assert [c["segregado"] for c in comp] == [True, True, False, False]
+    ws = openpyxl.load_workbook(io.BytesIO(X.carton_paja_tren(86, "", "2026-11-09", O.cajas_en_orden(t), {}, "", comp)))
+    assert ws["COMPOSICION"].cell(5, 5).value == "SEGREGADO" and ws["COMPOSICION"].cell(7, 5).value is None
+    with pytest.raises(A.AppError, match="ya está segregado"):
+        A.tren_segregar(A.Vagon(vagon=V1))
+    # vuelve al mismo tren con su carga, su caja vacía y su nota
+    r = A.tren_segregado_agregar(A.Vagon(vagon=V1))
+    t = O.tren_actual(odoo)
+    assert r["segregados"] == [] and t["segregados"] == [] and t["orden"] == [V1, V3]
+    assert t["vacias"] == ["CTEA25000377"] and t["notas"] == {"CRPU0910069": "nota"}
+    assert "segregado" not in R.leer_observaciones(odoo.bultos[11]["unload_note"])
+
+
+def test_quitar_carga_y_eliminar_segregado(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    borrados, _ = _api(monkeypatch, odoo)
+    odoo.bultos[11]["unload_note"] += "\nFoto en SharePoint: CARTON PAJA TREN 86/x.jpg"
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
+    A.tren_asignar(A.Asignar(bulto_id=13, caja_movil="CTEA25000377"))
+    A.tren_segregar(A.Vagon(vagon=V1))
+    with pytest.raises(A.AppError, match="no está en un vagón segregado"):
+        A.tren_segregado_quitar(A.Bulto(bulto_id=12))
+    r = A.tren_segregado_quitar(A.Bulto(bulto_id=11))                                          # el operario la quita
+    assert "Caja móvil" not in odoo.bultos[11]["unload_note"] and borrados == ["CARTON PAJA TREN 86/x.jpg"]
+    assert [bool(c["carga"]) for c in r["segregados"][0]["cajas"]] == [False, True]
+    r = A.tren_segregado_eliminar(A.Vagon(vagon=V1))                                           # la que queda vuelve a stock
+    assert r["segregados"] == [] and len(r["a_stock"]) == 1 and "Caja móvil" not in odoo.bultos[13]["unload_note"]
+    with pytest.raises(A.AppError, match="no está en la lista"):
+        A.tren_segregado_eliminar(A.Vagon(vagon=V1))
+
+
+def test_agregar_segregado_a_otro_tren(monkeypatch):
+    odoo = OdooOrden()
+    O.guardar_composicion(odoo, 86, "90107", "2026-11-09", CAJAS)
+    _, sincronizados = _api(monkeypatch, odoo)
+    A.tren_asignar(A.Asignar(bulto_id=11, caja_movil="CRPU0910069"))
+    A.tren_segregar(A.Vagon(vagon=V1))
+    O.terminar(odoo, O.tren_actual(odoo), "2026-11-10T08:00")
+    otras = [{"orden": 1, "vagon": "V9", "segunda": False, "caja_movil": "CAJA9", "tara_kg": 5000}]
+    O.guardar_composicion(odoo, 87, "90200", "2026-11-12", otras)
+    assert O.tren_actual(odoo)["tren"] == 87
+    sincronizados.clear()
+    r = A.tren_segregado_agregar(A.Vagon(vagon=V1))
+    t = O.tren_actual(odoo)
+    assert [c["caja_movil"] for c in t["cajas"]] == ["CAJA9", "CRPU0910069", "CTEA25000377"] and t["orden"] == [V1]
+    obs = R.leer_observaciones(odoo.bultos[11]["unload_note"])
+    assert obs["tren"] == "87" and obs["convoy"] == "90200" and obs["vagon"] == V1 and "segregado" not in obs
+    assert sincronizados == [11] and r["segregados"] == []                                     # documentos a la carpeta del 87
+    assert [g["vagon"] for g in r["grupos"]] == [V1]
+
+
+def test_lote_junta_las_subidas_en_una_llamada(monkeypatch):
+    enviados = []
+    monkeypatch.setenv("PR_AVISOS_WEBHOOK", "http://n8n")
+    monkeypatch.setattr(A.httpx, "post", lambda url, json, **k: enviados.append(json) or type("R", (), {"status_code": 200})())
+    with A.lote_n8n():
+        A.enviar_n8n({"evento": "composicion", "correo": False, "archivos": [{"nombre": "T.xlsx", "carpeta": "C", "b64": "1"}]})
+        A.enviar_n8n({"evento": "foto_subir", "correo": False, "carpeta": "C", "nombre": "f.jpg", "tipo": "image/jpeg", "b64": "2"})
+        A.enviar_n8n({"evento": "composicion", "correo": False, "archivos": [{"nombre": "T.xlsx", "carpeta": "C", "b64": "3"}]})
+        A.enviar_n8n({"evento": "foto_borrar", "correo": False, "carpeta": "C", "nombre": "viejo.jpg"})   # va aparte, al momento
+        assert [e["evento"] for e in enviados] == ["foto_borrar"]
+    assert [e["evento"] for e in enviados] == ["foto_borrar", "lote"]
+    assert [(a["nombre"], a["b64"]) for a in enviados[1]["archivos"]] == [("T.xlsx", "3"), ("f.jpg", "2")]

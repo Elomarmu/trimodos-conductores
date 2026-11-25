@@ -108,7 +108,7 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None,
                  tabla(cab_c, [fila_c(x) for x in odoo_res["lineas_corregidas"]]))
     if odoo_res.get("lineas_anuladas"):
         p.append(h3("Líneas anuladas en Odoo (cantidad 0): ya no salen de la Excel") +
-                 "<p style='font:10pt Calibri,Arial;color:#555'>Odoo no deja borrar líneas de un pedido confirmado: se dejan "
+                 "<p style='font:10pt Calibri,Arial;color:#555'>Las líneas no se borran: se dejan "
                  "a 0 con «ANULADA» delante. Si el servicio ha cambiado de producto, la línea buena se ha añadido en el mismo pedido.</p>" +
                  tabla(cab_c, [fila_c(x) for x in odoo_res["lineas_anuladas"]]))
     if odoo_res.get("anulaciones_frenadas"):
@@ -120,6 +120,12 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None,
                  "(freno de seguridad). Revisadlas: si alguna está mal, corregid la Excel. Después pulsad el botón: el proceso "
                  "vuelve a leer la Excel con los cambios y anula lo que siga sin salir de ella; lo demás se da por bueno.</p>" +
                  tabla(cab_c, [fila_c(x) for x in odoo_res["anulaciones_frenadas"]]) + boton)
+    if odoo_res.get("avisos_confirmados"):
+        p.append(h3(f"REVISAR A MANO: {len(odoo_res['avisos_confirmados'])} cambios en la Excel de pedidos ya confirmados") +
+                 "<p style='font:10pt Calibri,Arial;color:#555'>Estos pedidos ya los ha revisado y confirmado el personal, así que "
+                 "el proceso no los toca. Desde ayer ha cambiado en la Excel algo suyo: corregid el pedido en Odoo o, si la "
+                 "Excel está mal, la celda. Cada cambio se avisa una vez.</p>" +
+                 tabla(cab_c, [fila_c(x) for x in odoo_res["avisos_confirmados"]]))
     if odoo_res.get("cambios_facturados"):
         p.append(h3("REVISAR A MANO: cambios en servicios ya facturados") +
                  "<p style='font:10pt Calibri,Arial;color:#555'>La Excel ya no coincide con lo facturado. No se ha tocado nada: "
@@ -210,7 +216,7 @@ def _procesar(ruta: str, modo: str, dia: dt.date, url_excel: str | None = None, 
     desde7 = (dia - dt.timedelta(days=7)).isoformat()
     av["sl_sin_numero"] = [x for x in estados if x.tipo == "SALIDA_TREN" and not x.referencia and desde7 <= x.fecha <= dia.isoformat()]
     av["vencimientos"] = D.vencimientos(ruta, dia)
-    escr = list(res.get("excel", {}).get("escrituras", []))
+    escr = list(res.get("excel", {}).get("escrituras", [])) + list(res.get("escrituras_control", []))
     if historico and not res["restantes"]:  # solo en la última vuelta: el histórico del año para el cuadro de mandos
         try:
             escr += H.escrituras(ruta, dia)

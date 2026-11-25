@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
+import contextvars
 import datetime as dt
 import html
 import logging
@@ -98,8 +100,44 @@ TEXTOS = {"pedido_nuevo": "Se ha creado el pedido <b>{pedido}</b> «{referencia}
                          "(albarán {albaran}, {fecha}). El viaje no se ha guardado: hay que darlo de alta con su producto y precio."}
 
 
+# Lote de subidas a SharePoint: dentro de una petición, las Excel y los documentos que se suben sin correo se juntan
+# en UNA sola llamada a n8n al terminar (antes cada uno era una ejecución de n8n). Ver main.py (middleware).
+_LOTE: contextvars.ContextVar[list | None] = contextvars.ContextVar("pr_lote_n8n", default=None)
+_EVENTOS_LOTE = {"registro", "composicion", "foto_subir"}
+
+
+@contextlib.contextmanager
+def lote_n8n():
+    pendiente: list[dict] = []
+    marca = _LOTE.set(pendiente)
+    try:
+        yield pendiente
+    finally:
+        _LOTE.reset(marca)
+        vaciar_lote(pendiente)
+
+
+def vaciar_lote(pendiente: list[dict]) -> bool:
+    """Manda en una sola llamada todo lo acumulado (sin repetir: si una Excel se ha subido dos veces, vale la última)."""
+    if not pendiente:
+        return True
+    unicos: dict[tuple, dict] = {}
+    for a in pendiente:
+        unicos[(a.get("carpeta") or "", a["nombre"])] = a
+    archivos = list(unicos.values())
+    pendiente.clear()
+    return enviar_n8n({"evento": "lote", "correo": False, "asunto": "", "html": "", "archivos": archivos})
+
+
 def enviar_n8n(datos: dict) -> bool:
     """n8n (PR_AVISOS_WEBHOOK) manda el correo y, si trae archivos, los sube a SharePoint. Nunca para el trabajo."""
+    pendiente = _LOTE.get()
+    if pendiente is not None and datos.get("correo") is False and datos.get("evento") in _EVENTOS_LOTE:
+        if datos["evento"] == "foto_subir":
+            pendiente.append({"nombre": datos["nombre"], "carpeta": datos["carpeta"], "tipo": datos.get("tipo"), "b64": datos["b64"]})
+        else:
+            pendiente.extend(datos.get("archivos") or [])
+        return True
     url = os.environ.get("PR_AVISOS_WEBHOOK", "")
     if not url:
         log.info("PR sin webhook de n8n configurado: %s", datos.get("evento"))
@@ -137,7 +175,7 @@ def avisar(evento: str, datos: dict, enlaces: list[tuple[str, str]] = ()) -> Non
 
 class Archivo(BaseModel):
     archivo_b64: str = Field(max_length=6_000_000)
-    tipo: str = Field(max_length=40)
+    tipo: str = Field(max_length=100)   # el Excel (.xlsx) tiene un tipo largo
 
 
 class Archivos(BaseModel):
@@ -377,7 +415,55 @@ def pendientes():
     """Oficina: cargas a las que les falta algún dato o documento (foto del albarán, DI de residuos)."""
     lista = O.viajes(odoo_pr())
     return {"pendientes": [{k: v.get(k) for k in ("bulto_id", "bulto", "albaran", "codigo_paper", "fecha", "lugar", "estado", "tarea_id")}
-                           | {"faltan": R.faltan(v)} for v in lista if R.faltan(v)]}
+                           | {"faltan": R.faltan(v)} for v in lista if R.faltan(v) and v["estado"] != "Tren anterior"]}
+
+
+class Bultos(BaseModel):
+    bulto_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+def _fila_stock(v: dict) -> dict:
+    return {k: v.get(k) for k in ("bulto_id", "bulto", "albaran", "codigo_paper", "fecha", "lugar", "colaborador", "tractora",
+                                  "pedido", "estado", "fuera_stock")}
+
+
+@oficina.get("/stock")
+def stock():
+    """Oficina: lo que la app tiene en stock y lo que se sacó de stock (cargado en un tren anterior)."""
+    return stock_de(O.viajes(odoo_pr()))
+
+
+@oficina.post("/stock/sacar")
+def stock_sacar(body: Bultos):
+    """Oficina: saca de stock cargas que ya se fueron en un tren anterior (no se borra nada en Odoo)."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    hechos = _pr(O.sacar_de_stock, odoo, lista, body.bulto_ids, dt.datetime.now(R.MADRID).strftime("%d/%m/%Y"))
+    log.info("sacadas de stock (tren anterior): %s", hechos)
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return {"hechos": hechos, **stock_de(lista)}
+
+
+@oficina.post("/stock/devolver")
+def stock_devolver(body: Bultos):
+    """Oficina: deshace «sacar de stock»."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    hechos = _pr(O.devolver_a_stock, odoo, lista, body.bulto_ids)
+    log.info("devueltas a stock: %s", hechos)
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return {"hechos": hechos, **stock_de(lista)}
+
+
+def stock_de(lista: list[dict]) -> dict:
+    return {"stock": [_fila_stock(v) for v in lista if v["estado"] == "En stock"],
+            "fuera": [_fila_stock(v) for v in lista if v["estado"] == "Tren anterior"]}
 
 
 @oficina.get("/viajes")
@@ -413,6 +499,10 @@ class Asignar(BaseModel):
 class Mover(BaseModel):
     vagon: str = Field(min_length=1, max_length=20)
     hacia: str = Field(pattern=r"^(subir|bajar)$")
+
+
+class Vagon(BaseModel):
+    vagon: str = Field(min_length=1, max_length=20)
 
 
 class Editar(BaseModel):
@@ -528,7 +618,8 @@ def tren_composicion(body: TrenIn):
 
 def subir_excel_tren(t: dict, por_caja: dict) -> bool:
     """Sube (o sustituye) el libro CARTON PAJA TREN <n> en su carpeta de SharePoint, sin correo."""
-    libro = X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], O.cajas_en_orden(t), por_caja, t.get("convoy") or "")
+    libro = X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], O.cajas_en_orden(t), por_caja, t.get("convoy") or "",
+                               O.cajas_composicion(t))
     return enviar_n8n({"evento": "composicion", "correo": False, "asunto": "", "html": "", "archivos": [
         {"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]), "b64": base64.b64encode(libro).decode()}]})
 
@@ -575,7 +666,8 @@ def poner_al_dia(odoo, t: dict, lista: list[dict], registro: bool = True) -> Non
 def tren_actual():
     """Oficina y almacén: tren cargado, cajas con su carga y cargas en stock."""
     odoo = odoo_pr()
-    return O.estado_tren(odoo, _tren(odoo), O.viajes(odoo))
+    lista = O.viajes(odoo)
+    return _con_segregados(odoo, _tren(odoo), lista)
 
 
 @oficina.post("/tren/asignar")
@@ -683,6 +775,96 @@ def tren_rehacer():
     return O.estado_tren(odoo, t, lista)
 
 
+class Bulto(BaseModel):
+    bulto_id: int
+
+
+def _borrar_docs(cargas: list[dict]) -> None:
+    for v in cargas:
+        for _, clave, _, _ in R.DOCUMENTOS.values():
+            if v.get(clave):
+                borrar_foto(v[clave])
+
+
+def _con_segregados(odoo, t: dict | None, lista: list[dict]) -> dict:
+    return {**(O.estado_tren(odoo, t, lista) if t else {}), "segregados": O.segregados_vista(odoo, lista)}
+
+
+@oficina.get("/tren/segregados")
+def tren_segregados():
+    """Oficina: vagones segregados en espera de agregarlos a un tren (o eliminarlos)."""
+    odoo = odoo_pr()
+    return {"segregados": O.segregados_vista(odoo, O.viajes(odoo))}
+
+
+@oficina.post("/tren/segregar")
+def tren_segregar(body: Vagon):
+    """Oficina: aparta un vagón del tren (p. ej. descarrilado). Sus cargas se quedan en sus cajas y el vagón queda en
+    espera en «Vagones segregados» para agregarlo a un tren o eliminarlo."""
+    odoo = odoo_pr()
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.segregar, odoo, t, lista, body.vagon)
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista)
+    log.info("tren %s: vagón %s segregado", t["tren"], body.vagon)
+    return _con_segregados(odoo, t, lista)
+
+
+@oficina.post("/tren/segregados/agregar")
+def tren_segregado_agregar(body: Vagon):
+    """Oficina: mete un vagón segregado en el tren abierto. Sus cargas pasan a este tren y sus documentos a su carpeta."""
+    odoo = odoo_pr()
+    t, lista = _tren(odoo, abierto=True), O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    movidas = _pr(O.agregar_segregado, odoo, t, lista, body.vagon)
+    lista = O.viajes(odoo)
+    por_id = {v["bulto_id"]: v for v in lista}
+    for v in movidas:
+        if v["bulto_id"] in por_id:
+            sincronizar_foto(odoo, por_id[v["bulto_id"]], lista=lista)
+    lista = O.viajes(odoo) if movidas else lista
+    poner_al_dia(odoo, t, lista)
+    log.info("tren %s: vagón segregado %s agregado (%s cargas)", t["tren"], body.vagon, len(movidas))
+    return _con_segregados(odoo, t, lista)
+
+
+@oficina.post("/tren/segregados/eliminar")
+def tren_segregado_eliminar(body: Vagon):
+    """Oficina: borra un vagón segregado que no se va a usar. Las cargas que aún lleve vuelven a stock."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    a_stock = _pr(O.eliminar_segregado, odoo, lista, body.vagon)
+    _borrar_docs(a_stock)
+    lista = O.viajes(odoo)
+    if a_stock:
+        subir_registro(odoo, lista)
+    log.info("vagón segregado %s eliminado (%s cargas a stock)", body.vagon, len(a_stock))
+    t = O.tren_actual(odoo)
+    return {**_con_segregados(odoo, t, lista), "a_stock": [v.get("codigo_paper") or v.get("albaran") or v.get("bulto") for v in a_stock]}
+
+
+@oficina.post("/tren/segregados/quitar")
+def tren_segregado_quitar(body: Bulto):
+    """Oficina: saca una carga de la caja de un vagón segregado: vuelve a stock."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    v = next((x for x in lista if x["bulto_id"] == body.bulto_id), None)
+    if not v or v["estado"] != "Vagón segregado":
+        raise AppError("Esa carga no está en un vagón segregado.", 409, "no_segregada")
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.quitar, odoo, body.bulto_id)
+    _borrar_docs([v])
+    lista = O.viajes(odoo)
+    subir_registro(odoo, lista)
+    return _con_segregados(odoo, O.tren_actual(odoo), lista)
+
+
 @oficina.post("/tren/reabrir")
 def tren_reabrir():
     """Oficina: «Modificar el tren» terminado (hasta que se cargue la composición del siguiente)."""
@@ -705,7 +887,7 @@ def tren_enviar():
     cajas = O.cajas_en_orden(t)
     archivos = [{"nombre": excel_tren(t), "carpeta": R.carpeta_tren(t["tren"]),
                  "b64": base64.b64encode(X.carton_paja_tren(t["tren"], O.convoy_tren(t), t["fecha"], cajas, por_caja,
-                                                            t.get("convoy") or "")).decode()},
+                                                            t.get("convoy") or "", O.cajas_composicion(t))).decode()},
                 {"nombre": "REGISTRO VIAJES PR.xlsx", "b64": base64.b64encode(X.registro(lista)).decode()}]
     stock = [v for v in lista if v["estado"] == "En stock"]
     fecha_es = html.escape("-".join(reversed(str(t["fecha"]).split("-"))))
@@ -774,6 +956,61 @@ def require_n8n(enviar: bool = False, x_clave: str = Header(""), x_codigo_acceso
     raise AppError("No autorizado.", 401, "codigo_invalido")
 
 
+class ResultadoSP(BaseModel):
+    archivo: str = Field(min_length=1, max_length=200)
+    ok: bool
+    bloqueada: bool = False
+    motivo: str = Field("", max_length=300)
+
+
+class ResultadosSP(BaseModel):
+    resultados: list[ResultadoSP] = Field(max_length=50)
+
+
+@n8n.post("/sharepoint/resultado", dependencies=[Depends(require_n8n)])
+def sharepoint_resultado(body: ResultadosSP):
+    """n8n avisa de cómo ha ido cada Excel subida a SharePoint. Si no se pudo (p. ej. estaba abierta), la oficina lo verá
+    en la app con un botón para reintentar; cuando una subida sale bien, el aviso de esa Excel se quita."""
+    odoo = odoo_pr()
+    avisos = O.leer_avisos(odoo)
+    antes = dict(avisos)
+    ahora = dt.datetime.now(R.MADRID).strftime("%d/%m %H:%M")
+    for r in body.resultados:
+        if r.ok:
+            avisos.pop(r.archivo, None)
+        else:
+            avisos[r.archivo] = {"cuando": ahora, "bloqueada": r.bloqueada, "motivo": r.motivo[:200]}
+            log.warning("SharePoint: no se ha podido sustituir %s (%s)", r.archivo, r.motivo[:200])
+    if avisos != antes:
+        O.guardar_avisos(odoo, avisos)
+    return {"ok": True, "avisos": len(avisos)}
+
+
+@oficina.get("/avisos")
+def avisos_sharepoint():
+    """Oficina: Excel que no se han podido actualizar en SharePoint."""
+    try:
+        avisos = O.leer_avisos(odoo_pr())
+    except AppError:
+        raise
+    return {"avisos": [{"archivo": k, **v} for k, v in sorted(avisos.items())]}
+
+
+@oficina.post("/sharepoint/reintentar")
+def sharepoint_reintentar():
+    """Oficina: vuelve a generar desde Odoo y a subir la Excel de registro y la del tren actual."""
+    odoo = odoo_pr()
+    lista = O.viajes(odoo)
+    t = O.tren_actual(odoo)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    if t:
+        poner_al_dia(odoo, t, lista)
+    else:
+        subir_registro(odoo, lista)
+    return {"ok": True}
+
+
 @n8n.get("/resumen", dependencies=[Depends(require_n8n)])
 def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\d{2})?$")):
     """Para n8n por la mañana (lunes a sábado): llegadas a la nave, cargas en el tren, datos pendientes y stock."""
@@ -794,7 +1031,7 @@ def resumen(enviar: bool = False, hoy: str = Query("", pattern=r"^(\d{4}-\d{2}-\
         al_tren = [por_caja[c["caja_movil"]] for c in O.cajas_en_orden(t) if c["caja_movil"] in por_caja]
     titulo_tren = (f"Viajes cargados en el tren {int(t['tren'])}" + (f" (convoy {O.convoy_tren(t)})" if O.convoy_tren(t) else "")
                    + (" · terminado" if t.get("terminado") else " · cargando") if t else "Viajes cargados en el tren")
-    pendientes = [v for v in lista if faltan(v)]
+    pendientes = [v for v in lista if faltan(v) and v["estado"] != "Tren anterior"]
     stock = [v for v in lista if v["estado"] == "En stock"]
     dias = _dias_es(desde, hasta)
     h3 = lambda texto: f"<h3 style='font:bold 12pt Calibri,Arial;color:#1F4E79;margin:18px 0 6px'>{html.escape(texto)}</h3>"

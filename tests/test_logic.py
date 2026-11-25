@@ -38,6 +38,44 @@ def test_parse_qr_invalid(text):
         parse_qr(text, HOSTS)
 
 
+def _qr_host(host, token=TOKEN_ACTUAL):
+    return f"{host}/web/content/900002?access_token={token}"
+
+
+def test_qr_host_stinsa_aceptado():
+    r = service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.stinsa.com"))
+    assert r["verificado_por_qr"] is True
+
+
+def test_qr_host_grupotrimodos_aceptado():
+    r = service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.grupotrimodos.com"))
+    assert r["verificado_por_qr"] is True
+
+
+def test_qr_host_mayusculas_puerto_y_http(monkeypatch):
+    for h in ("HTTP://WWW.GrupoTrimodos.com:8069", "http://stinsa.com:443"):
+        assert service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host(h))["verificado_por_qr"] is True
+
+
+def test_qr_host_desconocido_rechazado():
+    with pytest.raises(AppError) as e:
+        service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.otro.com"))
+    assert e.value.code == "qr_invalido"
+
+
+def test_qr_host_valido_token_incorrecto_rechazado():
+    with pytest.raises(AppError) as e:
+        service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.grupotrimodos.com", TOKEN_ANTIGUO))
+    assert e.value.status == 404
+
+
+def test_odoo_qr_hosts_configurable(monkeypatch):
+    monkeypatch.setenv("ODOO_QR_HOSTS", "https://Solo.Ejemplo.com:8443")
+    with pytest.raises(AppError):
+        service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.grupotrimodos.com"))
+    assert service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://solo.ejemplo.com"))["verificado_por_qr"] is True
+
+
 def test_order_name():
     assert normalize_order_name(" s2621473 ") == "S2621473"
     for bad in ["", "2621473", "S12", "S26214a3", "S2621473; drop"]:
@@ -697,9 +735,13 @@ def test_todas_las_rutas_api_exigen_codigo_salvo_health():
     for r in rutas:
         if r.path.startswith("/api/argon/"):
             continue  # proceso ARGON: lo llama n8n con su propia clave (ARGON_CLAVE); se comprueba abajo
-        if r.path == "/api/pr/resumen":   # resumen de la mañana: n8n con su clave (X-Clave) u oficina con su código
+        if r.path in ("/api/pr/resumen", "/api/pr/sharepoint/resultado"):   # los llama n8n con su clave (X-Clave) u oficina con su código
             from app.pr.pr_api import require_n8n
             assert require_n8n in [d.call for d in r.dependant.dependencies]
+            continue
+        if r.path == "/api/stock/correo":   # correos del buzón del almacén: n8n con su clave (X-Clave = STOCK_CORREO_CLAVE)
+            from app.stock.stock_api import require_correo
+            assert require_correo in [d.call for d in r.dependant.dependencies]
             continue
         protegida = require_access in [d.call for d in r.dependant.dependencies]
         assert protegida == (r.path != "/api/health"), r.path
@@ -980,7 +1022,7 @@ def test_la_guia_de_la_app_se_genera_desde_el_markdown_y_no_esta_desfasada():
         assert actual.replace("\r\n", "\n") == generar(nombre).replace("\r\n", "\n"), f"{destino.name} desfasada: ejecuta scripts.generar_guia"
         assert f'href="{inicio}">Volver a la app' in actual
     assert "corregir la orden de transporte" in (GUIAS["conductores"][1]).read_text(encoding="utf-8")
-    assert "Almacén · PR" in (GUIAS["oficina"][1]).read_text(encoding="utf-8")
+    assert "Almacén Sevilla" in (GUIAS["oficina"][1]).read_text(encoding="utf-8")
 
 
 def test_el_menu_enlaza_a_la_guia_y_se_guarda_para_uso_sin_conexion():

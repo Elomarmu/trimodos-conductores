@@ -65,6 +65,7 @@ Después abre **http://localhost:8000** en el navegador. La cámara web funciona
 | `APP_ACCESS_CODE` | **Código de acceso compartido** (mínimo 8 caracteres). En modo `real` es **obligatorio**: sin él, la API se niega a funcionar (error 503). Los conductores lo escriben una vez en el móvil y se queda guardado. En modo `mock`, si está vacío, no se pide. |
 | `APP_OFICINA_CODE` | Código propio de oficina y almacén (mínimo 8 caracteres), distinto del de conductores. Si no se configura, se usa `APP_ACCESS_CODE`. |
 | `QR_ALLOWED_HOSTS` | Dominios extra aceptados dentro del QR (p. ej. la demo de Tecnativa). |
+| `ODOO_QR_HOSTS` | Hosts que puede llevar la URL del QR (por coma). Por defecto: `www.stinsa.com`, `stinsa.com`, `www.grupotrimodos.com`, `grupotrimodos.com`. |
 
 **Cómo averiguar la base de datos:** Odoo suele tener desactivado el listado. Con la sesión iniciada, abre la consola del navegador (F12) y escribe `odoo.session_info.db`. Para producción es `prod`.
 

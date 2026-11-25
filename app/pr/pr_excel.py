@@ -83,7 +83,7 @@ COL_OBS = 15   # «Observaciones» del almacén, justo antes de las comprobacion
 
 
 def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viajes_por_caja: dict[str, dict],
-                     convoy_entrada: str = "") -> bytes:
+                     convoy_entrada: str = "", composicion: list[dict] | None = None) -> bytes:
     """cajas: filas del tren (orden, vagon, segunda, caja_movil, tara_kg). viajes_por_caja: caja móvil → viaje que lleva.
     Las comprobaciones de momento no se revisan: salen siempre OK."""
     wb = Workbook()
@@ -144,7 +144,7 @@ def carton_paja_tren(tren: int, convoy: str, fecha: str, cajas: list[dict], viaj
     ws.page_setup.orientation = "landscape"
     ws.sheet_properties.pageSetUpPr.fitToPage = True   # al imprimir, todo el ancho en una hoja
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
-    hoja_composicion(wb, tren, convoy, fecha, cajas, convoy_entrada)
+    hoja_composicion(wb, tren, convoy, fecha, composicion if composicion is not None else cajas, convoy_entrada)
     return _guardar(wb)
 
 
@@ -157,14 +157,16 @@ def hoja_composicion(wb: Workbook, tren: int, convoy: str, fecha: str, cajas: li
     ws.column_dimensions["E"].width = ws.column_dimensions["F"].width = 14
     entrada = f" (de entrada: {convoy_entrada})" if convoy_entrada and convoy_entrada != convoy else ""
     ws["D2"] = f"Nº convoy de salida: {convoy or '—'}{entrada} · Fecha: {'-'.join(reversed((fecha or '').split('-')))} · {len(cajas)} cajas"
-    _cabecera(ws, 4, ["Orden", "Vagón", "Caja móvil", "Tara C.Movil"], [8, 16, 16, 13], TEAL)
+    _cabecera(ws, 4, ["Orden", "Vagón", "Caja móvil", "Tara C.Movil", "Estado"], [8, 16, 16, 13, 14], TEAL)
     for i, c in enumerate(cajas, start=5):
         for col, val in enumerate(["“" if c.get("segunda") else c.get("orden"), "“" if c.get("segunda") else c.get("vagon"),
-                                   c.get("caja_movil"), c.get("tara_kg")], start=1):
+                                   c.get("caja_movil"), c.get("tara_kg"), "SEGREGADO" if c.get("segregado") else None], start=1):
             celda = ws.cell(i, col, val)
             celda.border, celda.alignment = BORDE, Alignment(horizontal="center")
             if col == 4:
                 celda.number_format = "#,##0"
+            if c.get("segregado"):
+                celda.fill, celda.font = ROJO, Font(color="7F7F7F", strike=col < 5)
     ws.freeze_panes = "A5"
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
