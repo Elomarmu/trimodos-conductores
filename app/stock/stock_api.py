@@ -1380,7 +1380,7 @@ def facturacion(desde: str = Query(pattern=r"^\d{4}-\d{2}-\d{2}$"), hasta: str =
 
 # ---- correos del buzón agente.burriana@stinsa.com (los manda n8n) ------------------------------------------------------
 
-PALABRAS_SALIDA = ("SALIDA", "RECOGER", "RECOGIDA", "RETIRAR", "RETIRADA", "PEDIDO DE CARGA")
+PALABRAS_SALIDA = ("SALIDA", "ENTREGA", "RECOGER", "RECOGIDA", "RETIRAR", "RETIRADA", "PEDIDO DE CARGA")
 
 
 def require_correo(x_clave: str = Header("")):
