@@ -43,7 +43,7 @@ def is_editable(task: dict, stages=DEFAULT_EDITABLE_STAGES) -> tuple[bool, str |
     return False, f"Esta orden está en la etapa «{stage or 'sin etapa'}». Solo se puede modificar en {permitidas}. Avisa a la oficina."
 
 def _allowed_hosts(settings: Settings) -> set[str]:
-    hosts = set(settings.qr_allowed_hosts)
+    hosts = set(settings.qr_allowed_hosts) | set(settings.odoo_qr_hosts)
     if settings.mode != "real":
         hosts.add("www.stinsa.com")  # el QR de prueba del modo simulado
     if settings.odoo_url:

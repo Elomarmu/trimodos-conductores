@@ -372,8 +372,10 @@ function packageCard(p, index) {
 }
 
 function markChanged() {
-  for (const card of document.querySelectorAll(".pkg")) {
+  // Solo las tarjetas de bulto de la pantalla de edición: PR y stock también usan la clase «pkg» en sus formularios.
+  for (const card of document.querySelectorAll("#s-edit .pkg[data-pkg]")) {
     const p = state.data.bultos.find((x) => String(x.id) === card.dataset.pkg);
+    if (!p) continue;
     const c = current(p);
     const changed = {
       mercancia: c.goods === PENDING || (c.goods ? c.goods.id : null) !== (p.mercancia ? p.mercancia.id : null),

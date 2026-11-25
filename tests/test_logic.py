@@ -38,6 +38,44 @@ def test_parse_qr_invalid(text):
         parse_qr(text, HOSTS)
 
 
+def _qr_host(host, token=TOKEN_ACTUAL):
+    return f"{host}/web/content/900002?access_token={token}"
+
+
+def test_qr_host_stinsa_aceptado():
+    r = service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.stinsa.com"))
+    assert r["verificado_por_qr"] is True
+
+
+def test_qr_host_grupotrimodos_aceptado():
+    r = service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.grupotrimodos.com"))
+    assert r["verificado_por_qr"] is True
+
+
+def test_qr_host_mayusculas_puerto_y_http(monkeypatch):
+    for h in ("HTTP://WWW.GrupoTrimodos.com:8069", "http://stinsa.com:443"):
+        assert service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host(h))["verificado_por_qr"] is True
+
+
+def test_qr_host_desconocido_rechazado():
+    with pytest.raises(AppError) as e:
+        service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.otro.com"))
+    assert e.value.code == "qr_invalido"
+
+
+def test_qr_host_valido_token_incorrecto_rechazado():
+    with pytest.raises(AppError) as e:
+        service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.grupotrimodos.com", TOKEN_ANTIGUO))
+    assert e.value.status == 404
+
+
+def test_odoo_qr_hosts_configurable(monkeypatch):
+    monkeypatch.setenv("ODOO_QR_HOSTS", "https://Solo.Ejemplo.com:8443")
+    with pytest.raises(AppError):
+        service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://www.grupotrimodos.com"))
+    assert service.resolve(MockOdoo(), get_settings(), qr_text=_qr_host("https://solo.ejemplo.com"))["verificado_por_qr"] is True
+
+
 def test_order_name():
     assert normalize_order_name(" s2621473 ") == "S2621473"
     for bad in ["", "2621473", "S12", "S26214a3", "S2621473; drop"]:
