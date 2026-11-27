@@ -13,6 +13,8 @@ Oficina:
   POST /api/pr/tren/enviar          las dos Excel + correo con fotos (n8n)
   POST /api/pr/bobinas/leer         capturas del «Detalle convoy» de SAICA → cajas y total por clase de bobina
   POST /api/pr/bobinas/enviar       Excel de bobinas por clase → descarga y correo a Sevilla (n8n)
+  POST /api/pr/bobinas/leer-lista   Lista de Carga de bobinas → datos leídos + destino + matrículas
+  POST /api/pr/bobinas/registrar    {"viaje", "foto"} → línea en el pedido «BOBINAS {MES}»
 Oficina y almacén:
   GET  /api/pr/tren/actual · POST /api/pr/tren/asignar · POST /api/pr/tren/quitar
   POST /api/pr/tren/mover {"vagon", "hacia": subir|bajar} · POST /api/pr/tren/editar {"caja_movil", "nueva_caja", "nuevo_vagon"} · POST /api/pr/tren/intercambiar {"caja_movil", "hacia": subir|bajar}
@@ -1149,57 +1151,56 @@ def bobinas_enviar(body: ConvoyBobinas):
     return {"simulado": s.dry_run, "enviado": enviado, "para": destinatarios(), "total": total, "clases": len(clases), "archivos": archivos}
 
 
-@oficina.post("/bobinas/crear-linea")
-def bobinas_crear_linea(body: Archivo):
-    """Oficina Sevilla: foto/PDF de Lista de Carga de SAICA de bobinas → crea línea en pedido mensual de bobinas.
+class ViajeBobinasIn(BaseModel):
+    viaje: dict
+    foto: Archivo | None = None      # la Lista de Carga (foto o PDF): queda adjunta a la orden si Odoo la crea
 
-    Lee el documento con Claude Vision, extrae los datos, mapea el destino al producto, y crea la línea en Odoo.
-    """
-    s = get_settings()
-    if s.dry_run:
-        # En modo prueba, solo lee el documento sin crear nada en Odoo
-        datos, tipo = _bytes(body)
-        leido = _leer(L.leer_lista_bobinas, datos, tipo)
-        return {"simulado": True, "nº_documento": leido.get("nº_documento"), "destino": leido.get("lugar_entrega"),
-                "cantidad_tn": round((leido.get("peso_total_kg") or 0) / 1000, 3), "dudas": leido.get("dudas")}
 
-    odoo = odoo_pr()
+@oficina.post("/bobinas/leer-lista")
+def bobinas_leer_lista(body: Archivo):
+    """Oficina Sevilla: Lista de Carga de bobinas → datos leídos, destino detectado y matrículas comprobadas en Flota."""
+    from . import bobinas_reglas as BR
     datos, tipo = _bytes(body)
     leido = _leer(L.leer_lista_bobinas, datos, tipo)
-
-    # Avisos sobre dudas en la lectura
-    avisos = [f"Duda al leer: {d}" for d in leido.get("dudas") or []]
-
-    # Crear la línea en Odoo
-    res = _pr(O.crear_linea_bobinas, odoo, leido)
-    res["avisos"] = avisos
-    res["dudas"] = leido.get("dudas") or []
-
-    # Guardar la foto en la tarea
-    if not res.get("duplicado"):
+    viaje = {k: leido.get(k) for k in ("documento", "lugar_entrega", "fecha", "bobinas", "peso_kg", "transportista")}
+    viaje["tractora"], viaje["remolque"] = R.matricula(leido.get("tractora")), R.matricula(leido.get("remolque"))
+    viaje["peso_kg"] = R.kilos(leido.get("peso_kg"))
+    d = BR.destino(leido.get("lugar_entrega"))
+    viaje["destino"] = d.clave if d else None
+    res = {"viaje": viaje, "dudas": leido.get("dudas") or [],
+           "destinos": [{"clave": x.clave, "nombre": x.linea} for x in BR.DESTINOS]}
+    if get_settings().mode == "real":
         try:
-            O.guardar_foto(odoo, res["tarea_id"], leido.get("nº_documento"),
-                          base64.b64encode(_bytes(body)[0]).decode(), body.tipo, "lista_carga")
-        except Exception:
-            log.warning("no se pudo guardar la foto de Lista de Carga en la tarea %s", res["tarea_id"])
+            odoo = odoo_pr()
+            res["vehiculos"] = O.comprobar_vehiculos(odoo, viaje["tractora"], viaje["remolque"])
+            res["duplicado"] = bool(viaje["documento"] and O.bobinas_registrada(odoo, str(viaje["documento"])))
+        except AppError:
+            res["vehiculos"] = None
+    return res
 
-    # Nota en la tarea
-    from ..main import get_odoo
-    cli = get_odoo()
-    if not res.get("duplicado"):
+
+@oficina.post("/bobinas/registrar")
+def bobinas_registrar(body: ViajeBobinasIn):
+    """Oficina Sevilla: guarda el viaje de bobinas revisado como línea del pedido «BOBINAS {MES}»."""
+    from . import bobinas_reglas as BR
+    v = dict(body.viaje)
+    if v.get("destino"):   # la oficina ha elegido (o corregido) el destino en la pantalla
+        d = next((x for x in BR.DESTINOS if x.clave == v["destino"]), None)
+        if d:
+            v["lugar_entrega"] = d.palabras[0]
+    if get_settings().dry_run:
+        odoo = odoo_pr()
+        p = O.buscar_pedido_bobinas(odoo, v.get("fecha") or "")
+        return {"simulado": True, "pedido": p and p["name"], "pedido_nuevo": p is None,
+                "duplicado": bool(O.bobinas_registrada(odoo, str(v.get("documento") or "")))}
+    odoo = odoo_pr()
+    res = _pr(O.registrar_bobinas, odoo, v)
+    if body.foto and res.get("tarea_id") and not res["duplicado"]:
         try:
-            cli.post_note(res["tarea_id"],
-                         f"<p>Bobinas registradas desde la app: {res.get('cantidad_tn')} Tn hacia {res.get('destino')}. "
-                         f"Referencia: {res.get('referencia')}.</p>")
+            datos, tipo = _bytes(body.foto)
+            O.guardar_foto(odoo, res["tarea_id"], res["documento"], base64.b64encode(datos).decode(), tipo, "lista_carga")
         except Exception:
-            log.warning("no se pudo dejar la nota en la tarea %s", res["tarea_id"])
-
-    # Subir el registro actualizado
-    try:
-        subir_registro(odoo)
-    except Exception:
-        log.warning("no se pudo actualizar REGISTRO VIAJES en SharePoint")
-
-    log.info("bobinas linea creada: ref=%s destino=%s cantidad=%.3f Tn duplicado=%s",
-             res.get("referencia"), res.get("destino"), res.get("cantidad_tn"), res.get("duplicado"))
+            log.warning("no se pudo adjuntar la Lista de Carga a la tarea %s", res["tarea_id"])
+    log.info("bobinas registradas doc=%s destino=%s t=%s duplicado=%s", res.get("documento"), res.get("destino"),
+             res.get("toneladas"), res["duplicado"])
     return res

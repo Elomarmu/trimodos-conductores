@@ -1,97 +1,68 @@
-"""Reglas de negocio para viajes de bobinas SAICA.
+"""Reglas de los viajes de bobinas de SAICA (Lista de Carga → línea del pedido «BOBINAS {MES}»).
 
-Mapeo destino → producto, limpieza de datos, constantes Odoo.
-Los viajes de bobinas llegan en el mismo tren que PR pero son un tipo diferente.
+Comprobado en Odoo el 27/11/2026 con los pedidos S26100643 (BOBINAS NOVIEMBRE) y S26093468 (BOBINAS OCTUBRE):
+- Origen siempre STINSA SEVILLA (12888): las bobinas llegan en tren y se reparten a la fábrica del cliente.
+- El producto y el destino dependen del «Lugar de entrega» de la Lista de Carga.
+- Cantidad de la línea = toneladas (kg / 1000). El precio lo pone el producto (no se escribe).
+- Bulto: mercancía BOBINAS DE PAPEL (93), referencia de seguimiento = Nº de la Lista de Carga.
+- Coste de compra: subcontrata = el de su último viaje de ese producto; camión propio = 0.
+- Los productos «CON RETORNO» no se detectan en el documento: los pone la oficina a mano.
 """
 from __future__ import annotations
 
-import re
 import unicodedata
 from dataclasses import dataclass
 
-MADRID = __import__("zoneinfo").ZoneInfo("Europe/Madrid")
-
-# Datos fijos en Odoo (empresa 1 = STINSA). Validados para bobinas.
-CLIENTE_ID = 9228            # S.A. INDUSTRIAS CELULOSA ARAGONESA (SAICA PAPER)
-EMPRESA_ID = 1               # SERVICIOS DE TRÁFICOS INTERMODALES (STINSA)
-DESTINO_ID = 12888           # STINSA SEVILLA (La Negrilla): destino default
+CLIENTE_ID = 9228            # (SAICA) S.A. INDUSTRIAS CELULOSA ARAGONESA
+EMPRESA_ID = 1               # STINSA
+ORIGEN_ID = 12888            # STINSA SEVILLA (terminal)
 TIPO_VENTA_ID = 36           # Transporte Nacional
-COMERCIAL_ID = 48            # Olga Venega Sánchez
+COMERCIAL_ID = 47            # Sandra Venega Sánchez (comercial de los pedidos de bobinas)
+GOODS_BOBINAS = 93           # tms.goods «BOBINAS DE PAPEL»
+
+MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE",
+         "NOVIEMBRE", "DICIEMBRE"]
 
 
 @dataclass(frozen=True)
 class DestinoBobinas:
-    """Mapeo de destino → producto de bobinas."""
-    clave: str                # "SEVILLA", "CORDOBA", etc.
-    nombre: str               # Nombre línea: "BOBINAS SEVILLA"
-    producto_id: int          # ID del producto en Odoo
-    origen_id: int | None = None  # Punto de origen (si varía)
-    precio_t: float | None = None  # €/Tn (si no, usa el del producto)
+    clave: str
+    linea: str                # descripción de la línea, como la pone la oficina
+    producto_id: int
+    destino_id: int           # res.partner de la fábrica de descarga
+    palabras: tuple[str, ...]  # cómo aparece en «Lugar de entrega»
 
 
-# Mapeo de destinos a productos. Completar con IDs reales de Odoo.
-DESTINOS_BOBINAS: dict[str, DestinoBobinas] = {
-    "SEVILLA": DestinoBobinas("SEVILLA", "BOBINAS SEVILLA", 0),  # TODO: buscar producto_id
-    # Agregar más destinos según Odoo
-}
+DESTINOS: tuple[DestinoBobinas, ...] = (
+    DestinoBobinas("SEVILLA", "BOBINAS PAPEL SEVILLA", 41, 7206, ("SAICA PACK SEVILLA", "SEVILLA")),
+    DestinoBobinas("CORDOBA", "BOBINAS PAPEL CORDOBA (SIN RETORNO)", 725, 7905, ("RAMBLE", "RAMBALE", "CORDOBA", "LA RAMBLA")),
+    DestinoBobinas("HUELVA", "BOBINAS PAPEL HUELVA", 726, 9283, ("SKG", "SMURFIT", "HUELVA")),
+    DestinoBobinas("ALMENDRALEJO", "BOBINAS DE PAPEL ALMENDRALEJO (SIN RETORNO)", 788, 13909, ("ONDUPACK", "ALMENDRALEJO")),
+    DestinoBobinas("VALENCIA", "BOBINAS PAPEL SEV-VALENCIA", 2385, 28759, ("PATERNA", "VALENCIA")),
+)
 
 
 def sin_tildes(texto: str | None) -> str:
-    """Quita acentos y pasa a mayúsculas."""
     t = unicodedata.normalize("NFKD", texto or "")
     return "".join(c for c in t if not unicodedata.combining(c)).upper()
 
 
-def mapear_destino(destino_texto: str | None) -> DestinoBobinas | None:
-    """Busca el destino en la tabla DESTINOS_BOBINAS.
-
-    Busca por palabra clave (ej: 'Sevilla' → 'SEVILLA', 'Córdoba' → 'CORDOBA').
-    """
-    if not destino_texto:
+def destino(lugar_entrega: str | None) -> DestinoBobinas | None:
+    """Destino por el «Lugar de entrega». Se mira primero lo más concreto (Huelva, Córdoba…) y Sevilla al final,
+    porque «SEVILLA» también aparece en el resto de documentos (destino del tren)."""
+    t = sin_tildes(lugar_entrega)
+    if not t:
         return None
-
-    t = sin_tildes(destino_texto).strip()
-
-    # Búsqueda exacta primero
-    if t in DESTINOS_BOBINAS:
-        return DESTINOS_BOBINAS[t]
-
-    # Búsqueda parcial: si la clave está contenida
-    for clave, destino in DESTINOS_BOBINAS.items():
-        if clave in t or t in clave:
-            return destino
-
+    for d in DESTINOS[1:] + DESTINOS[:1]:
+        if any(p in t for p in d.palabras):
+            return d
     return None
 
 
-def matricula(texto: str | None) -> str:
-    """Limpia matrícula: quita espacios, caracteres especiales, pasa a mayúsculas."""
-    return re.sub(r"[^A-Z0-9]", "", sin_tildes(texto))
+def referencia_pedido(fecha: str) -> str:
+    """«2026-11-24» → «BOBINAS NOVIEMBRE» (como los pedidos que ya hace la oficina)."""
+    return f"BOBINAS {MESES[int(fecha[5:7]) - 1]}"
 
 
-def kilos(valor) -> int | None:
-    """«24.800» (punto de miles), «24800», 24800, 24.8 (toneladas) → 24800 kg."""
-    if valor in (None, ""):
-        return None
-    if isinstance(valor, (int, float)):
-        n = float(valor)
-    else:
-        t = str(valor).strip().upper().replace("KG", "").replace(" ", "")
-        if re.fullmatch(r"\d{1,3}(\.\d{3})+", t):
-            t = t.replace(".", "")
-        t = t.replace(",", ".")
-        try:
-            n = float(t)
-        except ValueError:
-            return None
-    if 0 < n < 100:  # vino en toneladas
-        n *= 1000
-    return int(round(n)) if n > 0 else None
-
-
-def referencia_pedido(mes: str) -> str:
-    """Referencia del pedido mensual: BOBINAS NOVIEMBRE 2026, etc.
-
-    Formato: 'BOBINAS {MES}'.
-    """
-    return f"BOBINAS {mes.upper()}"
+def toneladas(kg: int | None) -> float:
+    return round((kg or 0) / 1000, 3)
