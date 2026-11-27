@@ -121,7 +121,7 @@ def correo(hoy: dt.date, odoo_res: dict, av: dict, url_excel: str | None = None,
                  "vuelve a leer la Excel con los cambios y anula lo que siga sin salir de ella; lo demás se da por bueno.</p>" +
                  tabla(cab_c, [fila_c(x) for x in odoo_res["anulaciones_frenadas"]]) + boton)
     if odoo_res.get("avisos_confirmados"):
-        p.append(h3(f"REVISAR A MANO: {len(odoo_res['avisos_confirmados'])} cambios en la Excel de pedidos ya confirmados") +
+        p.append(h3("pedidos confirmados que deberían de modificarse porque han habido cambios en la excel") +
                  "<p style='font:10pt Calibri,Arial;color:#555'>Estos pedidos ya los ha revisado y confirmado el personal, así que "
                  "el proceso no los toca. Desde ayer ha cambiado en la Excel algo suyo: corregid el pedido en Odoo o, si la "
                  "Excel está mal, la celda. Cada cambio se avisa una vez.</p>" +
