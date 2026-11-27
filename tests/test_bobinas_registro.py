@@ -27,8 +27,8 @@ def test_referencia_pedido():
 
 
 class OdooFalso:
-    def __init__(self, pedido=True, previo=None, coste=110.0):
-        self.llamadas, self.pedido, self.previo, self.coste = [], pedido, previo, coste
+    def __init__(self, pedido=True, previo=None, coste=110.0, propio=False):
+        self.llamadas, self.pedido, self.previo, self.coste, self.propio = [], pedido, previo, coste, propio
 
     def __call__(self, modelo, metodo, args, **kw):
         self.llamadas.append((modelo, metodo, args, kw))
@@ -36,7 +36,8 @@ class OdooFalso:
             return [self.previo] if self.previo else []
         if modelo == "fleet.vehicle":
             placa = args[0][0][2]
-            return [{"id": 90 if placa.startswith("7") else 8279, "license_plate": placa, "driver_id": [9225, "JOSÉ GONZÁLEZ"]}]
+            return [{"id": 90 if placa.startswith("7") else 8279, "license_plate": placa, "driver_id": [9225, "JOSÉ GONZÁLEZ"],
+                     "is_own_vehicle": self.propio}]
         if modelo == "sale.order" and metodo == "search_read":
             return [{"id": 577417, "name": "S26100643", "state": "draft", "locked": False}] if self.pedido else []
         if modelo == "sale.order" and metodo == "create":
@@ -70,7 +71,7 @@ def test_registra_linea_como_la_oficina():
     assert l["product_uom_qty"] == 28.101
     assert l["shipping_origin_id"] == 12888 and l["shipping_destination_id"] == 7206
     assert l["tractor_id"] == 90 and l["trailer_id"] == 8279 and l["vendor_id"] == l["driver_id"] == 9225
-    assert l["purchase_price"] == 110.0
+    assert l["purchase_price"] == 110.0 and not res["propio"]
     assert "price_unit" not in l          # lo pone el producto
     bulto = next(a[0] for m, f, a, _ in odoo.llamadas if m == "tms.package" and f == "create")
     assert bulto["goods_id"] == 93 and bulto["carrier_tracking_ref"] == "7375296" and bulto["number_of_packages"] == 11
@@ -95,3 +96,13 @@ def test_no_repite():
 def test_destino_desconocido_no_guarda():
     with pytest.raises(O.ErrorPR, match="lugar de entrega"):
         O.registrar_bobinas(OdooFalso(), dict(VIAJE, lugar_entrega="OTRO SITIO"))
+
+
+def test_camion_propio_sin_proveedor_y_coste_85():
+    odoo = OdooFalso(propio=True, coste=0)
+    res = O.registrar_bobinas(odoo, dict(VIAJE))
+    l = _linea(odoo)
+    assert "vendor_id" not in l and "purchase_price" not in l and l["driver_id"] == 9225
+    escrito = next(a for m, f, a, _ in odoo.llamadas if m == "sale.order.line" and f == "write")
+    assert escrito == [[1], {"purchase_price": 5.03}]      # 85 % de 5,92
+    assert res["propio"] and res["coste"] == 5.03

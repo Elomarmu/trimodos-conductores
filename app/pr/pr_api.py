@@ -1182,12 +1182,7 @@ def bobinas_leer_lista(body: Archivo):
 @oficina.post("/bobinas/registrar")
 def bobinas_registrar(body: ViajeBobinasIn):
     """Oficina Sevilla: guarda el viaje de bobinas revisado como línea del pedido «BOBINAS {MES}»."""
-    from . import bobinas_reglas as BR
-    v = dict(body.viaje)
-    if v.get("destino"):   # la oficina ha elegido (o corregido) el destino en la pantalla
-        d = next((x for x in BR.DESTINOS if x.clave == v["destino"]), None)
-        if d:
-            v["lugar_entrega"] = d.palabras[0]
+    v = dict(body.viaje)   # «destino» = clave elegida (o corregida) por la oficina en la pantalla
     if get_settings().dry_run:
         odoo = odoo_pr()
         p = O.buscar_pedido_bobinas(odoo, v.get("fecha") or "")

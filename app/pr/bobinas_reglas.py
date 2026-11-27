@@ -5,7 +5,8 @@ Comprobado en Odoo el 27/11/2026 con los pedidos S26100643 (BOBINAS NOVIEMBRE) y
 - El producto y el destino dependen del «Lugar de entrega» de la Lista de Carga.
 - Cantidad de la línea = toneladas (kg / 1000). El precio lo pone el producto (no se escribe).
 - Bulto: mercancía BOBINAS DE PAPEL (93), referencia de seguimiento = Nº de la Lista de Carga.
-- Coste de compra: subcontrata = el de su último viaje de ese producto; camión propio = 0.
+- Subcontrata (vehículo no propio en Flota): proveedor = su transportista, coste = el de su último viaje de ese producto.
+- Camión propio («Vehículo propio» en Flota): sin proveedor; coste = 85 % del precio de venta (decisión 27/11/2026).
 - Los productos «CON RETORNO» no se detectan en el documento: los pone la oficina a mano.
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ ORIGEN_ID = 12888            # STINSA SEVILLA (terminal)
 TIPO_VENTA_ID = 36           # Transporte Nacional
 COMERCIAL_ID = 47            # Sandra Venega Sánchez (comercial de los pedidos de bobinas)
 GOODS_BOBINAS = 93           # tms.goods «BOBINAS DE PAPEL»
+COSTE_PROPIO = 0.85          # camión propio: coste = 85 % del precio de venta
 
 MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE",
          "NOVIEMBRE", "DICIEMBRE"]

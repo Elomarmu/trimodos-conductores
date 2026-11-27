@@ -56,7 +56,7 @@ def vehiculo(odoo, placa: str) -> dict | None:
     """Vehículo de Flota por matrícula. Si hay varios con la misma matrícula, el último usado en un pedido de SAICA."""
     if not placa:
         return None
-    vs = odoo("fleet.vehicle", "search_read", [[["license_plate", "=", placa]]], fields=["license_plate", "driver_id"])
+    vs = odoo("fleet.vehicle", "search_read", [[["license_plate", "=", placa]]], fields=["license_plate", "driver_id", "is_own_vehicle"])
     if len(vs) <= 1:
         return vs[0] if vs else None
     for campo in ("tractor_id", "trailer_id"):
@@ -96,6 +96,7 @@ def comprobar_vehiculos(odoo, tractora: str, remolque: str) -> dict:
         if clave == "tractora" and v:
             res["colaborador_id"] = colaborador(odoo, v)
             res["colaborador"] = v["driver_id"][1] if v.get("driver_id") else ""
+            res["propio"] = bool(v.get("is_own_vehicle"))
     return res
 
 
@@ -1024,7 +1025,7 @@ def registrar_bobinas(odoo, v: dict) -> dict:
     kg = R.kilos(v.get("peso_kg"))
     if not kg:
         raise ErrorPR("Falta el peso.")
-    dest = BR.destino(v.get("lugar_entrega"))
+    dest = next((d for d in BR.DESTINOS if d.clave == v.get("destino")), None) or BR.destino(v.get("lugar_entrega"))
     if not dest:
         raise ErrorPR(f"No conozco el lugar de entrega «{v.get('lugar_entrega') or ''}». Elige el destino.")
 
@@ -1036,9 +1037,11 @@ def registrar_bobinas(odoo, v: dict) -> dict:
     tr, re_ = vehiculo(odoo, R.matricula(v.get("tractora"))), vehiculo(odoo, R.matricula(v.get("remolque")))
     if not tr:
         raise ErrorPR(f"La tractora {v.get('tractora')} no está en Flota. Revisa la matrícula o avisa a la oficina.")
-    vendedor = colaborador(odoo, tr)
-    if not vendedor:
-        raise ErrorPR(f"La tractora {v.get('tractora')} no tiene transportista asignado en Flota. Avisa a la oficina.")
+    propio = bool(tr.get("is_own_vehicle"))
+    conductor = colaborador(odoo, tr)
+    if not conductor:
+        raise ErrorPR(f"La tractora {v.get('tractora')} no tiene {'conductor' if propio else 'transportista'} asignado en Flota. "
+                      "Avisa a la oficina.")
 
     pedido = buscar_pedido_bobinas(odoo, v["fecha"])
     nuevo = pedido is None
@@ -1064,18 +1067,23 @@ def registrar_bobinas(odoo, v: dict) -> dict:
 
     linea = {"product_id": dest.producto_id, "name": dest.linea, "product_uom_qty": BR.toneladas(kg),
              "pickup_date": cuando, "shipping_origin_id": BR.ORIGEN_ID, "shipping_destination_id": dest.destino_id,
-             "purchase_price": coste_bobinas(odoo, dest.producto_id, vendedor),
-             "tractor_id": tr["id"], "trailer_id": re_["id"] if re_ else False, "driver_id": vendedor, "vendor_id": vendedor,
+             "tractor_id": tr["id"], "trailer_id": re_["id"] if re_ else False, "driver_id": conductor,
              "tms_package_ids": [(6, 0, [bulto_id])]}   # sin price_unit: lo pone el producto
+    if not propio:   # subcontrata: proveedor y su coste de siempre. Camión propio: sin proveedor y coste = 85 % de la venta
+        linea["vendor_id"] = conductor
+        linea["purchase_price"] = coste_bobinas(odoo, dest.producto_id, conductor)
     odoo("sale.order", "write", [[pedido["id"]], {"order_line": [(0, 0, linea)]}])
 
     ls = odoo("sale.order.line", "search_read", [[["order_id", "=", pedido["id"]], ["tms_package_ids", "in", [bulto_id]]]],
               fields=["task_id", "order_id", "price_unit", "purchase_price"], limit=1)
     if not ls:
         raise ErrorPR("Odoo no ha guardado la línea. Avisa a la oficina.")
+    if propio:
+        ls[0]["purchase_price"] = round(ls[0]["price_unit"] * BR.COSTE_PROPIO, 2)
+        odoo("sale.order.line", "write", [[ls[0]["id"]], {"purchase_price": ls[0]["purchase_price"]}])
     tarea_id = ls[0]["task_id"][0] if ls[0].get("task_id") else None
     asegurar_puntos(odoo, tarea_id)
     return {"duplicado": False, "pedido_nuevo": nuevo, "pedido": ls[0]["order_id"][1], "pedido_id": pedido["id"],
             "linea_id": ls[0]["id"], "tarea_id": tarea_id, "bulto": nombre, "bulto_id": bulto_id, "documento": documento,
             "destino": dest.linea, "toneladas": BR.toneladas(kg), "precio": ls[0]["price_unit"],
-            "coste": ls[0]["purchase_price"]}
+            "coste": ls[0]["purchase_price"], "propio": propio}
