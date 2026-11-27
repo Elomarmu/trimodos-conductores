@@ -159,3 +159,38 @@ def leer_albaran(contenido: bytes, tipo: str, cliente: httpx.Client | None = Non
 
 def leer_tren(archivos: list[tuple[bytes, str]], cliente: httpx.Client | None = None) -> dict:
     return _preguntar(archivos, PROMPT_TREN, "composicion_tren", ESQUEMA_TREN, cliente)
+
+
+PROMPT_BOBINAS = """Lee esta «LISTA DE CARGA» de SAICA PAPER (bobinas de papel). Puede ser un PDF o una foto del móvil.
+
+- documento: el número que va después de «Nº», arriba a la derecha (p. ej. 7374098).
+- lugar_entrega: la empresa y población del recuadro «Lugar de entrega» (p. ej. «ENVASES RAMBLEÑOS, SL - LA RAMBLA
+  (CÓRDOBA)», «SAICA PACK SEVILLA»). Copia el nombre y la población tal cual.
+- fecha: la fecha de entrega (AAAA-MM-DD; años de 2 cifras son 20xx).
+- bobinas: número de bultos (p. ej. «12 BOBINAS DE PAPEL» → 12).
+- peso_kg: peso total en kg, entero. Punto de miles: «26.902» son 26902 kg.
+- transportista: la empresa transportista que figura en el documento.
+- tractora y remolque: matrículas sin espacios ni guiones; el remolque empieza por R.
+
+Si un dato no aparece o no se lee, devuelve null: no te lo inventes. Explica en «dudas» lo que no se lea con seguridad."""
+
+ESQUEMA_BOBINAS = {
+    "type": "object",
+    "properties": {
+        "documento": {"type": ["string", "null"]},
+        "lugar_entrega": {"type": ["string", "null"]},
+        "fecha": {"type": ["string", "null"], "description": "AAAA-MM-DD"},
+        "bobinas": {"type": ["integer", "null"]},
+        "peso_kg": {"type": ["integer", "null"]},
+        "transportista": {"type": ["string", "null"]},
+        "tractora": {"type": ["string", "null"]},
+        "remolque": {"type": ["string", "null"]},
+        "dudas": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["documento", "lugar_entrega", "fecha", "bobinas", "peso_kg", "tractora", "remolque", "dudas"],
+}
+
+
+def leer_lista_bobinas(contenido: bytes, tipo: str, cliente: httpx.Client | None = None) -> dict:
+    """Lista de Carga de bobinas de SAICA → documento, lugar de entrega, fecha, bobinas, peso, transportista y matrículas."""
+    return _preguntar([(contenido, tipo)], PROMPT_BOBINAS, "lista_carga_bobinas", ESQUEMA_BOBINAS, cliente)

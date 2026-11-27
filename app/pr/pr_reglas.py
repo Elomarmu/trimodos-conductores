@@ -142,6 +142,14 @@ def tipo_calidad(texto: str | None) -> str:
     return m.group(1) if m else ""
 
 
+COSTE_PROPIO = 0.85   # camión propio: coste del viaje = 85 % de la venta (cantidad × precio unitario). Decisión 27/11/2026.
+
+
+def coste_propio(cantidad: float | None, precio: float | None) -> float:
+    """Coste (importe fijo del viaje) cuando lo hace un camión propio: 85 % de cantidad × precio unitario."""
+    return round((cantidad or 0) * (precio or 0) * COSTE_PROPIO, 2)
+
+
 def fecha_hora_utc(fecha: str | None, hora: str | None) -> str | None:
     """Fecha y hora del albarán (hora de Madrid) → texto UTC para Odoo. Sin hora: 10:00 de Madrid."""
     if not fecha:

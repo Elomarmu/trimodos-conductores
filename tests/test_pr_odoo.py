@@ -19,7 +19,8 @@ class OdooV18:
                           {"id": 3356, "license_plate": "R8896BDF", "driver_id": False},
                           {"id": 190, "license_plate": "R8896BDF", "driver_id": False},
                           {"id": 4735, "license_plate": "1222HTP", "driver_id": [9161, "GUERRERO"]},
-                          {"id": 8337, "license_plate": "R3403BBP", "driver_id": False}]
+                          {"id": 8337, "license_plate": "R3403BBP", "driver_id": False},
+                          {"id": 1474, "license_plate": "2241KRB", "driver_id": [15458, "MAGUILLO"], "is_own_vehicle": True}]
         self.pedidos = {} if pedido_mes is None else {pedido_mes["id"]: dict(pedido_mes)}
         self.lineas, self.bultos, self.equipos = {}, {}, {"NPWU4954328": 52461}
         self.seq = iter(["PK2627659", "PK2627660"])  # el primero ya existe (choque de la v18)
@@ -38,6 +39,9 @@ class OdooV18:
             return [v for v in self.vehiculos if any(fnmatch.fnmatch(v["license_plate"], p) for p in pats)]
         if modelo == "sale.order.line" and metodo == "search_read":
             dom = dict((c[0], c[2]) for c in args[0])
+            if "id" in dom:   # leer una línea (coste del camión propio al cambiar el peso)
+                l = self.lineas[dom["id"]]["vals"]
+                return [{"id": dom["id"], "vendor_id": l.get("vendor_id") or False, "price_unit": l["price_unit"]}]
             if "tractor_id" in dom or "trailer_id" in dom:
                 return [{"id": 1, "trailer_id": [3356, "R8896BDF"], "tractor_id": [1, ""]}] if "trailer_id" in dom else []
             return [dict(l, id=i) for i, l in self.lineas.items()
@@ -106,6 +110,7 @@ class OdooV18:
             self.checkpoints.add(args[0][0])
             return True
         if modelo == "sale.order.line" and metodo == "write":
+            self.escrito_linea = (args[0][0], args[1])
             return True
         raise AssertionError((modelo, metodo, args))
 
@@ -218,3 +223,23 @@ def test_balas_mal_escritas():
 def test_hora_rara_no_rompe():
     assert R.fecha_hora_utc("2026-11-09", "25:99") == "2026-11-09 09:00:00"
     assert R.fecha_hora_utc("2026-11-09", "13:35:00") == "2026-11-09 12:35:00"
+
+
+def test_camion_propio_sin_proveedor_y_coste_85_de_la_venta():
+    odoo = OdooV18()
+    r = O.registrar(odoo, dict(JEREZ, tractora="2241KRB"))
+    linea = next(iter(odoo.lineas.values()))["vals"]
+    assert "vendor_id" not in linea and linea["driver_id"] == 15458
+    assert linea["purchase_price"] == R.coste_propio(24.8, 8.82) == 185.93     # 24,8 t × 8,82 € × 85 %
+    b = dict(odoo.bultos[r["bulto_id"]], sale_line_ids=[r["linea_id"]], shipping_origin_id=[7274, "JEREZ"])
+    O.actualizar(odoo, b, {"peso_kg": "20.000"})                                 # cambia el peso: el coste lo sigue
+    linea_id, vals = odoo.escrito_linea
+    assert vals["product_uom_qty"] == 20.0 and vals["purchase_price"] == R.coste_propio(20.0, 8.82)
+
+
+def test_colaborador_cambia_peso_no_toca_su_coste():
+    odoo = OdooV18()
+    r = O.registrar(odoo, JEREZ)
+    b = dict(odoo.bultos[r["bulto_id"]], sale_line_ids=[r["linea_id"]], shipping_origin_id=[7274, "JEREZ"])
+    O.actualizar(odoo, b, {"peso_kg": "20.000"})
+    assert "purchase_price" not in odoo.escrito_linea[1]

@@ -161,6 +161,7 @@
   <button id="of-stock" class="btn secondary">Sacar de stock (cargadas en un tren anterior)</button>
   <button id="of-tren" class="btn secondary">Composición del tren</button>
   <button id="of-asignar" class="btn secondary">Asignar cargas a cajas</button>
+  <button id="of-bobviaje" class="btn secondary">Viaje de bobinas (Lista de Carga de SAICA)</button>
   <button id="of-bobinas" class="btn secondary">Bobinas de un convoy (captura de SAICA)</button>
   <button class="btn ghost" data-go="menu">Volver al menú</button>
 </main>
@@ -263,6 +264,34 @@
     <div id="tren-hecho-cuerpo" class="result"></div>
     <button id="tren-ir-asignar" class="btn primary">Asignar cargas a cajas</button>
   </div>
+  <button class="btn ghost" data-go="pr-oficina">Volver</button>
+</main>
+
+<!-- Oficina: viaje de bobinas (Lista de Carga de SAICA → línea del pedido «BOBINAS {MES}»), todo en una pantalla -->
+<main id="s-pr-bobviaje" class="screen" hidden>
+  <h1>Viaje de bobinas</h1>
+  <p class="hint">Sube la Lista de Carga de SAICA (PDF o foto). Revisa los datos, corrige lo que haga falta y confirma.</p>
+  <label class="btn primary huge" for="bv-archivo" id="bv-subir">Subir la Lista de Carga</label>
+  <input id="bv-archivo" class="oculto" type="file" accept="image/*,application/pdf">
+  <form id="bv-form" class="pkg" novalidate hidden>
+    <p id="bv-archivo-nombre" class="hint"></p>
+    <div id="bv-avisos" class="avisos"></div>
+    <div class="field"><label for="bv-documento">Nº Lista de Carga</label><input id="bv-documento" type="text" inputmode="numeric" maxlength="20"></div>
+    <div class="field"><label for="bv-destino">Destino (producto)</label><select id="bv-destino"></select>
+      <p id="bv-lugar" class="hint"></p></div>
+    <div class="field"><label for="bv-fecha">Fecha de entrega</label><input id="bv-fecha" type="date"></div>
+    <div class="field"><label for="bv-bobinas">Bobinas</label><input id="bv-bobinas" type="text" inputmode="numeric" maxlength="3"></div>
+    <div class="field"><label for="bv-peso">Peso (kg)</label><input id="bv-peso" type="text" inputmode="numeric" maxlength="5">
+      <p id="bv-tn" class="hint"></p></div>
+    <div class="field"><label for="bv-tractora">Tractora</label><input id="bv-tractora" type="text" maxlength="12" autocapitalize="characters"></div>
+    <div class="field"><label for="bv-remolque">Remolque</label><input id="bv-remolque" type="text" maxlength="12" autocapitalize="characters"></div>
+    <p id="bv-vehiculo" class="hint"></p>
+    <div class="actions">
+      <button id="bv-confirmar" type="submit" class="btn primary">Confirmar y guardar en Odoo</button>
+      <button id="bv-otra" type="button" class="btn ghost">Descartar y subir otra</button>
+    </div>
+  </form>
+  <div id="bv-hecho" class="lista"></div>
   <button class="btn ghost" data-go="pr-oficina">Volver</button>
 </main>
 
