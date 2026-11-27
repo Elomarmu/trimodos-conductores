@@ -193,9 +193,11 @@ def registrar(odoo, v: dict) -> dict:
     tr, re_ = vehiculo(odoo, v.get("tractora")), vehiculo(odoo, v.get("remolque"))
     if not tr:
         raise ErrorPR(f"La tractora {v.get('tractora')} no está en Flota. Revisa la matrícula o avisa a la oficina.")
+    propio = bool(tr.get("is_own_vehicle"))
     vendedor = colaborador(odoo, tr)
     if not vendedor:
-        raise ErrorPR(f"La tractora {v.get('tractora')} no tiene transportista asignado en Flota. Avisa a la oficina.")
+        raise ErrorPR(f"La tractora {v.get('tractora')} no tiene {'conductor' if propio else 'transportista'} asignado en Flota. "
+                      "Avisa a la oficina.")
 
     pedido = buscar_pedido_mes(odoo, v["fecha"])
     nuevo = pedido is None
@@ -219,12 +221,17 @@ def registrar(odoo, v: dict) -> dict:
     else:
         bulto_id = odoo("tms.package", "create", [bulto])
 
+    cantidad = R.toneladas(punto, v.get("peso_kg")) or 0
     linea = {"product_id": punto.producto_id, "name": punto.linea, "price_unit": punto.precio_t,
-             "product_uom_qty": R.toneladas(punto, v.get("peso_kg")) or 0, "pickup_date": cuando,
+             "product_uom_qty": cantidad, "pickup_date": cuando,
              "shipping_origin_id": punto.origen_id, "shipping_destination_id": R.DESTINO_ID,
-             "purchase_price": coste_viaje(),  # Odoo lo pasa a la línea de compra del colaborador
-             "tractor_id": tr["id"], "trailer_id": re_["id"] if re_ else False, "driver_id": vendedor, "vendor_id": vendedor,
+             "tractor_id": tr["id"], "trailer_id": re_["id"] if re_ else False, "driver_id": vendedor,
              "tms_package_ids": [(6, 0, [bulto_id])]}
+    if propio:   # camión propio: el conductor solo en «Conductor», sin proveedor; coste = 85 % de la venta
+        linea["purchase_price"] = R.coste_propio(cantidad, punto.precio_t)
+    else:        # colaborador: Odoo pasa el coste a su línea de compra
+        linea["vendor_id"] = vendedor
+        linea["purchase_price"] = coste_viaje()
     eq = equipo(odoo, v.get("contenedor"))
     if eq:
         linea["equipment_id"] = eq
@@ -323,6 +330,10 @@ def actualizar(odoo, bulto: dict, cambios: dict) -> list[str]:
             raise ErrorPR("Revisa el número de contenedor (no cuadra el dígito de control).")
         vals_linea["equipment_id"] = equipo(odoo, cont)
         hechos.append("contenedor")
+    if "product_uom_qty" in vals_linea and linea_id:   # camión propio (sin proveedor): el coste sigue a la cantidad
+        ls = odoo("sale.order.line", "search_read", [[["id", "=", linea_id]]], fields=["vendor_id", "price_unit"], limit=1)
+        if ls and not ls[0].get("vendor_id"):
+            vals_linea["purchase_price"] = R.coste_propio(vals_linea["product_uom_qty"], ls[0]["price_unit"])
     if vals_linea and linea_id:
         odoo("sale.order.line", "write", [[linea_id], vals_linea])
     return hechos
@@ -350,7 +361,7 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
         return []
     ls = odoo("sale.order.line", "search_read", [[["order_id", "in", list(pedidos)], ["tms_package_ids", "!=", False],
                                                   ["pickup_date", ">=", f"{desde} 00:00:00"]]],
-              fields=["name", "order_id", "pickup_date", "tractor_id", "trailer_id", "vendor_id", "product_uom_qty",
+              fields=["name", "order_id", "pickup_date", "tractor_id", "trailer_id", "vendor_id", "driver_id", "product_uom_qty",
                       "equipment_id", "task_id", "tms_package_ids", "shipping_origin_id", "create_date"], order="pickup_date, id")
     ps = odoo("tms.package", "search_read", [[["id", "in", [i for l in ls for i in l["tms_package_ids"]]]]],
               fields=["name", "carrier_tracking_ref", "shipping_weight", "number_of_packages", "unload_note"])
@@ -367,7 +378,7 @@ def viajes(odoo, desde: str | None = None) -> list[dict]:
                     "registrado": R.fecha_madrid(l.get("create_date")), "tarea_id": (l.get("task_id") or [None])[0],
                     "bulto": p.get("name"), "bulto_id": p.get("id"), "fecha": (l.get("pickup_date") or "")[:10],
                     "tractora": _placa(l.get("tractor_id")), "remolque": _placa(l.get("trailer_id")),
-                    "colaborador": (l.get("vendor_id") or [None, ""])[1], "lugar": punto.nombre if punto else "",
+                    "colaborador": (l.get("vendor_id") or l.get("driver_id") or [None, ""])[1], "lugar": punto.nombre if punto else "",
                     "linea": l["name"], "toneladas": l.get("product_uom_qty"), "peso_kg": p.get("shipping_weight") or None,
                     "bultos": p.get("number_of_packages") or None, "codigo_paper": p.get("carrier_tracking_ref") or "",
                     "contenedor": (l.get("equipment_id") or [None, ""])[1],
@@ -1079,7 +1090,7 @@ def registrar_bobinas(odoo, v: dict) -> dict:
     if not ls:
         raise ErrorPR("Odoo no ha guardado la línea. Avisa a la oficina.")
     if propio:
-        ls[0]["purchase_price"] = round(ls[0]["price_unit"] * BR.COSTE_PROPIO, 2)
+        ls[0]["purchase_price"] = R.coste_propio(BR.toneladas(kg), ls[0]["price_unit"])
         odoo("sale.order.line", "write", [[ls[0]["id"]], {"purchase_price": ls[0]["purchase_price"]}])
     tarea_id = ls[0]["task_id"][0] if ls[0].get("task_id") else None
     asegurar_puntos(odoo, tarea_id)

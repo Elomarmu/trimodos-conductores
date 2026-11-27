@@ -104,5 +104,5 @@ def test_camion_propio_sin_proveedor_y_coste_85():
     l = _linea(odoo)
     assert "vendor_id" not in l and "purchase_price" not in l and l["driver_id"] == 9225
     escrito = next(a for m, f, a, _ in odoo.llamadas if m == "sale.order.line" and f == "write")
-    assert escrito == [[1], {"purchase_price": 5.03}]      # 85 % de 5,92
-    assert res["propio"] and res["coste"] == 5.03
+    assert escrito == [[1], {"purchase_price": 141.4}]     # 28,101 t × 5,92 € × 85 % (importe fijo del viaje)
+    assert res["propio"] and res["coste"] == 141.4
