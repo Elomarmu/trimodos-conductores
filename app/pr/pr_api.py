@@ -1147,3 +1147,59 @@ def bobinas_enviar(body: ConvoyBobinas):
         "html": cuerpo, "archivos": archivos})
     log.info("bobinas convoy %s enviadas: %s bobinas (%s)", d.get("convoy"), total, enviado)
     return {"simulado": s.dry_run, "enviado": enviado, "para": destinatarios(), "total": total, "clases": len(clases), "archivos": archivos}
+
+
+@oficina.post("/bobinas/crear-linea")
+def bobinas_crear_linea(body: Archivo):
+    """Oficina Sevilla: foto/PDF de Lista de Carga de SAICA de bobinas → crea línea en pedido mensual de bobinas.
+
+    Lee el documento con Claude Vision, extrae los datos, mapea el destino al producto, y crea la línea en Odoo.
+    """
+    s = get_settings()
+    if s.dry_run:
+        # En modo prueba, solo lee el documento sin crear nada en Odoo
+        datos, tipo = _bytes(body)
+        leido = _leer(L.leer_lista_bobinas, datos, tipo)
+        return {"simulado": True, "nº_documento": leido.get("nº_documento"), "destino": leido.get("lugar_entrega"),
+                "cantidad_tn": round((leido.get("peso_total_kg") or 0) / 1000, 3), "dudas": leido.get("dudas")}
+
+    odoo = odoo_pr()
+    datos, tipo = _bytes(body)
+    leido = _leer(L.leer_lista_bobinas, datos, tipo)
+
+    # Avisos sobre dudas en la lectura
+    avisos = [f"Duda al leer: {d}" for d in leido.get("dudas") or []]
+
+    # Crear la línea en Odoo
+    res = _pr(O.crear_linea_bobinas, odoo, leido)
+    res["avisos"] = avisos
+    res["dudas"] = leido.get("dudas") or []
+
+    # Guardar la foto en la tarea
+    if not res.get("duplicado"):
+        try:
+            O.guardar_foto(odoo, res["tarea_id"], leido.get("nº_documento"),
+                          base64.b64encode(_bytes(body)[0]).decode(), body.tipo, "lista_carga")
+        except Exception:
+            log.warning("no se pudo guardar la foto de Lista de Carga en la tarea %s", res["tarea_id"])
+
+    # Nota en la tarea
+    from ..main import get_odoo
+    cli = get_odoo()
+    if not res.get("duplicado"):
+        try:
+            cli.post_note(res["tarea_id"],
+                         f"<p>Bobinas registradas desde la app: {res.get('cantidad_tn')} Tn hacia {res.get('destino')}. "
+                         f"Referencia: {res.get('referencia')}.</p>")
+        except Exception:
+            log.warning("no se pudo dejar la nota en la tarea %s", res["tarea_id"])
+
+    # Subir el registro actualizado
+    try:
+        subir_registro(odoo)
+    except Exception:
+        log.warning("no se pudo actualizar REGISTRO VIAJES en SharePoint")
+
+    log.info("bobinas linea creada: ref=%s destino=%s cantidad=%.3f Tn duplicado=%s",
+             res.get("referencia"), res.get("destino"), res.get("cantidad_tn"), res.get("duplicado"))
+    return res

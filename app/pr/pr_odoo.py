@@ -982,3 +982,179 @@ def _placa(valor) -> str:
     return valor[1].rsplit("/", 1)[-1] if valor else ""
 
 
+# ---- bobinas SAICA ------------------------------------------------------------------------------------------------
+
+def buscar_pedido_bobinas(odoo, mes: str) -> dict | None:
+    """Pedido mensual de BOBINAS (ej: 'NOVIEMBRE 2026')."""
+    from . import bobinas_reglas as B
+    ref = B.referencia_pedido(mes)
+    ps = odoo("sale.order", "search_read", [[["partner_id", "=", R.CLIENTE_ID], ["client_order_ref", "=", ref]]],
+              fields=["name", "state", "locked", "user_id"], limit=1)
+    return ps[0] if ps else None
+
+
+def ya_registrado_bobinas(odoo, nº_documento: str) -> dict | None:
+    """Bulto de bobinas SAICA con ese nº de documento (referencia de la Lista de Carga)."""
+    if not nº_documento:
+        return None
+    texto = f"Referencia bobinas: {nº_documento}"
+    ps = odoo("tms.package", "search_read", [[["partner_id", "=", R.CLIENTE_ID], ["unload_note", "ilike", texto]]],
+              fields=["name", "task_ids", "sale_line_ids", "unload_note"], order="id desc", limit=1)
+    if ps:
+        obs = R.leer_observaciones(ps[0].get("unload_note"))
+        if obs.get("nº_documento") == nº_documento:
+            return ps[0]
+    return None
+
+
+def crear_linea_bobinas(odoo, datos_leidos: dict) -> dict:
+    """Crea una línea de pedido de bobinas en Odoo.
+
+    Parámetros:
+    - datos_leidos: dict con nº_documento, destino, nº_bultos, peso_total_kg, transportista, matrículas
+
+    Devuelve: {bulto, linea_id, referencia, destino, cantidad_tn}
+    """
+    from . import bobinas_reglas as B
+
+    # 1. Validar datos esenciales
+    nº_doc = str(datos_leidos.get("nº_documento") or "").strip()
+    destino_txt = str(datos_leidos.get("lugar_entrega") or "").strip()
+    nº_bultos = datos_leidos.get("nº_bultos")
+    peso_kg = datos_leidos.get("peso_total_kg")
+    transportista = str(datos_leidos.get("transportista") or "").strip()
+
+    if not nº_doc:
+        raise ErrorPR("Falta el nº de documento (referencia de la Lista de Carga).")
+    if not destino_txt:
+        raise ErrorPR("Falta el lugar de entrega / destino.")
+    if not peso_kg or peso_kg <= 0:
+        raise ErrorPR("El peso debe ser mayor a 0 kg.")
+    if not nº_bultos or nº_bultos <= 0:
+        raise ErrorPR("El número de bobinas debe ser mayor a 0.")
+
+    # 2. Mapear destino a producto
+    destino = B.mapear_destino(destino_txt)
+    if not destino:
+        raise ErrorPR(f"Destino '{destino_txt}' no reconocido. Contacta a la oficina.")
+    if destino.producto_id == 0:  # TODO
+        raise ErrorPR(f"Destino '{destino_txt}' sin producto configurado en Odoo. Avisa a la oficina.")
+
+    # 3. No repetir
+    previo = ya_registrado_bobinas(odoo, nº_doc)
+    if previo and previo.get("sale_line_ids"):
+        tarea = (previo.get("task_ids") or [None])[0]
+        asegurar_puntos(odoo, tarea)
+        return {"duplicado": True, "bulto": previo["name"], "tarea_id": tarea, "linea_id": previo["sale_line_ids"][0],
+                "referencia": nº_doc, "destino": destino_txt, "cantidad_tn": round(peso_kg / 1000, 3)}
+
+    # 4. Buscar o crear pedido del mes
+    # Se usa la fecha del documento o la fecha actual si no viene
+    fecha_txt = datos_leidos.get("fecha_entrega") or ""
+    if fecha_txt:
+        mes_año = fecha_txt.split("-")[0:2]  # AAAA-MM-DD → ["AAAA", "MM"]
+        mes_nombre = {
+            "01": "ENERO", "02": "FEBRERO", "03": "MARZO", "04": "ABRIL", "05": "MAYO", "06": "JUNIO",
+            "07": "JULIO", "08": "AGOSTO", "09": "SEPTIEMBRE", "10": "OCTUBRE", "11": "NOVIEMBRE", "12": "DICIEMBRE"
+        }.get(mes_año[1] if len(mes_año) > 1 else "", "")
+    else:
+        import datetime
+        hoy = datetime.date.today()
+        mes_nombre = {1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL", 5: "MAYO", 6: "JUNIO",
+                      7: "JULIO", 8: "AGOSTO", 9: "SEPTIEMBRE", 10: "OCTUBRE", 11: "NOVIEMBRE", 12: "DICIEMBRE"}.get(hoy.month, "")
+
+    if not mes_nombre:
+        raise ErrorPR("No se pudo determinar el mes. Revisa la fecha en el documento.")
+
+    pedido = buscar_pedido_bobinas(odoo, mes_nombre)
+    nuevo = pedido is None
+    if nuevo:
+        # Crear pedido mensual
+        vals = {"partner_id": B.CLIENTE_ID, "partner_invoice_id": B.CLIENTE_ID, "partner_shipping_id": B.CLIENTE_ID,
+                "company_id": B.EMPRESA_ID, "client_order_ref": B.referencia_pedido(mes_nombre),
+                "type_id": B.TIPO_VENTA_ID, "user_id": B.COMERCIAL_ID}
+        pid = odoo("sale.order", "create", [vals])
+        pedido = {"id": pid, "nuevo": True, "confirmar": True, "locked": False}
+    else:
+        preparar_pedido(odoo, pedido)
+
+    # 5. Crear bulto (tms.package)
+    cuando = R.fecha_hora_utc(fecha_txt) if fecha_txt else None
+    bulto_nombre = previo["name"] if previo else nombre_bulto(odoo)
+
+    obs_datos = {
+        "nº_documento": nº_doc,
+        "destino": destino_txt,
+        "transportista": transportista,
+        "matricula_tractora": B.matricula(datos_leidos.get("matricula_tractora")),
+        "matricula_remolque": B.matricula(datos_leidos.get("matricula_remolque")),
+    }
+
+    bulto = {
+        "name": bulto_nombre,
+        "partner_id": B.CLIENTE_ID,
+        "company_id": B.EMPRESA_ID,
+        "shipping_destination_id": B.DESTINO_ID,
+        "goods_id": GOODS_PAPEL_RECUPERADO,  # Mismo que PR
+        "carrier_tracking_ref": nº_doc,
+        "shipping_weight": peso_kg,
+        "number_of_packages": nº_bultos,
+        "unload_note": R.observaciones(obs_datos),
+    }
+    if cuando:
+        bulto["pickup_date"] = cuando
+
+    if previo:
+        bulto_id = previo["id"]
+        odoo("tms.package", "write", [[bulto_id], {k: v for k, v in bulto.items() if k != "name"}])
+    else:
+        bulto_id = odoo("tms.package", "create", [bulto])
+
+    # 6. Crear línea del pedido
+    # Precio del producto viene de Odoo (definido en la ficha del producto)
+    # Se obtiene el precio_unit del producto
+    productos = odoo("product.product", "search_read", [[["id", "=", destino.producto_id]]],
+                     fields=["list_price", "standard_price"], limit=1)
+    precio_unitario = (productos[0].get("list_price") or 0) if productos else 0
+
+    linea = {
+        "product_id": destino.producto_id,
+        "name": destino.nombre,
+        "price_unit": precio_unitario,
+        "product_uom_qty": round(peso_kg / 1000, 3),  # Toneladas
+        "product_uom": 36,  # Toneladas (OdooUnitId)
+        "tms_package_ids": [(6, 0, [bulto_id])],
+    }
+    if cuando:
+        linea["pickup_date"] = cuando
+
+    odoo("sale.order", "write", [[pedido["id"]], {"order_line": [(0, 0, linea)]}])
+
+    # 7. Confirmar pedido si es nuevo
+    if pedido.get("confirmar"):
+        odoo("sale.order", "action_confirm", [[pedido["id"]]])
+        odoo("sale.order", "action_unlock", [[pedido["id"]]])
+
+    # 8. Obtener tarea y rellenar puntos
+    lineas = odoo("sale.order.line", "search_read", [[["order_id", "=", pedido["id"]], ["tms_package_ids", "in", [bulto_id]]]],
+                  fields=["task_id", "id"], limit=1)
+    if not lineas or not lineas[0].get("task_id"):
+        raise ErrorPR("Odoo no ha creado la orden de transporte. Avisa a la oficina.")
+
+    tarea_id = lineas[0]["task_id"][0]
+    linea_id = lineas[0]["id"]
+    asegurar_puntos(odoo, tarea_id)
+
+    return {
+        "duplicado": False,
+        "pedido_nuevo": nuevo,
+        "bulto": bulto_nombre,
+        "bulto_id": bulto_id,
+        "linea_id": linea_id,
+        "tarea_id": tarea_id,
+        "referencia": nº_doc,
+        "destino": destino_txt,
+        "cantidad_tn": round(peso_kg / 1000, 3),
+    }
+
+

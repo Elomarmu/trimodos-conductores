@@ -159,3 +159,53 @@ def leer_albaran(contenido: bytes, tipo: str, cliente: httpx.Client | None = Non
 
 def leer_tren(archivos: list[tuple[bytes, str]], cliente: httpx.Client | None = None) -> dict:
     return _preguntar(archivos, PROMPT_TREN, "composicion_tren", ESQUEMA_TREN, cliente)
+
+
+PROMPT_BOBINAS = """Lee esta Lista de Carga de SAICA PAPER con bobinas (rolos de papel).
+Es un documento oficial con membrete de SAICA: puede ser una foto móvil o un PDF.
+
+La hoja trae, normalmente:
+- Nº de documento: arriba a la derecha (p. ej. 7374098). Este es el número de referencia de la carga.
+- Lugar de entrega: recuadro grande arriba (ej: SEVILLA, CÓRDOBA, MADRID). Puede estar abreviado (SVL → Sevilla).
+- Número de bobinas: en la tabla central, fila «Nº Bultos» o «Cantidad» (ej: 12 bobinas).
+- Peso total: «Peso neto» o «Peso Total» en kg (ej: 26.902 Kg). Punto de miles: «26.902» = 26902 kg.
+- Destino: punto de descarga (si es diferente del lugar de entrega).
+- Fecha de entrega: DD/MM/AAAA o similar.
+- Transportista: empresa de transporte (ej: «TRANSROMAS 2007, SL»). Es quien recoge la carga.
+- Matrículas: vienen normalmente escritas a mano o en recuadro:
+  - Tractora (camión): p. ej. 9118HTL
+  - Remolque: empieza por R, p. ej. R1460BBX
+  Si no aparecen, pueden estar en blanco o no venir en este documento.
+
+Reglas:
+- Los pesos usan punto de miles: «26.902» son 26902 kg. Da los kilos como número entero.
+- Si un dato no aparece o está en blanco, devuelve null. No te lo inventes.
+- Fecha en formato AAAA-MM-DD (si vienen 2 cifras de año, son 20xx).
+- Las matrículas sin espacios ni guiones. El remolque empieza por R.
+- En «dudas» explica cualquier dato que no se lea con seguridad.
+- El Nº de documento es crítico: es la referencia del pedido en Odoo."""
+
+ESQUEMA_BOBINAS = {
+    "type": "object",
+    "properties": {
+        "nº_documento": {"type": ["string", "null"], "description": "Número de referencia (arriba derecha)"},
+        "lugar_entrega": {"type": ["string", "null"], "description": "Destino: SEVILLA, CORDOBA, MADRID, etc."},
+        "nº_bultos": {"type": ["integer", "null"], "description": "Número de bobinas"},
+        "peso_total_kg": {"type": ["integer", "null"], "description": "Peso neto en kg"},
+        "destino": {"type": ["string", "null"], "description": "Punto de descarga (si es diferente)"},
+        "fecha_entrega": {"type": ["string", "null"], "description": "AAAA-MM-DD"},
+        "transportista": {"type": ["string", "null"], "description": "Empresa de transporte"},
+        "matricula_tractora": {"type": ["string", "null"]},
+        "matricula_remolque": {"type": ["string", "null"]},
+        "dudas": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["nº_documento", "lugar_entrega", "nº_bultos", "peso_total_kg", "transportista", "dudas"],
+}
+
+
+def leer_lista_bobinas(contenido: bytes, tipo: str, cliente: httpx.Client | None = None) -> dict:
+    """Lee una Lista de Carga de SAICA de bobinas.
+
+    Extrae: nº_documento, destino, cantidad de bobinas, peso (Tn), transportista, matrículas.
+    """
+    return _preguntar([(contenido, tipo)], PROMPT_BOBINAS, "datos_bobinas", ESQUEMA_BOBINAS, cliente)
