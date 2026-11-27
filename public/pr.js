@@ -50,9 +50,20 @@ function pintarComposicion(e) {
     ...comp.map((g, i) => h("div", { class: "vagon" + (g.segregado ? " segregado" : "") },
       h("div", { class: "vagon-cab" },
         h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`, g.segregado ? h("b", { class: "seg-tag" }, " SEGREGADO") : null),
+        abierto && !g.segregado ? h("span", { class: "vagon-mover" },
+          h("button", { type: "button", class: "btn ghost mini",
+            disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
+          h("button", { type: "button", class: "btn ghost mini",
+            disabled: i === comp.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼")) : null,
         abierto && !g.segregado ? h("button", { type: "button", class: "btn ghost mini", onclick: () => segregarVagon(g) }, "Segregar") : null),
-      h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ") +
-        (g.cargas ? ` · ${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}` : ""))))));
+      ...(g.cajas.length > 1 ? g.cajas.flatMap((caja, j) => [
+        h("div", { class: "fila" }, h("span", { class: "code" }, caja)),
+        j < g.cajas.length - 1 && abierto && !g.segregado ? h("div", { class: "fila intercambio" },
+          h("button", { type: "button", class: "btn ghost mini intercambio-btn",
+            title: "Intercambiar estas dos cajas", onclick: () => intercambiarCajasComp(g.vagon, caja) }, "⇅")) : null
+      ]).filter(x => x) : [h("div", { class: "fila" }, h("span", { class: "code" }, g.cajas.join(" · ")))]),
+      g.cargas ? h("div", { class: "fila", style: "font-size: 0.85em; color: #666" },
+        `${g.cargas} carga${g.cargas === 1 ? "" : "s"} asignada${g.cargas === 1 ? "" : "s"}`) : null)));
   pintarSegregados(e.segregados || [], e.tren && abierto ? e.tren : null);
 }
 function avisoComp(txt) { $("tren-comp-ok").textContent = txt; $("tren-comp-ok").hidden = false; }
@@ -649,28 +660,52 @@ function pintarAlmacen(e) {
   $("alm-hechas-titulo").hidden = !llenas.length;
   $("alm-orden-hint").hidden = !llenas.length;
   const grupos = e.grupos || [];
-  $("alm-hechas").replaceChildren(...grupos.map((g, i) => h("div", { class: "vagon" },
-    h("div", { class: "vagon-cab" },
-      h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`),
-      fin ? null : h("span", { class: "vagon-mover" },
-        h("button", { type: "button", class: "btn ghost mini", title: "Subir (hacia la locomotora)", "aria-label": `Subir el vagón ${g.vagon}`,
-          disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
-        h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
-          disabled: i === grupos.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼"))),
-    ...g.cajas.map((c) => h("div", { class: "fila" },
-      h("span", {}, h("b", {}, c.caja_movil), h("br"),
-        c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
-          : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía"),
-        c.observaciones ? h("br") : null, c.observaciones ? h("span", { class: "nota" }, "⚠ " + c.observaciones) : null),
-      fin ? null : h("span", { class: "vagon-mover" },
-        h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
-        c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null))))));
+  $("alm-hechas").replaceChildren(...grupos.map((g, i) => {
+    const filas = [];
+    g.cajas.forEach((c, j) => {
+      filas.push(h("div", { class: "fila" },
+        h("span", {}, h("b", {}, c.caja_movil), h("br"),
+          c.carga ? h("span", { class: "code" }, textoCarga(c.carga))
+            : h("span", { class: "hint" }, c.vacia ? "Caja vacía" : "Sin asignar todavía"),
+          c.observaciones ? h("br") : null, c.observaciones ? h("span", { class: "nota" }, "⚠ " + c.observaciones) : null),
+        fin ? null : h("span", { class: "vagon-mover" },
+          h("button", { type: "button", class: "btn ghost mini", onclick: (ev) => editarCaja(c, ev.target.closest(".fila")) }, "Modificar"),
+          c.carga || c.vacia ? h("button", { type: "button", class: "btn ghost quitar", onclick: () => quitarCarga(c) }, "Quitar") : null)));
+      if (j < g.cajas.length - 1 && !fin) {
+        filas.push(h("div", { class: "fila intercambio" },
+          h("span", {}),
+          h("button", { type: "button", class: "btn ghost mini intercambio-btn", title: "Intercambiar estas dos cajas", onclick: () => intercambiarCajas(c.caja_movil, "bajar") }, "⇅")));
+      }
+    });
+    return h("div", { class: "vagon" },
+      h("div", { class: "vagon-cab" },
+        h("span", {}, h("b", {}, `${i + 1}`), ` · Vagón ${g.vagon}`),
+        fin ? null : h("span", { class: "vagon-mover" },
+          h("button", { type: "button", class: "btn ghost mini", title: "Subir (hacia la locomotora)", "aria-label": `Subir el vagón ${g.vagon}`,
+            disabled: i === 0 ? "" : null, onclick: () => moverVagon(g.vagon, "subir") }, "▲"),
+          h("button", { type: "button", class: "btn ghost mini", title: "Bajar (hacia la cola)", "aria-label": `Bajar el vagón ${g.vagon}`,
+            disabled: i === grupos.length - 1 ? "" : null, onclick: () => moverVagon(g.vagon, "bajar") }, "▼"))),
+      ...filas);
+  }));
 }
 
 async function moverVagon(vagon, hacia) {
   clearError();
   busy("Cambiando el orden…");
   try { const r = await post("/api/pr/tren/mover", { vagon, hacia }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+  catch (e) { showError(e.message); } finally { busy(null); }
+}
+
+async function intercambiarCajas(caja_movil, hacia) {
+  clearError();
+  busy("Intercambiando cajas…");
+  try { const r = await post("/api/pr/tren/intercambiar", { caja_movil, hacia }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarAlmacen(r); }
+  catch (e) { showError(e.message); } finally { busy(null); }
+}
+async function intercambiarCajasComp(vagon, caja_movil) {
+  clearError();
+  busy("Intercambiando cajas…");
+  try { const r = await post("/api/pr/tren/intercambiar", { caja_movil, hacia: "bajar" }); if (r.simulado) showError("Modo de prueba: no se ha guardado nada."); else pintarComposicion(r); }
   catch (e) { showError(e.message); } finally { busy(null); }
 }
 
@@ -867,6 +902,94 @@ $("bob-enviar").addEventListener("click", async () => {
       h("div", { class: "banner info" }, r.simulado ? "Modo de prueba: no se ha enviado el correo." :
         r.enviado ? `Excel enviada por correo a ${r.para}.` : "No se ha podido enviar el correo (el envío automático no está configurado o ha fallado). Descárgala aquí."),
       ...r.archivos.map((a) => h("button", { class: "btn secondary", onclick: () => descargarXlsx(a) }, "Descargar " + a.nombre)));
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
+
+// ---------- oficina: viaje de bobinas (Lista de Carga → línea del pedido «BOBINAS {MES}»), en una sola pantalla ----------
+const bv = { foto: null, destinos: [] };
+const bvCampos = ["documento", "destino", "fecha", "bobinas", "peso", "tractora", "remolque"];
+function bvReiniciar() {
+  bv.foto = null;
+  $("bv-form").hidden = true; $("bv-subir").hidden = false;
+  $("bv-hecho").replaceChildren(); $("bv-avisos").replaceChildren();
+  $("bv-confirmar").disabled = false;
+  bvCampos.forEach((c) => { $("bv-" + c).disabled = false; });
+}
+$("of-bobviaje").addEventListener("click", () => { bvReiniciar(); go("pr-bobviaje"); });
+$("bv-otra").addEventListener("click", bvReiniciar);
+const bvTn = () => { const kg = Number($("bv-peso").value) || 0; $("bv-tn").textContent = kg ? `${(kg / 1000).toFixed(3).replace(".", ",")} t en la línea del pedido` : ""; };
+$("bv-peso").addEventListener("input", bvTn);
+function bvVehiculo(v) {
+  if (!v) { $("bv-vehiculo").textContent = "Las matrículas se comprueban en Flota al guardar."; return; }
+  const t = v.tractora, r = v.remolque, txt = [];
+  if (!t.existe) txt.push(`La tractora ${t.matricula || "(vacía)"} no está en Flota` + (t.parecidas.length ? ` (¿${t.parecidas.join(", ")}?)` : "") + ".");
+  else txt.push(v.propio ? `Camión propio · conductor ${v.colaborador || "sin asignar"} · coste = 85 % de la venta, sin proveedor.`
+    : `Subcontrata · ${v.colaborador || "sin transportista en Flota"} · coste de su último viaje.`);
+  if (r.matricula && !r.existe) txt.push(`El remolque ${r.matricula} no está en Flota` + (r.parecidas.length ? ` (¿${r.parecidas.join(", ")}?)` : "") + ".");
+  $("bv-vehiculo").textContent = txt.join(" ");
+}
+async function bvComprobar() {
+  const q = new URLSearchParams({ tractora: $("bv-tractora").value.trim(), remolque: $("bv-remolque").value.trim() });
+  try { bvVehiculo(await post("/api/pr/comprobar-vehiculos?" + q, {})); } catch { bvVehiculo(null); }
+}
+$("bv-tractora").addEventListener("change", bvComprobar);
+$("bv-remolque").addEventListener("change", bvComprobar);
+$("bv-archivo").addEventListener("change", async (ev) => {
+  const f = (ev.target.files || [])[0];
+  ev.target.value = "";
+  if (!f) return;
+  clearError();
+  busy("Leyendo la Lista de Carga…");
+  try {
+    bv.foto = await reducirBobinas(f);
+    const r = await post("/api/pr/bobinas/leer-lista", bv.foto);
+    const v = r.viaje;
+    bv.destinos = r.destinos;
+    $("bv-destino").replaceChildren(h("option", { value: "" }, "— elige el destino —"),
+      ...r.destinos.map((d) => h("option", { value: d.clave }, d.nombre)));
+    $("bv-destino").value = v.destino || "";
+    $("bv-lugar").textContent = v.lugar_entrega ? `En el documento: «${v.lugar_entrega}»` : "No se ha leído el lugar de entrega.";
+    $("bv-documento").value = v.documento || "";
+    $("bv-fecha").value = v.fecha || "";
+    $("bv-bobinas").value = v.bobinas ?? "";
+    $("bv-peso").value = v.peso_kg ?? "";
+    $("bv-tractora").value = v.tractora || "";
+    $("bv-remolque").value = v.remolque || "";
+    bvTn();
+    $("bv-archivo-nombre").textContent = `Archivo: ${f.name}` + (v.transportista ? ` · transportista en el documento: ${v.transportista}` : "");
+    const avisos = [];
+    if (r.duplicado) avisos.push(h("div", { class: "banner warn" }, `La Lista de Carga ${v.documento} ya está registrada en Odoo: al confirmar no se repite.`));
+    if (!v.destino) avisos.push(h("div", { class: "banner warn" }, "No reconozco el lugar de entrega: elige el destino."));
+    (r.dudas || []).forEach((d) => avisos.push(h("div", { class: "banner warn" }, "Duda al leer: " + d)));
+    if (!avisos.length) avisos.push(h("div", { class: "banner info" }, "Revisa los datos y confirma."));
+    $("bv-avisos").replaceChildren(...avisos);
+    bvVehiculo(r.vehiculos);
+    $("bv-hecho").replaceChildren();
+    $("bv-subir").hidden = true; $("bv-form").hidden = false;
+  } catch (e) { showError(e.message); } finally { busy(null); }
+});
+$("bv-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  clearError();
+  const viaje = { documento: $("bv-documento").value.trim(), destino: $("bv-destino").value, fecha: $("bv-fecha").value,
+    bobinas: Number($("bv-bobinas").value) || 0, peso_kg: Number($("bv-peso").value) || 0,
+    tractora: $("bv-tractora").value.trim(), remolque: $("bv-remolque").value.trim() };
+  const falta = [["documento", "el Nº de la Lista de Carga"], ["destino", "el destino"], ["fecha", "la fecha"], ["peso_kg", "el peso"],
+    ["tractora", "la tractora"]].filter(([k]) => !viaje[k]).map(([, t]) => t);
+  if (falta.length) { showError("Falta " + falta.join(", ") + "."); return; }
+  busy("Guardando en Odoo…");
+  try {
+    const r = await post("/api/pr/bobinas/registrar", { viaje, foto: bv.foto });
+    const eur = (n) => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+    $("bv-confirmar").disabled = true;
+    bvCampos.forEach((c) => { $("bv-" + c).disabled = true; });
+    $("bv-hecho").replaceChildren(
+      r.simulado ? h("div", { class: "banner info" }, `Modo de prueba: no se ha guardado. Iría al pedido ${r.pedido || "nuevo del mes"}.`)
+        : r.duplicado ? h("div", { class: "banner warn" }, `Ya estaba registrada (bulto ${r.bulto}). No se ha repetido.`)
+        : h("div", { class: "banner info" }, `Guardado en el pedido ${r.pedido}${r.pedido_nuevo ? " (nuevo, en borrador)" : ""}: ` +
+            `${r.destino} · ${String(r.toneladas).replace(".", ",")} t a ${eur(r.precio)}/t · coste ${eur(r.coste)}` +
+            `${r.propio ? " (camión propio, 85 %)" : ""} · bulto ${r.bulto}.`),
+      h("button", { class: "btn primary", onclick: bvReiniciar }, "Registrar otra Lista de Carga"));
   } catch (e) { showError(e.message); } finally { busy(null); }
 });
 

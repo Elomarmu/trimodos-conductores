@@ -13,9 +13,11 @@ Oficina:
   POST /api/pr/tren/enviar          las dos Excel + correo con fotos (n8n)
   POST /api/pr/bobinas/leer         capturas del «Detalle convoy» de SAICA → cajas y total por clase de bobina
   POST /api/pr/bobinas/enviar       Excel de bobinas por clase → descarga y correo a Sevilla (n8n)
+  POST /api/pr/bobinas/leer-lista   Lista de Carga de bobinas → datos leídos + destino + matrículas
+  POST /api/pr/bobinas/registrar    {"viaje", "foto"} → línea en el pedido «BOBINAS {MES}»
 Oficina y almacén:
   GET  /api/pr/tren/actual · POST /api/pr/tren/asignar · POST /api/pr/tren/quitar
-  POST /api/pr/tren/mover {"vagon", "hacia": subir|bajar} · POST /api/pr/tren/editar {"caja_movil", "nueva_caja", "nuevo_vagon"}
+  POST /api/pr/tren/mover {"vagon", "hacia": subir|bajar} · POST /api/pr/tren/editar {"caja_movil", "nueva_caja", "nuevo_vagon"} · POST /api/pr/tren/intercambiar {"caja_movil", "hacia": subir|bajar}
 n8n:
   GET  /api/pr/resumen              resumen de la mañana con la Excel de registro
 Las fotos y las Excel van a SharePoint y los correos salen por n8n (PR_AVISOS_WEBHOOK).
@@ -512,6 +514,11 @@ class Editar(BaseModel):
     observaciones: str | None = Field(None, max_length=300)   # None = no se tocan
 
 
+class IntercambiarCajas(BaseModel):
+    caja_movil: str = Field(min_length=1, max_length=20)
+    hacia: str = Field(pattern=r"^(subir|bajar)$")
+
+
 URL_EXCEL_TREN = "__URL_EXCEL_TREN__"   # n8n lo cambia por el enlace de la Excel del tren en SharePoint
 LETRA = "font:11pt Calibri,Arial"
 
@@ -755,6 +762,19 @@ def tren_editar(body: Editar):
                 sincronizar_foto(odoo, v, lista=lista)
         lista = O.viajes(odoo)
     poner_al_dia(odoo, t, lista, registro=bool(afectados))
+    return O.estado_tren(odoo, t, lista)
+
+
+@oficina.post("/tren/intercambiar")
+def tren_intercambiar(body: IntercambiarCajas):
+    """Almacén: intercambia dos cajas consecutivas dentro del mismo vagón."""
+    odoo = odoo_pr()
+    t = _tren(odoo, abierto=True)
+    if get_settings().dry_run:
+        return {"simulado": True}
+    _pr(O.intercambiar_cajas, odoo, t, body.caja_movil, body.hacia)
+    lista = O.viajes(odoo)
+    poner_al_dia(odoo, t, lista, registro=False)
     return O.estado_tren(odoo, t, lista)
 
 
@@ -1129,3 +1149,53 @@ def bobinas_enviar(body: ConvoyBobinas):
         "html": cuerpo, "archivos": archivos})
     log.info("bobinas convoy %s enviadas: %s bobinas (%s)", d.get("convoy"), total, enviado)
     return {"simulado": s.dry_run, "enviado": enviado, "para": destinatarios(), "total": total, "clases": len(clases), "archivos": archivos}
+
+
+class ViajeBobinasIn(BaseModel):
+    viaje: dict
+    foto: Archivo | None = None      # la Lista de Carga (foto o PDF): queda adjunta a la orden si Odoo la crea
+
+
+@oficina.post("/bobinas/leer-lista")
+def bobinas_leer_lista(body: Archivo):
+    """Oficina Sevilla: Lista de Carga de bobinas → datos leídos, destino detectado y matrículas comprobadas en Flota."""
+    from . import bobinas_reglas as BR
+    datos, tipo = _bytes(body)
+    leido = _leer(L.leer_lista_bobinas, datos, tipo)
+    viaje = {k: leido.get(k) for k in ("documento", "lugar_entrega", "fecha", "bobinas", "peso_kg", "transportista")}
+    viaje["tractora"], viaje["remolque"] = R.matricula(leido.get("tractora")), R.matricula(leido.get("remolque"))
+    viaje["peso_kg"] = R.kilos(leido.get("peso_kg"))
+    d = BR.destino(leido.get("lugar_entrega"))
+    viaje["destino"] = d.clave if d else None
+    res = {"viaje": viaje, "dudas": leido.get("dudas") or [],
+           "destinos": [{"clave": x.clave, "nombre": x.linea} for x in BR.DESTINOS]}
+    if get_settings().mode == "real":
+        try:
+            odoo = odoo_pr()
+            res["vehiculos"] = O.comprobar_vehiculos(odoo, viaje["tractora"], viaje["remolque"])
+            res["duplicado"] = bool(viaje["documento"] and O.bobinas_registrada(odoo, str(viaje["documento"])))
+        except AppError:
+            res["vehiculos"] = None
+    return res
+
+
+@oficina.post("/bobinas/registrar")
+def bobinas_registrar(body: ViajeBobinasIn):
+    """Oficina Sevilla: guarda el viaje de bobinas revisado como línea del pedido «BOBINAS {MES}»."""
+    v = dict(body.viaje)   # «destino» = clave elegida (o corregida) por la oficina en la pantalla
+    if get_settings().dry_run:
+        odoo = odoo_pr()
+        p = O.buscar_pedido_bobinas(odoo, v.get("fecha") or "")
+        return {"simulado": True, "pedido": p and p["name"], "pedido_nuevo": p is None,
+                "duplicado": bool(O.bobinas_registrada(odoo, str(v.get("documento") or "")))}
+    odoo = odoo_pr()
+    res = _pr(O.registrar_bobinas, odoo, v)
+    if body.foto and res.get("tarea_id") and not res["duplicado"]:
+        try:
+            datos, tipo = _bytes(body.foto)
+            O.guardar_foto(odoo, res["tarea_id"], res["documento"], base64.b64encode(datos).decode(), tipo, "lista_carga")
+        except Exception:
+            log.warning("no se pudo adjuntar la Lista de Carga a la tarea %s", res["tarea_id"])
+    log.info("bobinas registradas doc=%s destino=%s t=%s duplicado=%s", res.get("documento"), res.get("destino"),
+             res.get("toneladas"), res["duplicado"])
+    return res
